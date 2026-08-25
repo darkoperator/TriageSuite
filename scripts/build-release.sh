@@ -22,16 +22,20 @@ cd "$REPO_ROOT"
 CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
 [[ -d "$CARGO_BIN" ]] && PATH="$CARGO_BIN:$PATH"
 
-# --- The 12 forensic tool crates -> binary names (StubTriage excluded). ---
+# --- The forensic tool crates + orchestrator -> binary names (StubTriage and
+# AnyDeskTriage excluded: the latter's log format is still provisional/
+# undocumented, see docs/tools/ and crates/anydesk-triage). ---
 PACKAGES=(
   jle-triage le-triage pe-triage rb-triage re-triage
   sbe-triage sqle-triage srume-triage sum-triage wxt-triage
-  mft-triage evtx-triage
+  mft-triage evtx-triage amc-triage acc-triage lol-triage
+  srum-net-triage triage-orchestrator
 )
 BINARIES=(
   JLETriage LETriage PETriage RBTriage RETriage
   SBETriage SQLETriage SrumETriage SumETriage WxTTriage
-  MFTriage EvtxTriage
+  MFTriage EvtxTriage AmcacheTriage AppCompatTriage LolTriage
+  SrumNetTriage TriageSuite
 )
 
 # --- Supported targets. ---
