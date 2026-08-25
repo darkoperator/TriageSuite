@@ -5,13 +5,6 @@
 //! degrade to a non-empty placeholder rather than failing — real IDLists
 //! always contain surprises.
 
-// `chunks_exact(2)` decodes UTF-16LE byte pairs throughout this crate.
-// Newer clippy (not yet universally in use here) suggests `as_chunks::<2>()`
-// instead; deferred until that API's stable-since version is confirmed
-// compatible with this project's MSRV. `unknown_lints` keeps this harmless
-// on older clippy that doesn't recognize the lint name yet.
-#![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
-
 pub mod extension;
 pub mod guids;
 pub mod items;
