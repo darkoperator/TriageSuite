@@ -1,0 +1,12 @@
+[package]
+name = "triage-shellitems"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows shell item (IDList) parsing engine"
+
+[dependencies]
+thiserror.workspace = true
+encoding_rs.workspace = true
+chrono.workspace = true

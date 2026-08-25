@@ -1,0 +1,12 @@
+[package]
+name = "triage-lnk"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows Shell Link (.lnk) format parser"
+
+[dependencies]
+thiserror.workspace = true
+triage-shellitems = { path = "../triage-shellitems" }
+encoding_rs = "0.8"

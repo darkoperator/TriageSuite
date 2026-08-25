@@ -1,0 +1,25 @@
+[package]
+name = "anydesk-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AnyDesk trace-log (ad.trace/ad_svc.trace) line parser"
+
+[[bin]]
+name = "AnyDeskTriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true

@@ -1,0 +1,29 @@
+[package]
+name = "sbe-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows shellbags parser producing SBECmd-compatible CSV and JSON"
+
+[[bin]]
+name = "SBETriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-registry = { path = "../triage-registry" }
+triage-shellitems = { path = "../triage-shellitems" }
+notatin = "1.0.1"
+clap.workspace = true
+serde.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+triage-testkit = { path = "../triage-testkit" }
+csv.workspace = true

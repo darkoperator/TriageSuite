@@ -1,0 +1,15 @@
+[package]
+name = "triage-jumplist"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows Jump List (Automatic + Custom Destinations) parser"
+
+[dependencies]
+thiserror.workspace = true
+cfb = "0.14"
+triage-lnk = { path = "../triage-lnk" }
+triage-shellitems = { path = "../triage-shellitems" }
+
+[dev-dependencies]

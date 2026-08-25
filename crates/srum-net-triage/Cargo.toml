@@ -1,0 +1,27 @@
+[package]
+name = "srum-net-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SRUM network-usage rollup: per-day exfil volume and per-hour-of-day activity fingerprint by executable"
+
+[[bin]]
+name = "SrumNetTriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-registry = { path = "../triage-registry" }
+notatin = "1.0.1"
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true

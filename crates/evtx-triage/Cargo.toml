@@ -1,0 +1,28 @@
+[package]
+name = "evtx-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows .evtx event-log parser producing EvtxECmd-compatible CSV and JSON"
+
+[[bin]]
+name = "EvtxTriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-evtx = { path = "../triage-evtx" }
+clap.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+include_dir.workspace = true
+indicatif.workspace = true
+percent-encoding.workspace = true
+time = { version = "0.3", features = ["parsing", "macros"] }
+
+[dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
+assert_cmd.workspace = true
+tempfile.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "triage-ese"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Read-only ESE/JET-Blue access with revision sniffing and evidence-integrity discipline"
+
+[dependencies]
+ese_parser_lib.workspace = true
+triage-core = { path = "../triage-core" }
+tempfile.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]

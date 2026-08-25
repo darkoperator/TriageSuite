@@ -1,0 +1,104 @@
+Author: Kevin Pagano
+Description: Microsoft Defender Attack Surface Reduction has audited an operation
+EventId: 1134
+Channel: Microsoft-Windows-Windows Defender/Operational
+Provider: Microsoft-Windows-Windows Defender
+Maps:
+  -
+    Property: UserName
+    PropertyValue: "%User%"
+    Values:
+      -
+        Name: User
+        Value: "/Event/EventData/Data[@Name=\"User Sid\"]"
+  -
+    Property: ExecutableInfo
+    PropertyValue: "Process: %Process%"
+    Values:
+      -
+        Name: Process
+        Value: "/Event/EventData/Data[@Name=\"Process\"]"
+  -
+    Property: PayloadData1
+    PropertyValue: "Action: %ActionType% | Level: %Enforcement%"
+    Values:
+      -
+        Name: ActionType
+        Value: "/Event/EventData/Data[@Name=\"Action Type\"]"
+      -
+        Name: Enforcement
+        Value: "/Event/EventData/Data[@Name=\"Enforcement Level\"]"
+  -
+    Property: PayloadData2
+    PropertyValue: "Source: %Source%"
+    Values:
+      -
+        Name: Source
+        Value: "/Event/EventData/Data[@Name=\"Source\"]"
+  -
+    Property: PayloadData3
+    PropertyValue: "Target: %Target%"
+    Values:
+      -
+        Name: Target
+        Value: "/Event/EventData/Data[@Name=\"Target\"]"
+  -
+    Property: PayloadData4
+    PropertyValue: "Policy Rule ID: %PolicyID%"
+    Values:
+      -
+        Name: PolicyID
+        Value: "/Event/EventData/Data[@Name=\"Policy Rule Id\"]"
+  -
+    Property: PayloadData5
+    PropertyValue: "Versions - Product: %ProdVer% | Engine: %EngVer%"
+    Values:
+      -
+        Name: ProdVer
+        Value: "/Event/EventData/Data[@Name=\"Product Version\"]"
+      -
+        Name: EngVer
+        Value: "/Event/EventData/Data[@Name=\"Engine Version\"]"
+
+# Documentation:
+# https://raw.githubusercontent.com/nasbench/EVTX-ETW-Resources/refs/heads/main/ETWProvidersCSVs/Internal/Microsoft-Windows-Windows%20Defender.csv
+# https://asrgen.streamlit.app/ASR_Essentials
+# https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction
+#
+# Example Event Data:
+#  <Event>
+#   <System>
+#     <Provider Name="Microsoft-Windows-Windows Defender" Guid="11cd958a-c507-4ef3-b3f2-5fd9dfbd2c78" />
+#     <EventID>1134</EventID>
+#     <Version>0</Version>
+#     <Level>4</Level>
+#     <Task>0</Task>
+#     <Opcode>0</Opcode>
+#     <Keywords>0x8000000000000000</Keywords>
+#     <TimeCreated SystemTime="2026-04-08 12:57:40.9852031" />
+#     <EventRecordID>19725</EventRecordID>
+#     <Correlation />
+#     <Execution ProcessID="8888" ThreadID="14320" />
+#     <Channel>Microsoft-Windows-Windows Defender/Operational</Channel>
+#     <Computer>Desktop</Computer>
+#     <Security UserID="S-1-5-18" />
+#   </System>
+#   <EventData>
+#     <Data Name="Product Name">Microsoft Defender Antivirus</Data>
+#     <Data Name="Product Version">4.18.26020.6</Data>
+#     <Data Name="Unused"></Data>
+#     <Data Name="Policy Version">639111495510120544-af2ac94f4525f95dba1c8aeb8ff55f58483c50f4</Data>
+#     <Data Name="Policy Rule Id">bdf1e9d2-a23f-4536-826f-90fc14da76b6:3b71777d-6417-4e1c-l33t-5ee91dded6b2</Data>
+#     <Data Name="Enforcement Level">Audit</Data>
+#     <Data Name="Audit Reason">0</Data>
+#     <Data Name="Event Timestamp">1601-01-01T00:01:00Z</Data>
+#     <Data Name="Action Type">CopyToRemovableMedia</Data>
+#     <Data Name="Process">explorer.exe</Data>
+#     <Data Name="Source">\Device\HarddiskVolume3\Users\JohnDoe\OneDrive\Documents\001111.xls</Data>
+#     <Data Name="Target">\Device\HarddiskVolume13\001111.xls</Data>
+#     <Data Name="Session Id">1</Data>
+#     <Data Name="User Sid">S-1-12-1-2879141281-1080656321-2721707915-3836312345</Data>
+#     <Data Name="Signature Version">1.447.230.0</Data>
+#     <Data Name="Engine Version">1.1.26020.3</Data>
+#   </EventData>
+# </Event>

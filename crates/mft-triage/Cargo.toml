@@ -1,0 +1,25 @@
+[package]
+name = "mft-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NTFS $MFT / $J / $Boot parser producing MFTECmd-compatible CSV and JSON"
+
+[[bin]]
+name = "MFTriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-mft = { path = "../triage-mft" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
+csv.workspace = true
+assert_cmd.workspace = true
+tempfile.workspace = true

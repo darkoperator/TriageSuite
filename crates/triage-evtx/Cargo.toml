@@ -1,0 +1,22 @@
+[package]
+name = "triage-evtx"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows .evtx event-log parser + Zimmerman maps engine (vendored from EVTXTriage)"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+evtx = "0.11.2"
+roxmltree = "0.20"
+serde_yml = "0.0.13"
+serde.workspace = true
+serde_json.workspace = true
+time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+csv.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

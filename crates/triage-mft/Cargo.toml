@@ -1,0 +1,16 @@
+[package]
+name = "triage-mft"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NTFS $MFT / $J / $Boot parser (vendored from MFTriage) for TriageSuite"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+serde.workspace = true
+thiserror.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

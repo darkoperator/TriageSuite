@@ -1,0 +1,28 @@
+[package]
+name = "jle-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows Jump List parser producing JLECmd-compatible CSV and JSON"
+
+[[bin]]
+name = "JLETriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-jumplist = { path = "../triage-jumplist" }
+triage-lnk = { path = "../triage-lnk" }
+triage-shellitems = { path = "../triage-shellitems" }
+clap.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+triage-testkit = { path = "../triage-testkit" }
+csv.workspace = true

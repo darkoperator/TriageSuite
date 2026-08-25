@@ -1,0 +1,27 @@
+[package]
+name = "srume-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows SRUM (SRUDB.dat) parser producing SrumECmd-compatible CSV and JSON"
+
+[[bin]]
+name = "SrumETriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-ese = { path = "../triage-ese" }
+triage-registry = { path = "../triage-registry" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
+csv.workspace = true
+assert_cmd.workspace = true
+tempfile.workspace = true

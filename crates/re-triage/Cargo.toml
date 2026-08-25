@@ -1,0 +1,33 @@
+[package]
+name = "re-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows Registry parser producing RECmd-compatible CSV and JSON"
+
+[[bin]]
+name = "RETriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-registry = { path = "../triage-registry" }
+triage-shellitems = { path = "../triage-shellitems" }
+triage-guidmap = { path = "../triage-guidmap" }
+triage-appcompat = { path = "../triage-appcompat" }
+notatin = "1.0.1"
+clap.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+chrono.workspace = true
+csv.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+triage-testkit = { path = "../triage-testkit" }
+csv.workspace = true

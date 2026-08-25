@@ -1,0 +1,32 @@
+[package]
+name = "sqle-triage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SQLECmd-compatible SQLite map engine producing CSV and JSON"
+
+[[bin]]
+name = "SQLETriage"
+path = "src/main.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+triage-sqlite = { path = "../triage-sqlite" }
+clap.workspace = true
+indicatif.workspace = true
+percent-encoding.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+csv.workspace = true
+sha1.workspace = true
+include_dir.workspace = true
+
+[dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
+rusqlite.workspace = true
+tempfile.workspace = true
+assert_cmd.workspace = true
+csv.workspace = true

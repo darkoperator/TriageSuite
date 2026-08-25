@@ -1,0 +1,47 @@
+[package]
+name = "triage-orchestrator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "TriageSuite"
+path = "src/main.rs"
+
+[lib]
+name = "triage_orchestrator"
+path = "src/lib.rs"
+
+[dependencies]
+triage-core = { path = "../triage-core" }
+triage-cli = { path = "../triage-cli" }
+pe-triage = { path = "../pe-triage" }
+jle-triage = { path = "../jle-triage" }
+le-triage = { path = "../le-triage" }
+rb-triage = { path = "../rb-triage" }
+re-triage = { path = "../re-triage" }
+sbe-triage = { path = "../sbe-triage" }
+sqle-triage = { path = "../sqle-triage" }
+srume-triage = { path = "../srume-triage" }
+sum-triage = { path = "../sum-triage" }
+wxt-triage = { path = "../wxt-triage" }
+evtx-triage = { path = "../evtx-triage" }
+triage-evtx = { path = "../triage-evtx" }
+mft-triage = { path = "../mft-triage" }
+amc-triage = { path = "../amc-triage" }
+acc-triage = { path = "../acc-triage" }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+globset = { workspace = true }
+chrono = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+console = "0.15"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+triage-testkit = { path = "../triage-testkit" }

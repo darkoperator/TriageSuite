@@ -1,0 +1,15 @@
+[package]
+name = "triage-testkit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+description = "Compatibility-test harness comparing TriageSuite output to Zimmerman reference output"
+
+[dependencies]
+csv.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

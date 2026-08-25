@@ -1,0 +1,3438 @@
+[
+  {
+    "name": "KiTTY",
+    "category": "RAT",
+    "install_basenames": [
+      "kitty.exe"
+    ],
+    "sha256_hashes": [
+      "86f4ba4b3eb16c91aac10ad944e2785d08b597b11ba1f938b757c0705f782f37"
+    ]
+  },
+  {
+    "name": "OCS inventory",
+    "category": "RMM",
+    "install_basenames": [
+      "ocsinventory.exe",
+      "ocsservice.exe"
+    ],
+    "sha256_hashes": [
+      "5040a28ce56fdf1d3cb6719e2a13dd641c7455bd3cb85383e8ee66f17290f8d4"
+    ]
+  },
+  {
+    "name": "SysAid",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "ilias.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Site24x7",
+    "category": "RMM",
+    "install_basenames": [
+      "meagenthelper.exe",
+      "monitoringagent.exe",
+      "site24x7pluginagent.exe",
+      "site24x7windowsagenttrayicon.exe"
+    ],
+    "sha256_hashes": [
+      "66226654281414efabf4ba96151f1c8c8000f0fe68e6ca0346e3e50635560771",
+      "d86a0059fb121516da482deec1e2a56abbb9befe929cd66ff76f9d58fdc17398",
+      "b032de2cad86dcd97903552668f292e7ee07a2a6a2bf413ea5dac2f34ffda443",
+      "e9de4c481cdd5eae6f7c6e5b6275dab75f7a19550d878fc7c65671d24e8dea63",
+      "4d1a0fe967d379f6de9fbd8bec1760a1e83e6a4511efdf4238409ca4d60e94fe",
+      "da9ca2544a4e3bfa7468605bfdb44098a07f05517f51c59fc9e98cd5abef4d62"
+    ]
+  },
+  {
+    "name": "SpyAnywhere",
+    "category": "RMM",
+    "install_basenames": [
+      "sysdiag.exe"
+    ],
+    "sha256_hashes": [
+      "d77eb49917751cfebc42e468bf023e3a2b86b68a73e292ea651d8869aa2650a4",
+      "8188c9883b46eceed07cc494ac29a02a1506934fcdd3841ea21d7f30fdfbf16b"
+    ]
+  },
+  {
+    "name": "Apple Remote Desktop",
+    "category": "RAT",
+    "install_basenames": [
+      "ardagent.app"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RealVNC",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "HeartbeatRM",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "agent-installer-any.exe",
+      "hbrm-updater-x64.exe",
+      "hbrm-x64.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Sorillus",
+    "category": "RMM",
+    "install_basenames": [
+      "sorillus launcher.exe",
+      "sorillus-launcher*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Xshell",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "xshell.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ISL Online",
+    "category": "RMM",
+    "install_basenames": [
+      "isl light*",
+      "islalwaysonmonitor.exe",
+      "isllight.exe",
+      "isllightclient.exe",
+      "isllightservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Anyplace Control",
+    "category": "RMM",
+    "install_basenames": [
+      "apc_host.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Chrome Remote Desktop",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "remote_host.exe",
+      "remoting_host.exe"
+    ],
+    "sha256_hashes": [
+      "1e0fbe101bbca4efdfb05c012495265f1db731c97fb82fa8e569c6ab725c0140"
+    ]
+  },
+  {
+    "name": "RuDesktop",
+    "category": "RMM",
+    "install_basenames": [
+      "rd.exe",
+      "rudesktop*.exe"
+    ],
+    "sha256_hashes": [
+      "3f8795be3197df823b599d8bc96ecbf9c7d94079d490c9d94c3239e635332fdd"
+    ]
+  },
+  {
+    "name": "Tanium Deploy",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NordLocker",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "tmate",
+    "category": "RAT",
+    "install_basenames": [
+      "tmate",
+      "tmate-ready",
+      "tmate.bashrc",
+      "tmate.sock"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "HelpBeam",
+    "category": "RMM",
+    "install_basenames": [
+      "helpbeam*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ShellHub",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "shellhub-agent",
+      "shellhub-agent.service"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Miradore",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Komari",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "komari-agent.service",
+      "komari.service"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Mouse Without Borders",
+    "category": "RAT",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": [
+      "bf283be664cacfb08009f3996a7907fccebf7e0502652ef40582d64238fdfe22",
+      "f4b2e2dac7ba4458f79e7333d093b5259c18300ad201bfcb9b4674c00109815d"
+    ]
+  },
+  {
+    "name": "GoToAssist (GoTo Resolve)",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "gotoresolveexternalmodulehandler.exe",
+      "gotoresolvefilemanager.exe",
+      "gotoresolveloggerprocess.exe",
+      "gotoresolvenetworkchecker.exe",
+      "gotoresolveprocesschecker.exe",
+      "gotoresolvequickview.exe",
+      "gotoresolveregistryeditor.exe",
+      "gotoresolveremotecontrol.exe",
+      "gotoresolveservice.exe",
+      "gotoresolveservicemanager.exe",
+      "gotoresolveterminal.exe",
+      "gotoresolvetools32.exe",
+      "gotoresolvetools64.exe",
+      "gotoresolveui.exe",
+      "gotoresolveunattended.exe",
+      "gotoresolveunattendedremover.exe",
+      "gotoresolveunattendedui.exe"
+    ],
+    "sha256_hashes": [
+      "5e05eb31ab2b234bf34e66703761f6ff3663376eecf2ced7ec16852d037286cb",
+      "961e704a4d364ee384552af3551bac1de02541d8bcce40d5255fbc8cdea3adb1"
+    ]
+  },
+  {
+    "name": "RemotePass",
+    "category": "RMM",
+    "install_basenames": [
+      "remotepass-access.exe",
+      "rpaccess.exe",
+      "rpwhostscr.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "baramundi Management Suite",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Guacamole",
+    "category": "RAT",
+    "install_basenames": [
+      "guacd.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ExtraPuTTY",
+    "category": "RAT",
+    "install_basenames": [
+      "extraputty-0.30-2016-01-28-installer.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Level.io",
+    "category": "RMM",
+    "install_basenames": [
+      "level-remote-control-ffmpeg.exe",
+      "level-windows-amd64.exe",
+      "level.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Freshservice",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "freshservice.discoveryprobe.scanservice.exe",
+      "freshservice.discoveryprobe.window.exe",
+      "fs-probe-*.msi",
+      "fs-windows-agent-*.msi",
+      "fsagent.msi",
+      "fsagentautoupdate.exe",
+      "fsagentservice.exe",
+      "fswmiscanner.exe",
+      "plink.exe",
+      "win-installer-*.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NoMachine",
+    "category": "RAT",
+    "install_basenames": [
+      "nomachine*.exe",
+      "nxd.exe",
+      "nxservice*.ese"
+    ],
+    "sha256_hashes": [
+      "720e5eedeb8c552a0d4ca14414f5e99fd313e4d95d550169b7b4314e75686996",
+      "27836f35070f263f487db12cfd34b909678f9049cb0317cf3e64931c7eaad73c"
+    ]
+  },
+  {
+    "name": "Microsoft Quick Assist",
+    "category": "RAT",
+    "install_basenames": [
+      "quickassist.exe"
+    ],
+    "sha256_hashes": [
+      "0f6269a8095b8c622ea2b864df5fd6f09f676f0a5f87618d475b936e27b19af3",
+      "9653b13e7bfa2f3be8a175ff895e5bf46537e5f742905751282f956e39587b0b"
+    ]
+  },
+  {
+    "name": "Itarian",
+    "category": "RMM",
+    "install_basenames": [
+      "comodoremotecontrol.exe",
+      "itarianremoteaccesssetup.exe",
+      "itsmagent.exe",
+      "itsmrsp.exe",
+      "itsmservice.exe",
+      "raccess.exe",
+      "rdesktop.exe",
+      "rhost.exe",
+      "rmmservice.exe",
+      "rviewer.exe"
+    ],
+    "sha256_hashes": [
+      "aa7edf0e682942968173fd8904f01cae187262e6952c3c8e24dc1f8b4f2377ac"
+    ]
+  },
+  {
+    "name": "N-Able Advanced Monitoring Agent",
+    "category": "RMM",
+    "install_basenames": [
+      "agent_*_rw.exe",
+      "baseclient.exe",
+      "basupapp.exe",
+      "basupsrvc.exe",
+      "basupsrvccnfg.exe",
+      "basuptshelper.exe"
+    ],
+    "sha256_hashes": [
+      "e38be606da565f0976f1e42e4939ef3aeffc55985787629062e4e1bbedfa10d7"
+    ]
+  },
+  {
+    "name": "Bitvise SSH Server",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "bvsshserver-inst.exe"
+    ],
+    "sha256_hashes": [
+      "5aa0fd8c3c0c50e452569fbaef291f96b2ae3c9a7b52f80ed34bb48d63a8bcec",
+      "821fd942cdfeaf4a5fd2083420ce1e6c743008643fd6aa99d5ae64160dcd33a2"
+    ]
+  },
+  {
+    "name": "Panorama9",
+    "category": "RMM",
+    "install_basenames": [
+      "p9agent*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "CrossLoop",
+    "category": "RMM",
+    "install_basenames": [
+      "crossloopconnect.exe",
+      "crossloopservice.exe",
+      "winvncstub.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remote.it",
+    "category": "RMM",
+    "install_basenames": [
+      "remote-it-installer.exe",
+      "remote.it.exe",
+      "remoteit.exe"
+    ],
+    "sha256_hashes": [
+      "8689c6ca4c29d0b2f71f7f0df5e37a19fbc1dfd7653eb4f5331e0887d3704471"
+    ]
+  },
+  {
+    "name": "GotoHTTP",
+    "category": "RMM",
+    "install_basenames": [
+      "gotohttp*.exe",
+      "gotohttp.exe",
+      "gotohttp_x64.exe"
+    ],
+    "sha256_hashes": [
+      "baa575f60e834659befcce4a23c2be4ab5e2d8267f9e6558e01f8e915ccb0247"
+    ]
+  },
+  {
+    "name": "LANDesk",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "issuser.exe",
+      "landeskagentbootstrap.exe",
+      "landeskportalmanager.exe",
+      "ldinv32.exe",
+      "ldsensors.exe",
+      "softmon.exe",
+      "tmcsvc.exe"
+    ],
+    "sha256_hashes": [
+      "436e028a3072934418d30d4b9ba9a60b00fc6c7546b9134ee2483e8349516b0c",
+      "da92f8e474c040a53923cf81dc0d00adb5b3278cdfae039a22ebb2fc21993373"
+    ]
+  },
+  {
+    "name": "RemoteUtilities",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "rutserv.exe",
+      "rutview.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "PDQ Connect",
+    "category": "RMM",
+    "install_basenames": [
+      "pdq-connect*.exe",
+      "pdqconnectupdater-*.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Onionshare",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "onionshare*.exe",
+      "onionshare-win*.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "BeInSync",
+    "category": "RAT",
+    "install_basenames": [
+      "beinsync*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TurboMeeting",
+    "category": "RMM",
+    "install_basenames": [
+      "pcstarter.exe",
+      "turbomeeting.exe",
+      "turbomeetingstarter.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RemotePC",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "idrive.file-transfer",
+      "idrive.remotepcagent",
+      "remotepc.exe",
+      "remotepchost.exe",
+      "remotepcservice.exe",
+      "rpcsuite.exe"
+    ],
+    "sha256_hashes": [
+      "f330dd1b146522594b5920b2edf2c66f5566e75fb31959919fed0926bcaec794",
+      "8156cbcbdc4e2eeedcb4ddbabc0052d2e4898ca27280160c396639bb39d561e4"
+    ]
+  },
+  {
+    "name": "MioNet (Also known as WD Anywhere Access)",
+    "category": "RMM",
+    "install_basenames": [
+      "mionet.exe",
+      "mionetmanager.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Pocket Cloud (Wyse)",
+    "category": "RMM",
+    "install_basenames": [
+      "pocketcloud*.exe",
+      "pocketcloudservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Solar-PuTTY",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "solar-putty.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TigerVNC",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "tigervnc*.exe",
+      "tvnserver.exe",
+      "winvnc4.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ConnectWise Control",
+    "category": "RMM",
+    "install_basenames": [
+      "connectwisechat-customer.exe",
+      "connectwisecontrol.client.exe",
+      "screenconnect.windowsclient.exe"
+    ],
+    "sha256_hashes": [
+      "a5c8ede4d24165797dcfbabbb85f62c44a79b058381e68249bf418a01fc67a1d",
+      "c218eb4c68fafc90f1f9dde973ea85184c5a7cb830af174285d8b9e6ce6e1d06",
+      "ee0fd474de7eb1b844ec8359a4453bfb56263191643c03919bd05f439761c722",
+      "c79526ce6eed74a509c7192decb2ce8988578cdbe3400c68b66395f9c2941e40"
+    ]
+  },
+  {
+    "name": "Pcvisit",
+    "category": "RMM",
+    "install_basenames": [
+      "pcvisit-easysupport.exe",
+      "pcvisit.exe",
+      "pcvisit_client.exe",
+      "pcvisit_service_client.exe"
+    ],
+    "sha256_hashes": [
+      "57fa4781f5817841c56b058c0b244318bc18aaa3c842ee3d74294de2441f1da1"
+    ]
+  },
+  {
+    "name": "VNC",
+    "category": "RAT",
+    "install_basenames": [
+      "vncserver.exe",
+      "vncserverui.exe",
+      "vncviewer.exe",
+      "winvnc*.exe",
+      "winvnc.exe",
+      "winvncsc.exe",
+      "winwvc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remote Manipulator System",
+    "category": "RMM",
+    "install_basenames": [
+      "rfusclient.exe",
+      "rutserv.exe"
+    ],
+    "sha256_hashes": [
+      "7906a81b1dec372b4c232306678fda0cbc46db41e3db0c06b858d54d60cd7ab6"
+    ]
+  },
+  {
+    "name": "Dataplicity",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "dataplicity",
+      "dataplicity.service"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Netop Remote Control (aka Impero Connect)",
+    "category": "RMM",
+    "install_basenames": [
+      "nhostsvc.exe",
+      "nhstw32.exe",
+      "nldrw32.exe",
+      "rmserverconsolemediator.exe"
+    ],
+    "sha256_hashes": [
+      "c5b98ab84cb24ddcfd5e01928ea959b6af8bb4963a9d1ae10fef3734ba99657d"
+    ]
+  },
+  {
+    "name": "Xpra",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "xpra-launcher.exe",
+      "xpra-x86_64_setup.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RemotePulse",
+    "category": "RMM",
+    "install_basenames": [
+      "agent.ps1",
+      "defender-exclude.ps1",
+      "install.cmd",
+      "install.ps1",
+      "installcore.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "FreeNX",
+    "category": "RAT",
+    "install_basenames": [
+      "nxplayer.exe"
+    ],
+    "sha256_hashes": [
+      "a4adfcbab8aa773f1d91116beef5c15605cd855ff9680281ae9d4dcafe7443ee",
+      "338194b2e5e40d0830e6ec55845fd96ca3346d6c1eeafb7b7c5596568b87eff1"
+    ]
+  },
+  {
+    "name": "Pocket Controller (Soti Xsight)",
+    "category": "RMM",
+    "install_basenames": [
+      "pocketcontroller.exe",
+      "wysebrowser.exe",
+      "xsightservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TeamViewer",
+    "category": "RMM",
+    "install_basenames": [
+      "teamviewer_desktop.exe",
+      "teamviewer_service.exe",
+      "teamviewerhost"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "KHelpDesk",
+    "category": "RMM",
+    "install_basenames": [
+      "khelpdesk.exe"
+    ],
+    "sha256_hashes": [
+      "712d77f4b1f37367b887ca88c34f41d700f9b684dfaba2cf6856c8d3e1fc7642"
+    ]
+  },
+  {
+    "name": "AnyViewer",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": [
+      "4ef164fbedfbd439584d7c692f6ebb9bd9d937af436882c762483303531c5f8d"
+    ]
+  },
+  {
+    "name": "Barracuda",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Instant Housecall",
+    "category": "RMM",
+    "install_basenames": [
+      "hsloader.exe",
+      "ihcserver.exe",
+      "instanthousecall.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "FastViewer",
+    "category": "RMM",
+    "install_basenames": [
+      "fastclient.exe",
+      "fastmaster.exe",
+      "fastviewer.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Access Remote PC",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "GatherPlace-desktop sharing",
+    "category": "RMM",
+    "install_basenames": [
+      "gp3.exe",
+      "gp4.exe",
+      "gp5.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "I'm InTouch",
+    "category": "RMM",
+    "install_basenames": [
+      "i'm intouch go installer.exe",
+      "iit.exe",
+      "intouch.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Atera",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "agentpackagenetworkdiscovery.exe",
+      "agentpackagetaskscheduler.exe",
+      "atera networks",
+      "atera_agent.exe",
+      "ateraagent.exe",
+      "syncrosetup.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Free Tools Launcher",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ServerEye",
+    "category": "RMM",
+    "install_basenames": [
+      "servereye*.exe",
+      "serviceproxylocalsys.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Dev Tunnels (aka Visual Studio Dev Tunnel)",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RemoteView",
+    "category": "RMM",
+    "install_basenames": [
+      "remoteview.exe",
+      "rv.exe",
+      "rvagent.exe",
+      "rvagtray.exe"
+    ],
+    "sha256_hashes": [
+      "794ba3c194edc7c953ef39efe01686a5c7e1f996c5c090f12ebc124df6347baf"
+    ]
+  },
+  {
+    "name": "Encapto",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "PChelpware",
+    "category": "RMM",
+    "install_basenames": [
+      "pchelpware_viewer.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "SmartCode Web VNC",
+    "category": "RAT",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RdClient",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "rdclient.exe",
+      "rdclientinstaller.exe",
+      "supporttool.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remote Ripple",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "remoteripple.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Pandora RC (eHorus)",
+    "category": "RMM",
+    "install_basenames": [
+      "ehorus standalone.exe",
+      "ehorus_agent.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "QQ IM-remote assistance",
+    "category": "RMM",
+    "install_basenames": [
+      "qq.exe",
+      "qqpcmgr.exe",
+      "qqprotect.exe"
+    ],
+    "sha256_hashes": [
+      "ade688d199df2896a0fb1c1242cc3cbca8c779c9e6a99f067a0e3ca07de136d0",
+      "efb865721cf7fe1483a9a6d1f54b65a83a85a064fa488d24b3c6a681e1ffbc15",
+      "502e415e49b34695f487a733573019f07a090e885d01efeeb5b7dab229c03cfc"
+    ]
+  },
+  {
+    "name": "PSEXEC (Clone)",
+    "category": "RAT",
+    "install_basenames": [
+      "csexec.exe",
+      "paexec-*.exe",
+      "paexec.exe",
+      "remcom.exe",
+      "remcomsvc.exe",
+      "xcmd.exe",
+      "xcmdsvc.exe"
+    ],
+    "sha256_hashes": [
+      "da398afb377c451678b2bc25c13d2ffa160867803f6a6cc29bebeaf1f9b4c625",
+      "4de5b87554f9ce3af6c0fb466b72cd69400900f2bef83bb5465ec05c8dc6b119",
+      "7c8ffcc6c5c0233236d75075074bbba95b306f758f12209bf9aec3649f2b2383",
+      "3dc95ecd69c20d1c56b4befd135300f93afcfe12e214d86dbf6a70f05121b377",
+      "dd54213527e7c541a12e2df04769f44d0e390229ad0756ab3f3883e2b8b80ebe"
+    ]
+  },
+  {
+    "name": "ConnectWise",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RustDesk",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "rustdesk",
+      "rustdesk*.exe",
+      "rustdesk.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Impero Connect",
+    "category": "RMM",
+    "install_basenames": [
+      "imperoclientsvc.exe"
+    ],
+    "sha256_hashes": [
+      "2ef170a512ba3763050cca4f64055f658ff1df5bdf45784dae8b51256bd3c07c"
+    ]
+  },
+  {
+    "name": "SunLogin",
+    "category": "RMM",
+    "install_basenames": [
+      "orayremoteservice.exe",
+      "orayremoteshell.exe",
+      "sunlogin*.exe"
+    ],
+    "sha256_hashes": [
+      "9dc5b48a39bb21f43f89130c69e25db29f832843f2cd1f0e6cc33b19a962079f"
+    ]
+  },
+  {
+    "name": "Netviewer",
+    "category": "RMM",
+    "install_basenames": [
+      "netviewer*.exe",
+      "netviewer.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NTR Remote",
+    "category": "RMM",
+    "install_basenames": [
+      "ntrsupportpro_en.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MioNet (WD Anywhere Access)",
+    "category": "RMM",
+    "install_basenames": [
+      "mionet.exe",
+      "mionetmanager.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MyGreenPC",
+    "category": "RMM",
+    "install_basenames": [
+      "mygreenpc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "GoToAssist",
+    "category": "RMM",
+    "install_basenames": [
+      "g2a*.exe",
+      "g2ax_comm_customer.exe",
+      "g2mcomm.exe",
+      "g2mupdate.com",
+      "goto assist opener.exe",
+      "goto opener.exe",
+      "gotoassist.exe"
+    ],
+    "sha256_hashes": [
+      "a15638d6c615001cc15d1a4d382593dc3ddd62d4ae98691ae43e5845f468c380",
+      "df63edd5e58d2f1dbefc24dc863eeb3e7b4d8f6002dc9b5cf69a847e831d3cd2"
+    ]
+  },
+  {
+    "name": "X2Go",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Kabuto",
+    "category": "RMM",
+    "install_basenames": [
+      "kabuto.app.runner.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RAdmin",
+    "category": "RMM",
+    "install_basenames": [
+      "famitrf2",
+      "famitrfc",
+      "radmin.exe",
+      "rserver3.exe"
+    ],
+    "sha256_hashes": [
+      "839153d334bd3fb89488f1499cece43e7d1077f35fe0b0f79c2bd413bc3a9aaa"
+    ]
+  },
+  {
+    "name": "Ultra VNC",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "uvnc_launch.exe",
+      "vncviewer.exe",
+      "winvnc.exe"
+    ],
+    "sha256_hashes": [
+      "39195c0abe53dc8fc2a57beeb6df9accf72226d46688845bf864c4d639030d84"
+    ]
+  },
+  {
+    "name": "Action1",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": [
+      "ab6804a23ab76fff5ab63d7be8c3f179fca4154b56759590c27e6fa203e5d1c4"
+    ]
+  },
+  {
+    "name": "SuperPuTTY",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "superputty.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Rocket Remote Desktop",
+    "category": "RMM",
+    "install_basenames": [
+      "rdconsole.exe",
+      "rocketremotedesktop_setup.exe"
+    ],
+    "sha256_hashes": [
+      "a06ed00b1f3ae4a4dafe15d3e2d4a49ca2aa3e44c92cff8ac4a39b4c32760444",
+      "b77b82b349b1ae194aef5a41ead566451267f24b5bdd1d4b8a08d2b434cb2837"
+    ]
+  },
+  {
+    "name": "LocalXpose",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "loclx",
+      "loclx.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "GoTo Opener",
+    "category": "RMM",
+    "install_basenames": [
+      "goto opener"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DeskNets",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ESET Remote Administrator",
+    "category": "RMM",
+    "install_basenames": [
+      "einstaller.exe",
+      "era.exe",
+      "eraagent.exe",
+      "eratool.exe",
+      "ezhelp*.exe"
+    ],
+    "sha256_hashes": [
+      "0c8ced779a4b7dca7ba034de52c524d911f9abbb89d885f31a7edde0f015764a"
+    ]
+  },
+  {
+    "name": "RemoteCall",
+    "category": "RMM",
+    "install_basenames": [
+      "agentu.exe",
+      "raautoup.exe",
+      "rcengmgru.exe",
+      "rcmgrsvc.exe",
+      "rcstartsupport.exe",
+      "remotesupportplayeru.exe",
+      "rxstartsupport.exe"
+    ],
+    "sha256_hashes": [
+      "d8d56802d3a0f12a33a9c014ca5edb075e7272bb38274fdcb0d4a8a95a4147a6",
+      "47b4ff9f8cda6a49a31e1c1f9b42ed1a574bdb71f42f27c147bce48d1b48ac5d"
+    ]
+  },
+  {
+    "name": "Netviewer (GoToMeet)",
+    "category": "RMM",
+    "install_basenames": [
+      "netviewer.exe",
+      "nvclient.exe",
+      "nvconsole.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Seetrol",
+    "category": "RMM",
+    "install_basenames": [
+      "seetrolcenter.exe",
+      "seetrolclient.exe",
+      "seetrolmyservice.exe",
+      "seetrolremote.exe",
+      "seetrolsetting.exe"
+    ],
+    "sha256_hashes": [
+      "d3aadff853f04dd787a094f8237e23f86f0909c87f2507d759036c2f35816190"
+    ]
+  },
+  {
+    "name": "247ithelp.com (ConnectWise)",
+    "category": "RMM",
+    "install_basenames": [
+      "remote workforce client.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TightVNC",
+    "category": "RAT",
+    "install_basenames": [
+      "tightvncviewerportable*.exe",
+      "tvnserver.exe",
+      "tvnviewer.exe"
+    ],
+    "sha256_hashes": [
+      "25cde88b8245866e45f2cb081a817aef1ec179d10030837ac19c3863088aeeeb"
+    ]
+  },
+  {
+    "name": "NetBird",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "cis.vbs",
+      "install.conf",
+      "netbird",
+      "netbird ui.app",
+      "netbird-ui.exe",
+      "netbird.exe",
+      "netbird.msi",
+      "openssh.msi",
+      "trm",
+      "trm.zip"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "pcAnywhere",
+    "category": "RAT",
+    "install_basenames": [
+      "awhost32.exe",
+      "awrem32.exe",
+      "pcaquickconnect.exe",
+      "winaw32.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "SmarTTY",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "smartty.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Terminals",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ScreenConnect",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "connectwise*.exe",
+      "connectwisecontrol*.exe",
+      "remote workforce client.exe",
+      "screenconnect*.exe",
+      "screenconnect.clientservice.exe",
+      "screenconnect.windowsclient.exe"
+    ],
+    "sha256_hashes": [
+      "a5c8ede4d24165797dcfbabbb85f62c44a79b058381e68249bf418a01fc67a1d",
+      "c218eb4c68fafc90f1f9dde973ea85184c5a7cb830af174285d8b9e6ce6e1d06",
+      "ee0fd474de7eb1b844ec8359a4453bfb56263191643c03919bd05f439761c722",
+      "c79526ce6eed74a509c7192decb2ce8988578cdbe3400c68b66395f9c2941e40",
+      "165f4ecf1727c7f57017fe460640e9b262657feb1af06d918f79917d100531fc",
+      "c13b80b70198ced667351ff7f004e6ab5972503049b66a053d55b30f9ea4c0e9",
+      "46457d98fb1c53bbccb66c1015eb831355f30c8bf8e6f25cf3183aac2a5fd8ab",
+      "bc0b03a340d46c23a4a2f91ebd7ed4d0fcf92fc7c4323f522c86369ad483f68a",
+      "0f39299c04c5c5f79a9a9400fd346adaf82c34b1d5ac38213fb42368f0267bfb"
+    ]
+  },
+  {
+    "name": "RunSmart",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ITSupport247 (ConnectWise)",
+    "category": "RMM",
+    "install_basenames": [
+      "saazapsc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Duplicati",
+    "category": "RAT",
+    "install_basenames": [
+      "duplicati.server.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MobaXterm",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "mobaxterm_installer_*.msi",
+      "mobaxterm_installer_12.1.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Iperius Remote",
+    "category": "RMM",
+    "install_basenames": [
+      "iperius.exe",
+      "iperiusremote.exe"
+    ],
+    "sha256_hashes": [
+      "c712f3e5c62b2c46ba753e1f9f9e437d3049173f8fec45c6fd476318994a3dcc"
+    ]
+  },
+  {
+    "name": "Distant Desktop",
+    "category": "RMM",
+    "install_basenames": [
+      "dd.exe",
+      "ddsystem.exe",
+      "distant-desktop.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RPort",
+    "category": "RMM",
+    "install_basenames": [
+      "rport.exe"
+    ],
+    "sha256_hashes": [
+      "ab62e9e2d06330073f44c019d226c8dfe81f68afe25063866c9ce504a1ba7ace"
+    ]
+  },
+  {
+    "name": "KickIdler",
+    "category": "RMM",
+    "install_basenames": [
+      "grabberem.*msi",
+      "grabbertt*.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Senso.cloud",
+    "category": "RMM",
+    "install_basenames": [
+      "aadg.exe",
+      "sensoclient.exe",
+      "sensoservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Addigy",
+    "category": "RMM",
+    "install_basenames": [
+      "addigy-*.pkg"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "PuTTY Tray",
+    "category": "RAT",
+    "install_basenames": [
+      "puttytray.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Auvik",
+    "category": "RMM",
+    "install_basenames": [
+      "auvik.agent.exe",
+      "auvik.engine.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Free Ping Tool",
+    "category": "RAT",
+    "install_basenames": [
+      "can't find this one"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Aspia",
+    "category": "RMM",
+    "install_basenames": [
+      "aspia_client.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "mRemoteNG",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "mremoteng",
+      "mremoteng-installer-*.msi",
+      "mremoteng.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Pocket Controller",
+    "category": "RMM",
+    "install_basenames": [
+      "pocketcloudservice.exe",
+      "pocketcontroller.exe",
+      "wysebrowser.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "rdpwrap",
+    "category": "RAT",
+    "install_basenames": [
+      "rdpcheck.exe",
+      "rdpconf.exe",
+      "rdpwinst.exe"
+    ],
+    "sha256_hashes": [
+      "756c2904db70b5312ee968ec3d8f1d8c1fe403faa9096b809c2900a7a31de8b8",
+      "c36e92e4551c6f1db9c8261b9463fa817e67aa16f2e0394eadc6c3dfd165c385",
+      "30c22c221f033baf6c52f51f2412cd0aef335703762d5bf19c486e8ee7b8b72f"
+    ]
+  },
+  {
+    "name": "iDrive",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "id_tray.exe",
+      "idcomponent.dll",
+      "idriveeclassic.exe",
+      "idrivewinsetup.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DeskDay",
+    "category": "RMM",
+    "install_basenames": [
+      "ultimate_*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Insync",
+    "category": "RAT",
+    "install_basenames": [
+      "insync.exe"
+    ],
+    "sha256_hashes": [
+      "1f8d76ad0fcbe5fadd066b0a332a58ccd96438dff55c63d90d14dbd96ab7e98f",
+      "bcc7ed09d03e12c6e2e8889f08c5056ffc9eb1b5fe47bc199ae9e4965415b86b"
+    ]
+  },
+  {
+    "name": "Tailscale",
+    "category": "RAT",
+    "install_basenames": [
+      "tailscale-*.exe",
+      "tailscale-ipn.exe",
+      "tailscaled.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Splashtop",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "strwinclt.exe"
+    ],
+    "sha256_hashes": [
+      "31333b18ca5cf8f09bc6a8464b34b17f415afee14b6eed877f48ebb7a7191d57"
+    ]
+  },
+  {
+    "name": "EMCO Remote Console",
+    "category": "RMM",
+    "install_basenames": [
+      "remoteconsole.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Lite Manager",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "lmnoipserver.exe"
+    ],
+    "sha256_hashes": [
+      "d2598c8a6e0928716c94825bc2b4736ad530d0de93d83a507332327c4c883cdc",
+      "a1d75de65bcb6b68bf79d0e826cf5371f5b5df4df02729038aba8d9f0b0f52c8"
+    ]
+  },
+  {
+    "name": "Monitic",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "agent.exe",
+      "amon.exe",
+      "conf.json"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Alpemix",
+    "category": "RMM",
+    "install_basenames": [
+      "alpemixservice.exe"
+    ],
+    "sha256_hashes": [
+      "6893d9ca56c9a8ff7f40cabb737996ed419b288f5bb571d6c1cc6effa9e888d9"
+    ]
+  },
+  {
+    "name": "Connectwise Automate (LabTech)",
+    "category": "RMM",
+    "install_basenames": [
+      "ltsvc.exe",
+      "ltsvcmon.exe",
+      "lttray.exe"
+    ],
+    "sha256_hashes": [
+      "532d20a37c6493fae3144fa8aae0a2c3510f6bdc0a2683e9ce7970d6a22d65c2"
+    ]
+  },
+  {
+    "name": "SkyFex",
+    "category": "RMM",
+    "install_basenames": [
+      "deskroll.exe",
+      "deskrollua.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DeskShare",
+    "category": "RMM",
+    "install_basenames": [
+      "dsguest.exe",
+      "teamtaskmanager.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "WinSCP",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "winscp.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Acronis Cyber Protect (Remotix)",
+    "category": "RMM",
+    "install_basenames": [
+      "acroniscyberprotectconnectagent.exe",
+      "acroniscyberprotectconnectquickassist*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MeshCentral",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "meshagent*.exe",
+      "meshcentral*.exe"
+    ],
+    "sha256_hashes": [
+      "729f6286b503b36b45fb86efdf7a2e148713c1999a0a98fb485e72188ae26bdf"
+    ]
+  },
+  {
+    "name": "Lunixar",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "edocument-*.msi",
+      "googlemeet.msi",
+      "lunixar.agent.core.dll",
+      "lunixar.dll",
+      "lunixar.exe",
+      "lunixarremote.dll",
+      "lunixarremote.exe",
+      "lunixarrmm*.msi",
+      "lunixarupdater.dll",
+      "lunixarupdater.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ISL Online",
+    "category": "RMM",
+    "install_basenames": [
+      "isl light*",
+      "islalwaysonmonitor.exe",
+      "isllight.exe",
+      "isllightclient.exe",
+      "isllightservice.exe"
+    ],
+    "sha256_hashes": [
+      "ae6c0e25c5867370a9208f63cecd039779384ca205336f7a8d1635058eb0f759",
+      "0a52b503f8461b741a50e48bfd47daff299d29ed2dde29dadaffa7398e1db6f6",
+      "03214d8b41186760f2cf299ba70a22695f4a28be0080551dc582d7a52ac2b96a"
+    ]
+  },
+  {
+    "name": "LogMeIn rescue",
+    "category": "RMM",
+    "install_basenames": [
+      "lmi_rescue.exe",
+      "lmi_rescue_srv.exe",
+      "support-logmeinrescue*.exe",
+      "support-logmeinrescue.exe"
+    ],
+    "sha256_hashes": [
+      "093e4af5f61640e64799539e8f3418e0890a3fe0aa3e33613de3d62936ee2f20",
+      "50efac7eb47a1ff1deb0b5e037251cbd800513a8e0306659ddd212b5a5a45c25"
+    ]
+  },
+  {
+    "name": "NetSupport Manager",
+    "category": "RMM",
+    "install_basenames": [
+      "client32.exe",
+      "pcicfgui.exe",
+      "pcictlui.exe",
+      "remcmdstub.exe"
+    ],
+    "sha256_hashes": [
+      "a0ce8c26b6b322cc7311b19decab019dcdd2766768e011936d7701ac75a97ee9"
+    ]
+  },
+  {
+    "name": "UltraVNC",
+    "category": "RAT",
+    "install_basenames": [
+      "ultravnc*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ITSupport247 (ConnectWise)",
+    "category": "RMM",
+    "install_basenames": [
+      "saazapsc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "BeyondTrust (Bomgar)",
+    "category": "RMM",
+    "install_basenames": [
+      "bomgar-pac-*.exe",
+      "bomgar-pac.exe",
+      "bomgar-rdp.exe",
+      "bomgar-scc-*.exe",
+      "bomgar-scc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DW Service",
+    "category": "RMM",
+    "install_basenames": [
+      "dwagent.exe",
+      "dwaglnc.exe",
+      "dwagsvc.exe"
+    ],
+    "sha256_hashes": [
+      "cd098eddb23f2d2f6c42271ca82803b0d5ac950cb82a9b8ae0928e83945a53df"
+    ]
+  },
+  {
+    "name": "GLPI Agent",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "glpi-agent"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "AeroAdmin",
+    "category": "RMM",
+    "install_basenames": [
+      "aeroadmin.exe"
+    ],
+    "sha256_hashes": [
+      "00611ecd71f1db02006e287854f9cb09830d5f06513b7f5964cccd27e4fb81e7"
+    ]
+  },
+  {
+    "name": "VIZOR",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Faronics Core",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "coreagentservice.exe",
+      "faronicscoreagent.exe",
+      "fcaforstartupmonitor.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "LogMeIn",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": [
+      "9b6f4f5e6f85dfe628f9781e65ab8917bf9f7d3e24bb6c564ab2fc0020a93f32",
+      "71cf94f02a53c2a37976acbb0a87fd8bb0edda247c780ca61fbe4a41a17406a5"
+    ]
+  },
+  {
+    "name": "Xeox",
+    "category": "RMM",
+    "install_basenames": [
+      "xeox-agent_*.exe",
+      "xeox-agent_x64.exe",
+      "xeox-agent_x86.exe",
+      "xeox_service_windows.exe"
+    ],
+    "sha256_hashes": [
+      "d0bad90ead3f283a5914042d497613c522f61513c0a63005cb0e86d3297d1f40"
+    ]
+  },
+  {
+    "name": "Level",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": [
+      "9ce73bf30a1b85bb85dc02b0177ec362b39587e48b968b411a9ae5cc0557a7c6",
+      "075b9694aa770850d54870e4a3a55fd11a26497ccb8de4f2ec7b2ecca2b88d83"
+    ]
+  },
+  {
+    "name": "RDPView",
+    "category": "RAT",
+    "install_basenames": [
+      "dwrcs.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Instant Housecall",
+    "category": "RMM",
+    "install_basenames": [
+      "hsloader.exe",
+      "ihcserver.exe",
+      "instanthousecall.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Kaseya (VSA)",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "CentraStage (Now Datto)",
+    "category": "RMM",
+    "install_basenames": [
+      "aemagent.exe",
+      "cagservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Laplink Everywhere",
+    "category": "RMM",
+    "install_basenames": [
+      "laplink-everywhere-setup*.exe",
+      "laplink.exe",
+      "laplinkeverywhere.exe",
+      "llrcservice.exe",
+      "oosysagent.exe",
+      "serverproxyservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "PuTTY",
+    "category": "RAT",
+    "install_basenames": [
+      "putty.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "SimpleHelp",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "remote access.exe",
+      "serviceconfig.xml",
+      "simplegatewayservice.exe",
+      "simplehelpcustomer.exe",
+      "simpleservice.exe",
+      "spsrv.exe",
+      "vhost.exe",
+      "windowslauncher.exe"
+    ],
+    "sha256_hashes": [
+      "77b8f597b7d20d4f7ae84caa5c22b94a8d9e09051f7cdaa17f41890ccf8c77a2"
+    ]
+  },
+  {
+    "name": "Supremo",
+    "category": "RMM",
+    "install_basenames": [
+      "supremo.exe",
+      "supremohelper.exe",
+      "supremoservice.exe",
+      "supremosystem.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Centurion",
+    "category": "RMM",
+    "install_basenames": [
+      "ctiserv.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Yandex.Disk",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "yandexdisk2.exe"
+    ],
+    "sha256_hashes": [
+      "b4de5a3d4ac1c70fdc0c498e3248389392d80efc4fb3a8fb67435f79da830199"
+    ]
+  },
+  {
+    "name": "Netop Remote Control (Impero Connect)",
+    "category": "RMM",
+    "install_basenames": [
+      "connect.backdrop.cloud*.exe",
+      "imperoclientsvc.exe",
+      "imperoinit.exe",
+      "netop ondemand.exe",
+      "ngstw32.exe",
+      "nhostsvc.exe",
+      "nhstw32.exe",
+      "nldrw32.exe",
+      "rmserverconsolemediator.exe"
+    ],
+    "sha256_hashes": [
+      "2ef170a512ba3763050cca4f64055f658ff1df5bdf45784dae8b51256bd3c07c",
+      "bdb200d53531c7c66b74b36f622981de8eae40c7833cbea6190877eea10a8cb0"
+    ]
+  },
+  {
+    "name": "ZeroTier",
+    "category": "RAT",
+    "install_basenames": [
+      "zero-powershell.exe",
+      "zerotier*.exe",
+      "zerotier*.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ISL Light",
+    "category": "RMM",
+    "install_basenames": [
+      "islalwaysonmonitor.exe",
+      "isllight.exe",
+      "isllightservice.exe"
+    ],
+    "sha256_hashes": [
+      "ae6c0e25c5867370a9208f63cecd039779384ca205336f7a8d1635058eb0f759",
+      "0a52b503f8461b741a50e48bfd47daff299d29ed2dde29dadaffa7398e1db6f6",
+      "03214d8b41186760f2cf299ba70a22695f4a28be0080551dc582d7a52ac2b96a"
+    ]
+  },
+  {
+    "name": "Ammyy Admin",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "aa_v*.exe",
+      "ammyy_admin.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "AweRay",
+    "category": "RMM",
+    "install_basenames": [
+      "aweray_remote*.exe",
+      "awesun.exe"
+    ],
+    "sha256_hashes": [
+      "995cdb276cd21557532b0b73c0ada53415f223400103177be9dd47e42a54e940"
+    ]
+  },
+  {
+    "name": "GetScreen",
+    "category": "RMM",
+    "install_basenames": [
+      "getscreen-x86.exe",
+      "getscreen.upd.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ezHelp",
+    "category": "RMM",
+    "install_basenames": [
+      "ezhelpclient.exe",
+      "ezhelpclientmanager.exe",
+      "ezhelpmanager.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RemSupp",
+    "category": "RMM",
+    "install_basenames": [
+      "installer.exe",
+      "remsupp.exe",
+      "uninstall remsupp.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Basecamp",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "AnyDesk",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "anydesk.app"
+    ],
+    "sha256_hashes": [
+      "864e2c3675d05cd4816a42167b45ab66e3d5995fae7e1fd680223940061b9803"
+    ]
+  },
+  {
+    "name": "SuperOps",
+    "category": "RMM",
+    "install_basenames": [
+      "superops.exe",
+      "superopsticket.exe"
+    ],
+    "sha256_hashes": [
+      "f086241d446a5898c068fcd684e90be3fa7a758dbfb8be9464660012ea4f63e6",
+      "eb2be7658c833c4abec241cd57c10ff12abe3af726f801c42894d0e541183871",
+      "15576575fceb3ea566339e0a9c4baffbad3899adff992165d11834943dbc1d3d"
+    ]
+  },
+  {
+    "name": "Any Support",
+    "category": "RMM",
+    "install_basenames": [
+      "manuallauncher.exe"
+    ],
+    "sha256_hashes": [
+      "948e074ca4b5957a3cac40db6b88b6735dd635b841f510ccb50d507783170833",
+      "6cc5985ad284992d6f59ff3336e5ce9065a01988322b015ae128d0899a75c14b",
+      "7ffc8c8f47f3dd18d1d3e51d078093aed7915093c6dadafcd1ada2d1c43a21ad"
+    ]
+  },
+  {
+    "name": "Mikogo",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "mikogo-screen-service.exe",
+      "mikogo-service.exe",
+      "mikogo-starter.exe",
+      "mikogo.exe",
+      "mikogolauncher.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Sophos-Remote Management System",
+    "category": "RMM",
+    "install_basenames": [
+      "clientmrinit.exe",
+      "mgntsvc.exe",
+      "routernt.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Faronics Deploy",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "cloudwksinstall.exe",
+      "faronicsdeployagent.exe",
+      "faronicssa.exe",
+      "frcserver.exe",
+      "fssinstaller.exe",
+      "fwa_ui_agent.exe",
+      "fwaservice.exe",
+      "fwawebinstaller_*.exe",
+      "migrationhelper_32.exe",
+      "migrationhelper_64.exe",
+      "modulesupgrademgr.exe",
+      "notificationhelper.exe",
+      "usernotificationhelper.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Syspectr",
+    "category": "RMM",
+    "install_basenames": [
+      "oolocker.exe",
+      "oosyspectr.exe",
+      "syspectr.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "FixMe.it",
+    "category": "RMM",
+    "install_basenames": [
+      "9380cc75b872221a7425d7503565b67580407f60",
+      "fixmeit client.exe",
+      "fixmeit expert setup.exe",
+      "fixmeit unattended access setup.exe",
+      "fixmeitclient*.exe",
+      "fixmeitclient.exe",
+      "ticlientcore.exe",
+      "ticlienthelper*.exe",
+      "tiexpertcore.exe",
+      "tiexpertstandalone.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NinjaOne (formerly NinjaRMM)",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Net Monitor for Employees",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "nmep_agtconfig.exe",
+      "nmep_ctrlagent.exe",
+      "nmep_ctrlagentsvc.exe",
+      "winpty-agent.exe",
+      "winpty-agent64.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remcos",
+    "category": "RMM",
+    "install_basenames": [
+      "remcos*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Pilixo",
+    "category": "RMM",
+    "install_basenames": [
+      "pilixo_installer*.exe",
+      "rdp.exe"
+    ],
+    "sha256_hashes": [
+      "44b8093cc6cee4dc28ac779675983f2cbdc74fc33837a16758f988163794bd97"
+    ]
+  },
+  {
+    "name": "Zabbix Agent",
+    "category": "RMM",
+    "install_basenames": [
+      "zabbix_agent*.exe"
+    ],
+    "sha256_hashes": [
+      "0b2070c42e42bfad0fb239a25696e4a734de487dd293135121fa3651cb9e826b"
+    ]
+  },
+  {
+    "name": "Faronics Insight",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "fistudentagent.exe",
+      "fistudentsvc.exe",
+      "fistudentui.exe",
+      "insightinstaller.exe",
+      "insightinstallerstudent.exe",
+      "insightinstallerteacher.exe",
+      "insightsetup.msi",
+      "stahelper.exe",
+      "studentsvc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remote Desktop Manager (Devolutions)",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Domotz",
+    "category": "RMM",
+    "install_basenames": [
+      "domotz pro desktop app setup*.exe",
+      "domotz pro desktop app.exe",
+      "domotz*.exe",
+      "domotz-windows*.exe",
+      "domotz.exe",
+      "domotz_bash.exe"
+    ],
+    "sha256_hashes": [
+      "2761bda50e77e0a0e2a8ac1836281035cd8d3d2c5faf8b41d607519ca22a7bf5"
+    ]
+  },
+  {
+    "name": "Adobe Connect",
+    "category": "RAT",
+    "install_basenames": [
+      "connect.exe",
+      "connectappsetup*.exe",
+      "connectdetector.exe",
+      "connectshellsetup*.exe"
+    ],
+    "sha256_hashes": [
+      "4d5e55cb8cbeb6fc530c38ffd6413ce22b618e4e06fa5c3ebb7c24902aa4ae4d"
+    ]
+  },
+  {
+    "name": "Total Software Deployment",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "tniwinagent.exe",
+      "tsdservice.exe"
+    ],
+    "sha256_hashes": [
+      "2c3979c76cccc59b5240053a226374f89be4a7f4c58e29b04efd849cb6465575"
+    ]
+  },
+  {
+    "name": "FreeRDP",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Level.io",
+    "category": "RMM",
+    "install_basenames": [
+      "level-remote-control-ffmpeg.exe",
+      "level-windows-amd64.exe",
+      "level.exe"
+    ],
+    "sha256_hashes": [
+      "075b9694aa770850d54870e4a3a55fd11a26497ccb8de4f2ec7b2ecca2b88d83"
+    ]
+  },
+  {
+    "name": "NVDA (Non-Visual Desktop Access)",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "nvda.exe",
+      "nvda_*.exe",
+      "nvda_service.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ZOC",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "zoc.exe"
+    ],
+    "sha256_hashes": [
+      "a87e256901f94c986acb31fa1b47e0bb13d4cbfcd2d714cd6d09db41babbec5d"
+    ]
+  },
+  {
+    "name": "eHorus",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "ehorus standalone.exe",
+      "ehorus_agent.exe",
+      "ehorus_cmd.exe",
+      "ehorus_launcher.exe",
+      "ehorus_uit.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remotely",
+    "category": "RMM",
+    "install_basenames": [
+      "connectioninfo.json",
+      "etag.txt",
+      "remotely-agent.plist",
+      "remotely-agent.service",
+      "remotely_agent",
+      "remotely_agent.exe",
+      "remotely_desktop",
+      "remotely_desktop.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Quick Assist",
+    "category": "RAT",
+    "install_basenames": [
+      "quickassist.exe"
+    ],
+    "sha256_hashes": [
+      "0f6269a8095b8c622ea2b864df5fd6f09f676f0a5f87618d475b936e27b19af3",
+      "9653b13e7bfa2f3be8a175ff895e5bf46537e5f742905751282f956e39587b0b"
+    ]
+  },
+  {
+    "name": "Pcnow",
+    "category": "RMM",
+    "install_basenames": [
+      "mwcliun.exe",
+      "pcnmgr.exe",
+      "webexpcnow.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Comodo RMM",
+    "category": "RMM",
+    "install_basenames": [
+      "itsmagent.exe",
+      "rviewer.exe"
+    ],
+    "sha256_hashes": [
+      "0104e8d061e84b6038d1ae63bd184c30b648dfcf20f1ccef375038cbf415356e"
+    ]
+  },
+  {
+    "name": "Remote Utilities",
+    "category": "RMM",
+    "install_basenames": [
+      "rutserv.exe",
+      "rutview.exe"
+    ],
+    "sha256_hashes": [
+      "fe0d943f853c27b741328cfaf188718ccad383517c457ad291b9c08b5f7be0db"
+    ]
+  },
+  {
+    "name": "Synergy",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Tactical RMM",
+    "category": "RMM",
+    "install_basenames": [
+      "tacticalrmm.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Teramind",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "agent",
+      "config",
+      "teramind agent.app",
+      "tmagent.app",
+      "tmagentsvc.exe",
+      "tmsysd"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Rodex RMM",
+    "category": "RAT",
+    "install_basenames": [
+      "<random>.exe",
+      "rodexagent.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DesktopNow",
+    "category": "RMM",
+    "install_basenames": [
+      "desktopnow.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Royal Apps",
+    "category": "RMM",
+    "install_basenames": [
+      "royalserver.exe",
+      "royalts.exe"
+    ],
+    "sha256_hashes": [
+      "fdb7e23f6a02780def665e6ea428cd9cd59f115cd33d9dc7ba2b63a5fa8e1b3f"
+    ]
+  },
+  {
+    "name": "ManageEngine RMM Central",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TeleDesktop",
+    "category": "RMM",
+    "install_basenames": [
+      "pstlaunch.exe",
+      "ptdskclient.exe",
+      "ptdskhost.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ScreenMeet",
+    "category": "RMM",
+    "install_basenames": [
+      "screenmeet.support.exe",
+      "screenmeetsupport.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Echoware",
+    "category": "RMM",
+    "install_basenames": [
+      "echoserver*.exe",
+      "echoware.dll"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "SimpleHelp",
+    "category": "RMM",
+    "install_basenames": [
+      "remote access.exe",
+      "serviceconfig.xml",
+      "simplegatewayservice.exe",
+      "simplehelpcustomer.exe",
+      "simpleservice.exe",
+      "spsrv.exe",
+      "windowslauncher.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DragonDisk",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "dragondisk.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Parsec",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "parsecd.exe",
+      "pservice.exe"
+    ],
+    "sha256_hashes": [
+      "cc62d22bf8a082621fa25fdeee3150c17b09dbc09c9371e3dcdd6ec83967770c"
+    ]
+  },
+  {
+    "name": "Koofr",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "JollysFastVNC",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Parallels Access",
+    "category": "RMM",
+    "install_basenames": [
+      "parallelsaccess-*.exe",
+      "prl_deskctl_agent.exe",
+      "prl_deskctl_wizard.exe",
+      "prl_pm_service.exe",
+      "tsclient.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "SecureCRT",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "securecrt.exe"
+    ],
+    "sha256_hashes": [
+      "85d2ff4ab6928f08dc2295affbf9ba3c125a5071c4d3c8c522bff357d7a2ff77"
+    ]
+  },
+  {
+    "name": "Bitvise SSH Client",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "bvsshclient-inst.exe"
+    ],
+    "sha256_hashes": [
+      "5aa0fd8c3c0c50e452569fbaef291f96b2ae3c9a7b52f80ed34bb48d63a8bcec",
+      "a68d7fe876f7968127050a8e42049f751ea2cf18f8965dab9b36433111c8d602"
+    ]
+  },
+  {
+    "name": "HelpU",
+    "category": "RMM",
+    "install_basenames": [
+      "helpu_install.exe",
+      "helpumanager.exe",
+      "helpuupdater.exe"
+    ],
+    "sha256_hashes": [
+      "759ee372252febb7326a65400e44e377a0f68c8e50b3e06184611ff71357b9e3"
+    ]
+  },
+  {
+    "name": "Gorelo RMM",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": [
+      "caa0721604c85d2779f2d5dfebd2a1f3203d11585231288f254d84d9544c7ce0"
+    ]
+  },
+  {
+    "name": "Ninite Pro (Ninite Agent)",
+    "category": "RMM",
+    "install_basenames": [
+      "ninite.exe",
+      "niniteagent.exe",
+      "niniteone.exe",
+      "ninitepro.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Pulseway",
+    "category": "RMM",
+    "install_basenames": [
+      "pcmonitormanager.exe",
+      "pcmonitorsrv.exe"
+    ],
+    "sha256_hashes": [
+      "f6f60040d1adeaa011f8a2459e58ac3dfb59c190f45a45fb4ed1f9717ad4ec47"
+    ]
+  },
+  {
+    "name": "SmartFTP",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "sfshelltools.dll.mui"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MyIVO",
+    "category": "RMM",
+    "install_basenames": [
+      "myivomanager.exe",
+      "myivomgr.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "LabTech RMM (Now ConnectWise Automate)",
+    "category": "RMM",
+    "install_basenames": [
+      "ltsvc.exe",
+      "ltsvcmon.exe",
+      "lttray.exe"
+    ],
+    "sha256_hashes": [
+      "66b1ef65896e9f91efd1e3347e70eb2cf1708e1ce2ca267fb4704858aa3ee028",
+      "532d20a37c6493fae3144fa8aae0a2c3510f6bdc0a2683e9ce7970d6a22d65c2"
+    ]
+  },
+  {
+    "name": "CruzControl",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TiFLUX",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "si.exe",
+      "tiagent.app",
+      "tiagent.exe",
+      "tiservice.exe",
+      "tiupdateservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Ericom AccessNow",
+    "category": "RMM",
+    "install_basenames": [
+      "accessserver*.exe",
+      "accessserver.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Nezha",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "agent",
+      "dashboard",
+      "dashboard-windows-amd64.exe",
+      "nezha-agent",
+      "nezha-agent.exe",
+      "nezha-agent.service",
+      "nezha-dashboard.service",
+      "nezha_agent"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Splashtop Remote",
+    "category": "RMM",
+    "install_basenames": [
+      "splashtop_streamer_windows*.exe",
+      "splashtopsos.exe",
+      "sragent.exe",
+      "srmanager.exe",
+      "srserver.exe",
+      "srservice.exe",
+      "strwinclt.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "N-Able Advanced Monitoring Agent",
+    "category": "RMM",
+    "install_basenames": [
+      "agent_*_rw.exe",
+      "baseclient.exe",
+      "basupapp.exe",
+      "basupsrvc.exe",
+      "basupsrvccnfg.exe",
+      "basuptshelper.exe",
+      "winagent.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "N-ABLE Remote Access Software",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Splashtop (Beta)",
+    "category": "RMM",
+    "install_basenames": [
+      "splashtop_streamer_windows*.exe",
+      "splashtopsos.exe",
+      "srmanager.exe",
+      "srserver.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Quest KACE Agent (formerly Dell KACE)",
+    "category": "RMM",
+    "install_basenames": [
+      "konea.exe"
+    ],
+    "sha256_hashes": [
+      "850a4c24055afc7d293232f250f8ec7cc4bb6971f2fe159512427196e96720eb"
+    ]
+  },
+  {
+    "name": "LiteManager",
+    "category": "RMM",
+    "install_basenames": [
+      "lmnoipserver.exe",
+      "romfusclient.exe",
+      "romserver.exe",
+      "romviewer.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RDCMan",
+    "category": "RAT",
+    "install_basenames": [
+      "rdcman-x86.exe",
+      "rdcman.exe"
+    ],
+    "sha256_hashes": [
+      "966952d678a8eb7254cf7c024ece8bc47e05a89c760f994db92f5a4309688b25"
+    ]
+  },
+  {
+    "name": "Chicken (of the VNC)",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Absolute (Computrace)",
+    "category": "RMM",
+    "install_basenames": [
+      "ctes.exe",
+      "cteshostsvc.exe",
+      "ctespersitence.exe",
+      "rpcld.exe",
+      "rpcnet.exe"
+    ],
+    "sha256_hashes": [
+      "76a4272310b3f5151939eee0e63b61cee712d88af5b1606202360147082adbc1"
+    ]
+  },
+  {
+    "name": "Ivanti Remote Control",
+    "category": "RMM",
+    "install_basenames": [
+      "agentlessrc.exe",
+      "arcui.exe",
+      "ivantiremotecontrol.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ToDesk",
+    "category": "RMM",
+    "install_basenames": [
+      "todesk.exe",
+      "todesk_service.exe",
+      "todesk_setup.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ShowMyPC",
+    "category": "RMM",
+    "install_basenames": [
+      "showmypc*.exe",
+      "showmypc.exe",
+      "smpcsetup.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ngrok",
+    "category": "RAT",
+    "install_basenames": [
+      "ngrok*",
+      "ngrok.exe",
+      "ngrok.zip"
+    ],
+    "sha256_hashes": [
+      "c4c1e472823a12e2ee127a64d6ee3de9b31d02bc972baeb8800e6d918dce16a1"
+    ]
+  },
+  {
+    "name": "WebRDP",
+    "category": "RAT",
+    "install_basenames": [
+      "webrdp.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "rdp2tcp",
+    "category": "RAT",
+    "install_basenames": [
+      "rdp2tcp.py",
+      "tdp2tcp.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "S3 Browser",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "s3browser*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "HelpWire",
+    "category": "RMM",
+    "install_basenames": [
+      "helpwire operator.app",
+      "helpwire quick.exe",
+      "helpwire unattended access.lnk",
+      "helpwire-operator",
+      "helpwire-unattended.service",
+      "helpwire.exe",
+      "helpwire.lnk"
+    ],
+    "sha256_hashes": [
+      "9de79ff72aa09670b3d7115e9e92e1fb7e95efb607d1dab402bb7d0994fbbcec"
+    ]
+  },
+  {
+    "name": "Ericom Connect",
+    "category": "RMM",
+    "install_basenames": [
+      "ericomconnectremotehost*.exe",
+      "ericomconnnectconfigurationtool.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Netop",
+    "category": "RMM",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Syncro",
+    "category": "RMM",
+    "install_basenames": [
+      "kabuto.app.runner.exe",
+      "kabuto.installer.exe",
+      "kabuto.service.runner.exe",
+      "kabutosetup.exe",
+      "syncro.app.runner.exe",
+      "syncro.installer.exe",
+      "syncro.overmind.service.exe",
+      "syncro.service.exe",
+      "syncrolive.agent.exe",
+      "syncrolive.service.exe"
+    ],
+    "sha256_hashes": [
+      "de8c1b54a83ffdeba275cac978af0d0e4cefb4b03686d28db5558b33e7e6106a"
+    ]
+  },
+  {
+    "name": "Jump Desktop",
+    "category": "RMM",
+    "install_basenames": [
+      "jumpclient.exe",
+      "jumpconnect.exe",
+      "jumpdesktop.exe",
+      "jumpservice.exe",
+      "jumpupdater.exe"
+    ],
+    "sha256_hashes": [
+      "880b3e0e54169ab6e32e9cb9d4c20c234dfc2d0dfeaee6faf68d4257941cf1ed"
+    ]
+  },
+  {
+    "name": "BeAnyWhere",
+    "category": "RMM",
+    "install_basenames": [
+      "basupapp.exe",
+      "basupappelev.exe",
+      "basupappsrvc.exe",
+      "basupsrvc.exe",
+      "basupsrvcupdate.exe",
+      "basupsysinf.exe",
+      "basuptshelper.exe",
+      "takecontrol.exe"
+    ],
+    "sha256_hashes": [
+      "6a054444b16470b59c0ff13ada9e9cab8268631112507b6973d7e6d62f3b9fc4"
+    ]
+  },
+  {
+    "name": "Veyon",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "veyon-master.exe",
+      "veyon-server.exe",
+      "veyon-service.exe",
+      "veyon-wcli.exe",
+      "veyon-worker.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "WebEx (Remote Access)",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Bluetrait",
+    "category": "RAT",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NoteOn-desktop sharing",
+    "category": "RAT",
+    "install_basenames": [
+      "nateon*.exe",
+      "nateon.exe",
+      "nateonmain.exe"
+    ],
+    "sha256_hashes": [
+      "dd6cae30fa01137e95bc035020663bd43077affe942be4624e57bb3ac2922756",
+      "fcbd2b2c27c1f53007b16f63b7f611b9cf1499362426b08c26f7a924675dfc5c"
+    ]
+  },
+  {
+    "name": "Devolutions Remote Desktop Manager",
+    "category": "RAT",
+    "install_basenames": [
+      "remote desktop manager",
+      "remotedesktopmanager.exe"
+    ],
+    "sha256_hashes": [
+      "b4dc03f646a3212aae9769e146b35bad4d0ddea71807afc97a3494215ecb0219"
+    ]
+  },
+  {
+    "name": "Remote Desktop Plus",
+    "category": "RAT",
+    "install_basenames": [
+      "rdp.exe"
+    ],
+    "sha256_hashes": [
+      "44b8093cc6cee4dc28ac779675983f2cbdc74fc33837a16758f988163794bd97"
+    ]
+  },
+  {
+    "name": "Controlio",
+    "category": "RMM",
+    "install_basenames": [
+      "bbl.exe",
+      "libeay32.dll",
+      "ssleay32.dll",
+      "wec_launcher_[a-z0-9]*_.exe",
+      "wec_launcher_[a-z0-9]*_.pkg",
+      "wecliboardlistener.exe",
+      "weinstsvc.exe",
+      "wemonc.exe",
+      "weprtct.exe",
+      "wesvc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "DameWare",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "dameware mini remote control*.exe",
+      "dameware remote support.exe",
+      "dntus*.exe",
+      "dwrcs.exe",
+      "dwrcst.exe",
+      "solarwinds-dameware-drs*.exe",
+      "solarwinds-dameware-mrc*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NinjaRMM",
+    "category": "RMM",
+    "install_basenames": [
+      "ninjarmm-cli.exe",
+      "ninjarmmagent.exe",
+      "ninjarmmagentpatcher.exe"
+    ],
+    "sha256_hashes": [
+      "61e3d7e1235c0f6d5318721715ce5fb136c8e03783f0d3d75aa026c845958032"
+    ]
+  },
+  {
+    "name": "Tanium",
+    "category": "RMM",
+    "install_basenames": [
+      "taniumclient.exe",
+      "taniumcx.exe",
+      "taniumexecwrapper.exe",
+      "taniumfileinfo.exe",
+      "tpowershell.exe"
+    ],
+    "sha256_hashes": [
+      "3be87ff5ce6a9e0104110027478dbc1ce63c97a5cd1324f06d92d97857afbaf3",
+      "9c25d19ee1ea68a1a4e729dc0fab0bf879e63c4ab599f86f2e9b5ca961671a84"
+    ]
+  },
+  {
+    "name": "MEGAsync",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "megasyncsetup64.exe",
+      "megaupdater.exe"
+    ],
+    "sha256_hashes": [
+      "6ffa84575a19e64a21e26f6a752854212b5c73555db1e20cee78ee44efe7781d"
+    ]
+  },
+  {
+    "name": "InvGate",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "dephlp.exe",
+      "invgate-ed.exe",
+      "invgateassetsrd.exe",
+      "invgaterd.exe",
+      "sas.dll",
+      "software matt.dll"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Weezo",
+    "category": "RMM",
+    "install_basenames": [
+      "weezo setup*.exe",
+      "weezo.exe",
+      "weezohttpd.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "XRDP",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Teleport Connect",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "teleport connect setup-*.exe",
+      "tsh"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Netreo",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Laplink Gold",
+    "category": "RMM",
+    "install_basenames": [
+      "laplink.exe",
+      "tsircusr.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "CloudFlare Tunnel",
+    "category": "RAT",
+    "install_basenames": [
+      "cloudflared.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Faronics Deep Freeze",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "cloudwksinstall.exe",
+      "dfc.exe",
+      "dfinst.exe",
+      "dfserv.exe",
+      "dfservex.exe",
+      "dfstd.exe",
+      "dfstdinstall.exe",
+      "dfwks.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Duet Display",
+    "category": "RAT",
+    "install_basenames": [
+      "duet.exe",
+      "duetdisp.exe",
+      "duetsetup.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "BeyondTrust",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ManageEngine",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "dcagentservice.exe",
+      "installshield setup.exe",
+      "manageengine_remote_access_plus.exe"
+    ],
+    "sha256_hashes": [
+      "b9326bd53d5cfd1d1ff72f52e92e776487e206e76363d4c23a3c60143349c790",
+      "e65be97dfb0ae62de4bfbfed140aaa1e16e9f4461e8e29c9816fc54dea595694",
+      "b51dee244adcf4795db9378e56897a97b48eb2c3d4ed758af98ddab2e6f9967b",
+      "7ac27dd17b4cfa28f37deb6dcb9519b4e7a2dd405134ac881a8c49d32cb904e6"
+    ]
+  },
+  {
+    "name": "Remobo",
+    "category": "RMM",
+    "install_basenames": [
+      "remobo.exe",
+      "remobo_client.exe",
+      "remobo_tracker.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Mocha VNC Lite",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "this installs a modified vnc and cannot be blocked by path separate from vnc"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "LabTeach (Connectwise Automate)",
+    "category": "RMM",
+    "install_basenames": [
+      "ltsvc.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ImmyBot",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "immyagent.exe",
+      "immybot.agent.ephemeral.exe",
+      "immybot.msi",
+      "immyupdater.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MultCloud",
+    "category": "RAT",
+    "install_basenames": [
+      "requires sign up"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "TrustConnect",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "docconnect.agent.exe",
+      "trustconnectagent.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Electric AI (Kaseya)",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "VNC Connect",
+    "category": "RAT",
+    "install_basenames": [
+      "*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "RES Automation Manager",
+    "category": "RMM",
+    "install_basenames": [
+      "wisshell*.exe",
+      "wmc.exe",
+      "wmc_deployer.exe",
+      "wmcsvc.exe"
+    ],
+    "sha256_hashes": [
+      "a48d80e35636a24613adcb9b1f928eeef86073a580878d023871bc762ac8a2c8"
+    ]
+  },
+  {
+    "name": "Remmon",
+    "category": "RMM",
+    "install_basenames": [
+      "remmon.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "mstsc.exe (Microsoft Remote Desktop Connection)",
+    "category": "RAT",
+    "install_basenames": [
+      "mstsc.exe"
+    ],
+    "sha256_hashes": [
+      "39baa167de334fef185ae8b97e8c709a307eed08e80fe115577c59a05200a13a"
+    ]
+  },
+  {
+    "name": "PSEXEC",
+    "category": "RAT",
+    "install_basenames": [
+      "psexec.exe",
+      "psexec64.exe",
+      "psexecsvc.exe"
+    ],
+    "sha256_hashes": [
+      "046b0719f9659ad368515035768ae5be3599621af5ed1916785239711b898be8"
+    ]
+  },
+  {
+    "name": "UltraViewer",
+    "category": "RMM",
+    "install_basenames": [
+      "ultraviewer.exe",
+      "ultraviewer_desktop.exe",
+      "ultraviewer_service.exe",
+      "ultraviewer_setup*"
+    ],
+    "sha256_hashes": [
+      "1809068550d615bd78bdd3618cf3ab13c35e67102013cf2ef0f316684d80781c",
+      "0fa31dd2affdad98dbca7d8b7a9dc02c56093ff2ca06e6b03db7aa4cd4bf5260",
+      "a7a7419a44b9e4a858b2d59f9a6876dda83e5e7841376a496e5501ffaa521883"
+    ]
+  },
+  {
+    "name": "OptiTune",
+    "category": "RMM",
+    "install_basenames": [
+      "otpowershell.exe",
+      "otservice.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "GoToMyPC",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "g2m.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "PiTunnel",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "pitunnel",
+      "pitunnel.service"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Goverlan",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "govagentinstallhelper.exe",
+      "govagentx64.exe",
+      "goverrmc.exe",
+      "govreachclient.exe",
+      "govsrv*.exe",
+      "govsrv.exe"
+    ],
+    "sha256_hashes": [
+      "086207248872cecd4d338c0aa26f69aaff779c7c88f02d13fe5e004df85bdece"
+    ]
+  },
+  {
+    "name": "Rapid7",
+    "category": "RMM",
+    "install_basenames": [
+      "ir_agent.exe",
+      "rapid7_agent_core.exe",
+      "rapid7_endpoint_broker.exe"
+    ],
+    "sha256_hashes": [
+      "62d7cb45c4635b60faee5dcfab0e5562a7cf7745c26a8288575e67a7024a683c",
+      "0fb44b024e3df56e73db61782a022eeed5126adb850105d9355cff243c1ceab5"
+    ]
+  },
+  {
+    "name": "Syncthing",
+    "category": "RAT",
+    "install_basenames": [
+      "*",
+      "syncthing.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "GoToAssist Agent Desktop Console",
+    "category": "RMM",
+    "install_basenames": [
+      "g2rdesktopconsole-x64.msi"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "AliWangWang-remote-control",
+    "category": "RMM",
+    "install_basenames": [
+      "alitask.exe"
+    ],
+    "sha256_hashes": [
+      "e9bf9575e130de921b6d04e3717c609292ab86ffad1f64cf73ecb94d15c5be91",
+      "d3b2b174fe34f1e568333977c0bc23b3df3f68e47fbe503772becdeea6d140af"
+    ]
+  },
+  {
+    "name": "Chrome SSH Extension",
+    "category": "RAT",
+    "install_basenames": [
+      "iodihamcpbpeioajjeobimgagajmlibd*"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "IntelliAdmin Remote Control",
+    "category": "RMM",
+    "install_basenames": [
+      "agent32.exe",
+      "agent64.exe",
+      "agent_setup_5.exe",
+      "iadmin.exe",
+      "intelliadmin.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "FleetDeck.io",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "fd_agent.dll",
+      "fleetdeck-agent.exe",
+      "fleetdeck-agent.msi",
+      "fleetdeck-agent.mst",
+      "fleetdeck_agent.exe",
+      "fleetdeck_agent_svc.exe",
+      "fleetdeck_commander_launcher.exe",
+      "fleetdeck_commander_svc.exe",
+      "fleetdeck_installer.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Manage Engine (Desktop Central)",
+    "category": "RMM",
+    "install_basenames": [
+      "dcagentregister.exe",
+      "dcagentservice.exe"
+    ],
+    "sha256_hashes": [
+      "b9326bd53d5cfd1d1ff72f52e92e776487e206e76363d4c23a3c60143349c790",
+      "e65be97dfb0ae62de4bfbfed140aaa1e16e9f4461e8e29c9816fc54dea595694",
+      "b51dee244adcf4795db9378e56897a97b48eb2c3d4ed758af98ddab2e6f9967b",
+      "6d7903597fc23baa069da2d0fe6959b0c1f01644461bb9f842e6326f1a49077a"
+    ]
+  },
+  {
+    "name": "Fortra",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Jump Cloud",
+    "category": "RMM",
+    "install_basenames": [
+      "jumpcloud*.exe"
+    ],
+    "sha256_hashes": [
+      "be269a8a5a57a4525cf0f4342e864e7a5e307f4aa1246cf52a08a26e0a30b1af",
+      "73afc1ff220df0f407d9db143645dcb15f57c1f95918ab01daa0a96e3824e56e"
+    ]
+  },
+  {
+    "name": "Naverisk",
+    "category": "RMM",
+    "install_basenames": [
+      "agentsetup-*.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Zoho Assist",
+    "category": "RMM",
+    "install_basenames": [
+      "connect.exe",
+      "toolsiq.exe",
+      "za_access.exe",
+      "za_connect.exe",
+      "zaservice.exe",
+      "zmagent.exe",
+      "zohomeeting.exe",
+      "zohotray.exe",
+      "zohours.exe",
+      "zohoursservice.exe"
+    ],
+    "sha256_hashes": [
+      "64ebab9cd1ce291382e37fce92ceb657cbfc3299244d38b8f2e0e7a9268408f7",
+      "98bc528011f7604a558abf379965bcf27c04c728850c7b72f2e9ceca78e5c92d",
+      "5b6b51b6b0f94767d5dcbf3bfdda9a98d0a0b98463a791d2f0e7c3acfaebf2e8",
+      "a9171ebd8d965df5fe889defa1406b345ee6c4bcb444f4d6bdc166f05be47c29",
+      "b769b924c99b3c96c44be6d04bc9af3d9943040269e15bc404b93e389db41303"
+    ]
+  },
+  {
+    "name": "Visual Studio Dev Tunnel",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Neturo",
+    "category": "RMM",
+    "install_basenames": [
+      "neturo*.exe",
+      "neturo.exe",
+      "ntrntservice.exe"
+    ],
+    "sha256_hashes": [
+      "8f58e4840aba88c7bbf69f86139498f6a6ab92d317491f729a79c5ed12c1d046"
+    ]
+  },
+  {
+    "name": "ManageEngine ServiceDesk Plus",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "manageengine_servicedesk_plus.bin",
+      "manageengine_servicedesk_plus.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "MSP360",
+    "category": "RMM",
+    "install_basenames": [
+      "cbb.exe",
+      "cbbackupplan.exe",
+      "cloud.backup.rm.service.exe",
+      "cloud.backup.scheduler.exe",
+      "cloudracmd.exe",
+      "cloudrasd.exe",
+      "cloudraservice.exe",
+      "cloudrautilities.exe",
+      "connect.exe",
+      "online backup.exe",
+      "remote desktop.exe",
+      "rmm.agent.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "ControlR",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "controlr.*.app",
+      "controlr.agent.exe",
+      "controlr.app",
+      "controlr.desktopclient.dll",
+      "controlr.desktopclient.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Royal Server",
+    "category": "RMM",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Remmina",
+    "category": "RAT",
+    "install_basenames": [],
+    "sha256_hashes": []
+  },
+  {
+    "name": "CrossTec Remote Control",
+    "category": "RMM",
+    "install_basenames": [
+      "pcivideo.exe",
+      "supporttool.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "Royal TS",
+    "category": "RMM",
+    "install_basenames": [
+      "royalts.exe"
+    ],
+    "sha256_hashes": [
+      "4270f73b1e7b4108a5a6b5bec8b0afea15f62c0a3452906ae15fb349dd197336"
+    ]
+  },
+  {
+    "name": "HopToDesk",
+    "category": "RMM",
+    "install_basenames": [
+      "hoptodesk-standalone.exe",
+      "hoptodesk.exe"
+    ],
+    "sha256_hashes": [
+      "99b2948fd10b23b6d36e035b60cb92b9b82fb0bd4003e6d28f950f0b227cae2d"
+    ]
+  },
+  {
+    "name": "BeamYourScreen",
+    "category": "RMM",
+    "install_basenames": [
+      "beamyourscreen-host.exe",
+      "beamyourscreen.exe"
+    ],
+    "sha256_hashes": []
+  },
+  {
+    "name": "NetLock RMM",
+    "category": "RMM",
+    "install_basenames": [
+      "*",
+      "netlock_rmm_agent_installer",
+      "netlock_rmm_agent_installer.exe",
+      "netlock_rmm_user_process.exe",
+      "netlock_rmm_user_uac.exe"
+    ],
+    "sha256_hashes": []
+  }
+]

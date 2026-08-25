@@ -1,0 +1,18 @@
+# Evidence test captures — never committed
+test captures
+
+# Large NTFS sample fixtures for triage-mft unit tests (copied locally, never committed)
+sample_files/
+
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# Local tool output
+/output/
+/results/
+.worktrees/
+
+# macOS
+.DS_Store
+/dist/

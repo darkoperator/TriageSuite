@@ -1,0 +1,11 @@
+[package]
+name = "triage-prefetch"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows Prefetch file format parser (versions 17-31, MAM decompression)"
+
+[dependencies]
+thiserror.workspace = true
+xpress-huffman.workspace = true

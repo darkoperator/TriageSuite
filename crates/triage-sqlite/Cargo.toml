@@ -1,0 +1,13 @@
+[package]
+name = "triage-sqlite"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Read-only SQLite access with WAL/immutable evidence-integrity discipline"
+
+[dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]

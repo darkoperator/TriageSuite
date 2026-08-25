@@ -1,0 +1,10 @@
+[package]
+name = "triage-appcompat"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Windows AppCompatCache/ShimCache (Win10 '10ts') binary parser, shared by RETriage and AppCompatTriage"
+
+[dependencies]
+chrono.workspace = true
