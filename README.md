@@ -15,7 +15,7 @@
 
 *(Printed in color at the start of every `TriageSuite run`.)*
 
-This project is a collection of Rust command-line forensic parsers for Velociraptor Windows triage captures. They all produce output compatible with Eric Zimmerman tools, given that they have become kind of a industry standard, I wanted to ensure workflows stayed the same with little to no changes. All timestamps are ISO 8601 UTC (`2024-06-29T00:05:00.1234567Z`) regardless of how the source artifact stores them; this is a lesson I learned from working over 50 IR engagements each year, having all timestamps in UTC just makes life easier.
+This project is a collection of Rust command-line forensic parsers for Velociraptor Windows triage captures. They all produce output compatible with Eric Zimmerman tools, given that they have become kind of a industry standard, I wanted to ensure workflows stayed the same with little to no changes. All timestamps are ISO 8601 UTC (`2024-06-29T00:05:00.1234567Z`) regardless of how the source artifact stores them; this is a lesson I learned from working multiple IR engagements each year, having all timestamps in UTC just makes life easier.
 
 
 **Author:** Carlos (DarkOperator) Perez <carlos_perez@darkoperator.com>
