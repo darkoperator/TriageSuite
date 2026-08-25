@@ -20,7 +20,12 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # chunks_exact_to_as_chunks: this lint is newer than the clippy pinned
+      # on contributors' machines, so it isn't addressed in source yet
+      # (31 call sites across 15 crates decode fixed-size byte chunks, e.g.
+      # UTF-16LE pairs). Suppressed here rather than per-crate so CI tracks
+      # one toolchain instead of forcing everyone onto the newest stable.
+      - run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::chunks_exact_to_as_chunks
       - run: cargo test --workspace --lib
       - run: cargo test -p triage-orchestrator --test e2e
       - run: cargo test -p triage-orchestrator --test external_tools_e2e
