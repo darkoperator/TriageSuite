@@ -1,0 +1,1 @@
+FullPath,Extension,IsDirectory,FileSize,Created0x10,LastModified0x10,SourceFile
