@@ -80,8 +80,8 @@ external forensic binaries per host:
 
 **Hayabusa** is an EVTX Sigma-rule scanner: it takes a directory of Windows Event Log files and
 produces a detection timeline by evaluating them against a Sigma rule set. TriageSuite can run it
-up to twice per host — once for a CSV timeline (`csv-timeline`) and once for a JSONL timeline
-(`json-timeline -L`).
+up to three times per host — a CSV timeline and a JSONL timeline (both via Hayabusa >= 4.0's
+unified `dfir-timeline --output-type csv`/`jsonl`), plus a `logon-summary` pass.
 
 **Takajo** is a Hayabusa-results analyzer: it doesn't touch raw evidence directly. Its
 `automagic` subcommand consumes Hayabusa's JSONL timeline output and produces a folder of derived
@@ -115,8 +115,9 @@ list):
 |---|---|---|---|---|
 | `bin` | hayabusa, takajo | string | `"hayabusa"` / `"takajo"` | binary name/path (PATH lookup if bare) |
 | `enabled` | hayabusa, takajo | bool | `true` | auto-run if found; `false` disables even when present |
-| `csv` | hayabusa | bool | `true` | run `csv-timeline` |
-| `json` | hayabusa | bool | `true` | run `json-timeline -L`; **required** if `[takajo]` is enabled |
+| `csv` | hayabusa | bool | `true` | run `dfir-timeline --output-type csv` |
+| `json` | hayabusa | bool | `true` | run `dfir-timeline --output-type jsonl`; **required** if `[takajo]` is enabled |
+| `logon_summary` | hayabusa | bool | `true` | run `logon-summary` |
 | `rules` | hayabusa | string | unset | path to Sigma rules |
 | `min_level` | hayabusa | string | unset | minimum alert severity |
 | `level` | takajo | string | unset | analysis level passed to `automagic` |

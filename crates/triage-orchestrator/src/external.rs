@@ -1,5 +1,7 @@
 use crate::capture::HostCapture;
-use crate::external_args::{hayabusa_csv_args, hayabusa_json_args, takajo_automagic_args};
+use crate::external_args::{
+    hayabusa_csv_args, hayabusa_json_args, hayabusa_logon_summary_args, takajo_automagic_args,
+};
 use crate::external_bin::resolve_bin;
 use crate::external_config::ResolvedConfig;
 use serde::Serialize;
@@ -29,7 +31,16 @@ fn not_found(tool: &str) -> ExternalToolReport {
     }
 }
 
-fn invoke(bin: &Path, args: &[OsString], tool: &str, output_path: PathBuf) -> ExternalToolReport {
+/// `find_outputs` is called only when the process exits successfully, and decides what
+/// counts as "this tool's output" — a single file/dir existence check for most tools, or
+/// a directory glob for logon-summary (which writes a variable number of `<prefix>-*.csv`
+/// files, none at all if it found nothing to summarize).
+fn invoke(
+    bin: &Path,
+    args: &[OsString],
+    tool: &str,
+    find_outputs: impl FnOnce() -> Vec<PathBuf>,
+) -> ExternalToolReport {
     let mut cmd = Command::new(bin);
     cmd.args(args);
     // Takajo (2.16.1) checks that its own executable exists relative to the process's
@@ -42,16 +53,11 @@ fn invoke(bin: &Path, args: &[OsString], tool: &str, output_path: PathBuf) -> Ex
     match cmd.output() {
         Ok(out) => {
             let ok = out.status.success();
-            // Only claim the output path in the manifest if it actually exists on disk —
+            // Only claim output paths in the manifest if they actually exist on disk —
             // a zero exit code alone doesn't guarantee the tool wrote anything (see
             // execute.rs's `result.output_paths.retain(|path| path.exists());` for the
-            // same convention). `output_path` may be a file (Hayabusa) or a directory
-            // (Takajo's automagic output), so check both.
-            let output_paths = if ok && output_path.exists() {
-                vec![output_path]
-            } else {
-                Vec::new()
-            };
+            // same convention).
+            let output_paths = if ok { find_outputs() } else { Vec::new() };
             let error = (!ok).then(|| {
                 let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
                 if stderr.is_empty() {
@@ -80,10 +86,41 @@ fn invoke(bin: &Path, args: &[OsString], tool: &str, output_path: PathBuf) -> Ex
     }
 }
 
-/// Run Hayabusa (up to twice: csv-timeline / json-timeline) and, if it produced a JSONL
-/// timeline and Takajo is enabled, chain Takajo `automagic` off that output. One report per
-/// invocation attempted; a tool that isn't found or isn't enabled contributes at most one
-/// report explaining why nothing ran.
+/// A single-element output list if `path` exists, else empty. The common case for tools
+/// that write exactly one known file/directory (everything but `logon-summary`).
+fn path_if_exists(path: &Path) -> Vec<PathBuf> {
+    if path.exists() {
+        vec![path.to_path_buf()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Files directly under `dir` whose basename starts with `prefix`, sorted for
+/// deterministic reporting. Used for `logon-summary`, which writes a variable number of
+/// `<prefix>-*.csv` files (none at all if it found nothing to summarize).
+fn files_with_prefix(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut matches: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(prefix))
+        })
+        .collect();
+    matches.sort();
+    matches
+}
+
+/// Run Hayabusa (up to three times: dfir-timeline csv / dfir-timeline jsonl /
+/// logon-summary) and, if it produced a JSONL timeline and Takajo is enabled, chain
+/// Takajo `automagic` off that output. One report per invocation attempted; a tool that
+/// isn't found or isn't enabled contributes at most one report explaining why nothing
+/// ran.
 pub fn run_external_tools_for_host(
     resolved: &ResolvedConfig,
     host: &HostCapture,
@@ -103,20 +140,37 @@ pub fn run_external_tools_for_host(
                     let out_file = hayabusa_dir.join("timeline.csv");
                     let args =
                         hayabusa_csv_args(&resolved.hayabusa, &host.artifact_root, &out_file);
-                    reports.push(invoke(&bin, &args, "hayabusa-csv", out_file));
+                    let check = out_file.clone();
+                    reports.push(invoke(&bin, &args, "hayabusa-csv", || {
+                        path_if_exists(&check)
+                    }));
                 }
                 if resolved.hayabusa.json {
                     let _ = std::fs::create_dir_all(&hayabusa_dir);
                     let out_file = hayabusa_dir.join("timeline.jsonl");
                     let args =
                         hayabusa_json_args(&resolved.hayabusa, &host.artifact_root, &out_file);
-                    let report = invoke(&bin, &args, "hayabusa-json", out_file.clone());
+                    let check = out_file.clone();
+                    let report = invoke(&bin, &args, "hayabusa-json", || path_if_exists(&check));
                     // Gate the Takajo chain on the JSONL actually existing on disk, not
                     // merely on the subprocess reporting success with no error.
                     if out_file.is_file() {
                         jsonl_output = Some(out_file);
                     }
                     reports.push(report);
+                }
+                if resolved.hayabusa.logon_summary {
+                    let _ = std::fs::create_dir_all(&hayabusa_dir);
+                    let prefix_path = hayabusa_dir.join("logon-summary");
+                    let args = hayabusa_logon_summary_args(
+                        &resolved.hayabusa,
+                        &host.artifact_root,
+                        &prefix_path,
+                    );
+                    let dir = hayabusa_dir.clone();
+                    reports.push(invoke(&bin, &args, "hayabusa-logon-summary", || {
+                        files_with_prefix(&dir, "logon-summary")
+                    }));
                 }
             }
             None => reports.push(not_found("hayabusa")),
@@ -132,7 +186,10 @@ pub fn run_external_tools_for_host(
                     // (host_dir) is present, never pre-create takajo_dir.
                     let _ = std::fs::create_dir_all(&host_dir);
                     let args = takajo_automagic_args(&resolved.takajo, &jsonl, &takajo_dir);
-                    reports.push(invoke(&bin, &args, "takajo-automagic", takajo_dir.clone()));
+                    let check = takajo_dir.clone();
+                    reports.push(invoke(&bin, &args, "takajo-automagic", || {
+                        path_if_exists(&check)
+                    }));
                 }
                 None => reports.push(not_found("takajo")),
             },
@@ -225,7 +282,12 @@ mod tests {
         let names: Vec<&str> = reports.iter().map(|r| r.tool.as_str()).collect();
         assert_eq!(
             names,
-            vec!["hayabusa-csv", "hayabusa-json", "takajo-automagic"]
+            vec![
+                "hayabusa-csv",
+                "hayabusa-json",
+                "hayabusa-logon-summary",
+                "takajo-automagic"
+            ]
         );
         for r in &reports {
             assert!(r.found, "{}: expected found", r.tool);
@@ -240,6 +302,10 @@ mod tests {
         }
         assert!(out_root.join("H/Hayabusa/timeline.csv").is_file());
         assert!(out_root.join("H/Hayabusa/timeline.jsonl").is_file());
+        // The generic stub writes a single flat file at whatever path follows
+        // `--output`, unlike real Hayabusa's two `<prefix>-*.csv` files — enough to
+        // exercise files_with_prefix's discovery without needing the real binary.
+        assert!(out_root.join("H/Hayabusa/logon-summary").is_file());
         assert!(out_root.join("H/Takajo/report.txt").is_file());
     }
 
@@ -322,6 +388,7 @@ mod tests {
         };
         resolved.hayabusa.bin = bin.to_str().unwrap().to_string();
         resolved.hayabusa.json = false; // isolate to the csv invocation
+        resolved.hayabusa.logon_summary = false; // isolate to the csv invocation
         resolved.takajo.enabled = false;
 
         let host = HostCapture {

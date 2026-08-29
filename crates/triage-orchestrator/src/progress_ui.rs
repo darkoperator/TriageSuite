@@ -7,7 +7,49 @@
 //! codes.
 
 use crate::execute::ToolRunResult;
+use crate::external::ExternalToolReport;
 use std::io::IsTerminal;
+
+/// Format one external tool's report (Hayabusa/Takajo). Same three-state shape as
+/// `summary_line`, plus a fourth ("not found on PATH") this crate's external tools can
+/// also produce — a state in-process `Tool`s never have.
+pub fn external_tool_line(report: &ExternalToolReport, colored: bool) -> String {
+    if !report.found {
+        let glyph = "\u{25CB}"; // ○
+        let marker = if colored {
+            console::Style::new()
+                .force_styling(true)
+                .yellow()
+                .apply_to(glyph)
+                .to_string()
+        } else {
+            glyph.to_string()
+        };
+        return format!("{marker} {} not found on PATH, skipped", report.tool);
+    }
+    let ok = report.error.is_none();
+    let glyph = if ok { "\u{2714}" } else { "\u{2718}" }; // ✔ / ✘
+    let marker = if colored {
+        let style = console::Style::new().force_styling(true);
+        let style = if ok { style.green() } else { style.red() };
+        style.apply_to(glyph).to_string()
+    } else {
+        glyph.to_string()
+    };
+    match &report.error {
+        Some(e) => format!("{marker} {} {e}", report.tool),
+        None if report.output_paths.is_empty() => format!("{marker} {}", report.tool),
+        None => {
+            let paths = report
+                .output_paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{marker} {} -> {paths}", report.tool)
+        }
+    }
+}
 
 /// Format one tool's result. `colored` forces ANSI styling on/off deterministically
 /// (independent of ambient TTY detection) so callers control color per Global Constraints.
@@ -175,6 +217,13 @@ impl ProgressUi {
             eprintln!("Done \u{2014} {total} tools in {}", fmt_dur(dur)); // —
         }
     }
+
+    /// An external tool (Hayabusa/Takajo) invocation finished. Always printed, same as
+    /// `host_header` — external-tool failures previously vanished into the manifest with
+    /// no console trace at all, which is exactly the gap this closes.
+    pub fn external_tool_finished(&self, report: &ExternalToolReport) {
+        eprintln!("{}", external_tool_line(report, self.color));
+    }
 }
 
 #[cfg(test)]
@@ -246,6 +295,55 @@ mod tests {
             s.contains('\u{1b}'),
             "expected ANSI escape when colored=true"
         );
+    }
+
+    fn ext_report(
+        tool: &str,
+        found: bool,
+        error: Option<&str>,
+        output_paths: Vec<std::path::PathBuf>,
+    ) -> ExternalToolReport {
+        ExternalToolReport {
+            tool: tool.to_string(),
+            found,
+            invoked: found,
+            exit_code: found.then_some(if error.is_some() { 1 } else { 0 }),
+            output_paths,
+            error: error.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn external_tool_line_not_found_is_distinct_from_failure() {
+        let s = external_tool_line(&ext_report("hayabusa", false, None, vec![]), false);
+        assert!(s.contains("hayabusa"));
+        assert!(s.contains("not found on PATH"));
+    }
+
+    #[test]
+    fn external_tool_line_success_shows_output_paths() {
+        let s = external_tool_line(
+            &ext_report(
+                "hayabusa-csv",
+                true,
+                None,
+                vec![std::path::PathBuf::from("/out/timeline.csv")],
+            ),
+            false,
+        );
+        assert!(s.starts_with('\u{2714}')); // ✔
+        assert!(s.contains("hayabusa-csv"));
+        assert!(s.contains("/out/timeline.csv"));
+    }
+
+    #[test]
+    fn external_tool_line_failure_shows_error_text() {
+        let s = external_tool_line(
+            &ext_report("hayabusa-json", true, Some("exited with status 1"), vec![]),
+            false,
+        );
+        assert!(s.starts_with('\u{2718}')); // ✘
+        assert!(s.contains("exited with status 1"));
     }
 
     #[test]

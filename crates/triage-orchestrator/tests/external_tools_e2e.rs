@@ -95,7 +95,8 @@ enabled = false
 
     let manifest_text =
         fs::read_to_string(out.join("run_manifest.json")).expect("manifest must be written");
-    // hayabusa ran (csv-timeline only; json defaults true too, so both should appear)
+    // hayabusa ran (csv only checked here; json/logon_summary default true too, so all
+    // three should appear in the manifest alongside this one)
     assert!(
         manifest_text.contains("\"tool\": \"hayabusa-csv\""),
         "manifest missing hayabusa-csv entry: {manifest_text}"

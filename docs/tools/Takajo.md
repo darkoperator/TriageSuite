@@ -40,8 +40,8 @@ later design.
 ## Dependency on Hayabusa
 
 Takajo does not read raw evidence. `automagic -t` requires Hayabusa's JSONL timeline as input,
-so Takajo can only run after a Hayabusa `json-timeline` invocation has produced one for that
-host.
+so Takajo can only run after Hayabusa's `json`-triggered `dfir-timeline` invocation has
+produced one for that host.
 
 The orchestrator enforces this at two points:
 
@@ -51,7 +51,7 @@ The orchestrator enforces this at two points:
   active profile — which is a hard config-load error (`ExternalConfig::resolve` returns
   `Err(ConfigError(...))` mentioning both `takajo` and `hayabusa.json`), not a silent skip.
 - **Run time:** even with valid config, the orchestrator only chains Takajo if Hayabusa's
-  `json-timeline` invocation actually produced a `.jsonl` file on disk for that host — checked
+  `json`-triggered `dfir-timeline` invocation actually produced a `.jsonl` file on disk for that host — checked
   with `out_file.is_file()`, not merely "the Hayabusa subprocess exited zero with no error." A
   Hayabusa run that reports success but, for whatever reason, leaves no JSONL file behind still
   causes Takajo to be skipped for that host, with a reported reason (see Manifest reporting
@@ -61,7 +61,8 @@ The orchestrator enforces this at two points:
 
 Takajo needs no configuration to run: with no `[takajo]` table and no `--config` at all, the
 orchestrator behaves as though `[takajo]` were present with every field at its default —
-`enabled = true`. Concretely, per host, after Hayabusa's `json-timeline` invocation:
+`enabled = true`. Concretely, per host, after Hayabusa's `json`-triggered `dfir-timeline`
+invocation:
 
 1. The orchestrator looks up the `takajo` binary — a bare name is resolved by scanning `PATH`
    for the first matching executable file; an explicit path (anything containing a path

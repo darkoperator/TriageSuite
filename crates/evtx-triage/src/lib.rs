@@ -25,6 +25,8 @@ pub const DATASETS: &[DatasetSpec] = &[DatasetSpec {
 pub struct EvtxTool {
     pub maps: MapIndex,
     pub opts: ParseOptions,
+    /// Additive: when true, every event is also written to a per-source-file dataset,
+    /// alongside (not instead of) the combined "events" dataset.
     pub split: bool,
     /// Used output stems for `--split` collision handling across per-file parse calls.
     pub used_stems: Mutex<HashSet<String>>,
@@ -106,13 +108,14 @@ impl Tool for EvtxTool {
             message: e.to_string(),
         };
 
+        // --split is additive, not exclusive: every event always goes to the aggregate
+        // "events" dataset, and also to a per-source-file dataset when --split is set.
         let split_stem = self.split.then(|| self.allocate_stem(path));
         let mut count = 0u64;
         match triage_evtx::visit_evtx_file(path, &self.opts, &self.maps, &mut |rec| {
+            out.write("events", &rec)?;
             if let Some(stem) = &split_stem {
                 out.write_dynamic_record(stem, &rec)?;
-            } else {
-                out.write("events", &rec)?;
             }
             count += 1;
             Ok::<(), TriageError>(())

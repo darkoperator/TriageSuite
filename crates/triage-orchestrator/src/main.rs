@@ -229,6 +229,9 @@ fn main() {
                     host,
                     &out,
                 );
+                for report in &external_tools {
+                    ui.external_tool_finished(report);
+                }
                 host_entries.push(triage_orchestrator::manifest::HostEntry {
                     host: host.host.clone(),
                     output_id: host.output_id.clone(),

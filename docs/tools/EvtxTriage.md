@@ -19,7 +19,7 @@ EvtxTriage takes TriageSuite's shared input/output flags (`-d`/`--directory` or 
 | Flag | Description |
 |---|---|
 | `--maps <DIR>` | Maps directory override. Default: the bundled corpus embedded at compile time. |
-| `--split` | Write one output file per source `.evtx`, named after the source file, instead of one aggregate output. |
+| `--split` | Also write one output file per source `.evtx`, named after the source file, in addition to the combined aggregate output. |
 | `--sync` | Refresh the bundled maps corpus from GitHub (EricZimmerman/evtx), then exit — does not parse any `.evtx` files. |
 | `--id <IDS>` | Include only these Event IDs (comma-separated). |
 | `--ex <IDS>` | Exclude these Event IDs (comma-separated). |
@@ -48,7 +48,7 @@ EvtxTriage uses TriageSuite's shared output layout (`triage-core`'s `OutputLayou
 The single dataset is named `events`, with default basename `EvtxTriage_Output` and NDJSON framing for JSON output. Confirmed from the integration tests:
 
 - Default (aggregate) run: a run-stamped file such as `<YYYYMMDDHHmmss>_EvtxTriage_Output.csv` / `.json`.
-- `--split`: one file per source `.evtx`, named `<source-stem>_system.csv` / `.json` (flat mode folds the `system` identity into the name) — the aggregate `..._EvtxTriage_Output.*` file is not produced in this mode.
+- `--split` is additive: it adds one file per source `.evtx`, named `<source-stem>_system.csv` / `.json` (flat mode folds the `system` identity into the name), alongside — not instead of — the aggregate `..._EvtxTriage_Output.*` file, which is still produced.
 - `--csvf`/`--jsonf` override the basename portion of the aggregate filename.
 
 ## Output fields
@@ -101,7 +101,8 @@ EvtxTriage -d /evidence/capture --csv /out/evtx \
   --ch Security --id 4624,4625,4634 \
   --sd 2026-01-01T00:00:00Z --ed 2026-01-31T23:59:59Z
 
-# One output file per source .evtx, using a locally maintained maps directory
+# Also emit one output file per source .evtx (alongside the aggregate), using a
+# locally maintained maps directory
 EvtxTriage -d /evidence/capture --csv /out/evtx --split --maps /opt/evtx-maps
 
 # Refresh the bundled maps corpus from EricZimmerman/evtx (then rebuild to embed it)

@@ -8,6 +8,10 @@ sample_files/
 /target
 **/*.rs.bk
 
+# .NET build artifacts (scripts/guid_extractor)
+**/obj/
+**/bin/
+
 # Local tool output
 /output/
 /results/

@@ -8,6 +8,7 @@ pub struct HayabusaConfig {
     pub enabled: bool,
     pub csv: bool,
     pub json: bool,
+    pub logon_summary: bool,
     pub rules: Option<String>,
     pub rules_config: Option<String>,
     pub min_level: Option<String>,
@@ -33,6 +34,7 @@ impl Default for HayabusaConfig {
             enabled: true,
             csv: true,
             json: true,
+            logon_summary: true,
             rules: None,
             rules_config: None,
             min_level: None,
@@ -60,6 +62,7 @@ pub struct HayabusaOverlay {
     pub enabled: Option<bool>,
     pub csv: Option<bool>,
     pub json: Option<bool>,
+    pub logon_summary: Option<bool>,
     pub rules: Option<String>,
     pub rules_config: Option<String>,
     pub min_level: Option<String>,
@@ -87,6 +90,7 @@ impl HayabusaConfig {
             enabled: overlay.enabled.unwrap_or(self.enabled),
             csv: overlay.csv.unwrap_or(self.csv),
             json: overlay.json.unwrap_or(self.json),
+            logon_summary: overlay.logon_summary.unwrap_or(self.logon_summary),
             rules: overlay.rules.clone().or_else(|| self.rules.clone()),
             rules_config: overlay
                 .rules_config

@@ -7,7 +7,8 @@ pub struct EvtxArgs {
     #[arg(long)]
     pub maps: Option<PathBuf>,
 
-    /// Write one output file per source .evtx, named after the source file
+    /// Also write one output file per source .evtx, named after the source file,
+    /// in addition to the combined aggregate output
     #[arg(long)]
     pub split: bool,
 

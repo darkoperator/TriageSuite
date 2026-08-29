@@ -104,7 +104,7 @@ fn aggregate_csv_header_when_evidence_present() {
 }
 
 #[test]
-fn split_writes_per_source_file_when_evidence_present() {
+fn split_writes_per_source_file_in_addition_to_the_aggregate_when_evidence_present() {
     let Some(evtx) = populated_evtx() else { return };
     // Isolate a single populated log into its own dir so --split is fast + deterministic.
     let src = tempfile::tempdir().unwrap();
@@ -134,8 +134,9 @@ fn split_writes_per_source_file_when_evidence_present() {
         csvs.iter().any(|n| n == &format!("{stem}_system.csv")),
         "expected per-source {stem}_system.csv; got {csvs:?}"
     );
+    // --split is additive: the combined aggregate output is still produced too.
     assert!(
-        !csvs.iter().any(|n| n.ends_with("_EvtxTriage_Output.csv")),
-        "split must not emit the aggregate name"
+        csvs.iter().any(|n| n.ends_with("_EvtxTriage_Output.csv")),
+        "expected the aggregate EvtxTriage_Output.csv alongside the per-source file; got {csvs:?}"
     );
 }
