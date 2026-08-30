@@ -129,7 +129,7 @@ pub fn prepare(
         (vec![capture.to_path_buf()], None)
     } else if capture.is_dir() {
         (
-            archive::find_archives(capture, &[extracted_root.clone()]),
+            archive::find_archives(capture, std::slice::from_ref(&extracted_root)),
             Some(capture.to_path_buf()),
         )
     } else {
