@@ -6,9 +6,11 @@
 //! or `--no-progress` is set. Never affects parsing, the manifest, or exit
 //! codes.
 
+use crate::archive::ExtractReport;
 use crate::execute::ToolRunResult;
 use crate::external::ExternalToolReport;
 use std::io::IsTerminal;
+use std::path::Path;
 
 /// Format one external tool's report (Hayabusa/Takajo). Same three-state shape as
 /// `summary_line`, plus a fourth ("not found on PATH") this crate's external tools can
@@ -224,6 +226,127 @@ impl ProgressUi {
     pub fn external_tool_finished(&self, report: &ExternalToolReport) {
         eprintln!("{}", external_tool_line(report, self.color));
     }
+
+    /// Extraction of an archive began (shown only with decorations). Worth
+    /// announcing because a multi-GB archive can take minutes, and the
+    /// append-only contract rules out a spinner.
+    pub fn archive_started(&self, archive: &Path, entries: usize, declared: Option<u128>) {
+        if !self.decorate {
+            return;
+        }
+        let name = file_name_of(archive);
+        match declared {
+            Some(total) => eprintln!(
+                "\u{25B6} Extracting {name} ({entries} entries, {})",
+                fmt_bytes(total)
+            ),
+            None => eprintln!("\u{25B6} Extracting {name} ({entries} entries)"),
+        }
+    }
+
+    /// Periodic heartbeat during a long extraction (decorations only). Appends
+    /// a line rather than repainting one, per the module contract.
+    pub fn archive_progress(&self, done: u64, total: Option<u128>) {
+        if !self.decorate {
+            return;
+        }
+        match total {
+            Some(t) if t > 0 => {
+                let pct = (done as u128 * 100 / t).min(100);
+                eprintln!(
+                    "  \u{2026} {pct}% ({} / {})",
+                    fmt_bytes(done as u128),
+                    fmt_bytes(t)
+                );
+            }
+            _ => eprintln!("  \u{2026} {}", fmt_bytes(done as u128)),
+        }
+    }
+
+    /// Extraction finished. Always printed, for the same reason as
+    /// `external_tool_finished`: an archive that yields no host must never be
+    /// invisible, including under `--no-progress`.
+    pub fn archive_finished(&self, report: &ExtractReport) {
+        eprintln!("{}", archive_line(report, self.color));
+    }
+
+    /// An archive was skipped. Always printed, same rationale.
+    pub fn archive_skipped(&self, archive: &Path, reason: &str) {
+        eprintln!("{}", archive_skip_line(archive, reason, self.color));
+    }
+}
+
+fn file_name_of(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Human-readable byte count: "3.4 GiB".
+fn fmt_bytes(n: u128) -> String {
+    const KIB: u128 = 1024;
+    const MIB: u128 = KIB * 1024;
+    const GIB: u128 = MIB * 1024;
+    const TIB: u128 = GIB * 1024;
+    if n >= TIB {
+        format!("{:.1} TiB", n as f64 / TIB as f64)
+    } else if n >= GIB {
+        format!("{:.1} GiB", n as f64 / GIB as f64)
+    } else if n >= MIB {
+        format!("{:.1} MiB", n as f64 / MIB as f64)
+    } else if n >= KIB {
+        format!("{:.1} KiB", n as f64 / KIB as f64)
+    } else {
+        format!("{n} B")
+    }
+}
+
+fn glyph(marker: &str, colored: bool, style: fn(console::Style) -> console::Style) -> String {
+    if colored {
+        style(console::Style::new().force_styling(true))
+            .apply_to(marker)
+            .to_string()
+    } else {
+        marker.to_string()
+    }
+}
+
+/// One line describing an extraction outcome, in the same shape as
+/// `summary_line`/`external_tool_line` so it can be unit-tested without a TTY.
+pub fn archive_line(report: &ExtractReport, colored: bool) -> String {
+    let name = file_name_of(&report.archive);
+    if let Some(err) = &report.error {
+        let marker = glyph("\u{2718}", colored, |s| s.red()); // ✘
+        return format!("{marker} {name} extraction failed: {err}");
+    }
+    let dest = file_name_of(&report.dest);
+    if report.reused {
+        // Yellow ○, matching "not found on PATH, skipped": we did no work.
+        let marker = glyph("\u{25CB}", colored, |s| s.yellow());
+        return format!("{marker} {name} reusing existing extraction at _extracted/{dest}");
+    }
+    let marker = glyph("\u{2714}", colored, |s| s.green()); // ✔
+    let verb = if report.re_extracted {
+        "re-extracted"
+    } else {
+        "extracted"
+    };
+    let mut line = format!(
+        "{marker} {name} -> _extracted/{dest} ({verb}, {} files, {}, {})",
+        report.files_written,
+        fmt_bytes(report.bytes_written as u128),
+        fmt_dur(report.duration)
+    );
+    if report.skipped_entries > 0 {
+        line.push_str(&format!("; {} entries skipped", report.skipped_entries));
+    }
+    line
+}
+
+/// One line describing a skipped archive.
+pub fn archive_skip_line(archive: &Path, reason: &str, colored: bool) -> String {
+    let marker = glyph("\u{25CB}", colored, |s| s.yellow()); // ○
+    format!("{marker} {} skipped: {reason}", file_name_of(archive))
 }
 
 #[cfg(test)]

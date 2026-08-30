@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Build all TriageSuite forensic tools for 5 platforms and package per-platform
 # release archives + checksums. Run from anywhere; resolves the repo root itself.
+# Each archive also bundles README.md, docs/tools/*.md, and triage.example.toml
+# alongside the binaries.
 #
 # Usage:
 #   scripts/build-release.sh                 # all 5 targets
@@ -107,6 +109,10 @@ for target in "${TARGETS[@]}"; do
     [[ -f "$src" ]] || die "missing built binary: $src"
     cp "$src" "$stage/"
   done
+
+  cp "$REPO_ROOT/README.md" "$stage/"
+  cp "$REPO_ROOT/triage.example.toml" "$stage/"
+  cp -r "$REPO_ROOT/docs/tools" "$stage/docs"
 
   if is_windows "$target"; then
     archive="$name.zip"

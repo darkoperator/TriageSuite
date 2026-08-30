@@ -99,10 +99,9 @@ these 4 fields; unset overlay fields fall through to the base `[takajo]` table's
 ## Execution requirements discovered via live testing
 
 Two real requirements were found by running the orchestrator against the actual `takajo`
-binary (Takajo 2.16.1) — neither is documented in Takajo's own `--help` text in an obvious way,
-and neither is captured in the earlier design spec (`docs/superpowers/specs/2026-08-22-hayabusa-takajo-config-design.md`),
-which predates this testing. Both are handled automatically by the orchestrator; they matter to
-you only if you plan to invoke Takajo by hand outside of TriageSuite.
+binary (Takajo 2.16.1) — neither is documented in Takajo's own `--help` text in an obvious way.
+Both are handled automatically by the orchestrator; they matter to you only if you plan to
+invoke Takajo by hand outside of TriageSuite.
 
 1. **Working directory must be Takajo's own install directory.** Takajo checks that its own
    executable exists relative to the process's current working directory and refuses to run

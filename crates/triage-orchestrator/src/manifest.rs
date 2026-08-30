@@ -11,7 +11,30 @@ pub struct Manifest {
     pub finished_utc: String,
     pub capture_type: String,
     pub final_exit_status: i32,
+    /// Input archives seen this run. Omitted entirely when the capture was
+    /// already an unzipped directory, so those manifests are unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub archives: Vec<ArchiveEntry>,
     pub hosts: Vec<HostEntry>,
+}
+
+/// Chain-of-custody record for one input `.zip`.
+#[derive(Serialize)]
+pub struct ArchiveEntry {
+    pub archive: String,
+    pub archive_path: String,
+    pub size_bytes: u64,
+    /// "extracted" | "re-extracted" | "reused" | "skipped" | "failed"
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extracted_to: Option<String>,
+    pub files_written: u64,
+    pub bytes_written: u64,
+    pub skipped_entries: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_reasons: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -20,6 +43,9 @@ pub struct HostEntry {
     pub output_id: String,
     pub os: String,
     pub collection: String,
+    /// Set when this host was extracted from an archive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_archive: Option<String>,
     pub inaccessible_entries: u64,
     pub tools: Vec<ToolEntryReport>,
     pub external_tools: Vec<crate::external::ExternalToolReport>,
@@ -63,12 +89,14 @@ pub fn run_id() -> String {
     chrono::Utc::now().format("%Y%m%d%H%M%S%3f").to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     capture_type: CaptureType,
     run_id: &str,
     started: &str,
     finished: &str,
     final_exit_status: i32,
+    archives: Vec<ArchiveEntry>,
     hosts: Vec<HostEntry>,
 ) -> Manifest {
     let ty = match capture_type {
@@ -76,15 +104,74 @@ pub fn build(
         CaptureType::Raw => "raw",
     };
     Manifest {
-        schema_version: 1,
+        // 2: added `archives[]` and `hosts[].source_archive` for zip input.
+        schema_version: 2,
         run_id: run_id.to_string(),
         orchestrator_version: env!("CARGO_PKG_VERSION").to_string(),
         started_utc: started.to_string(),
         finished_utc: finished.to_string(),
         capture_type: ty.to_string(),
         final_exit_status,
+        archives,
         hosts,
     }
+}
+
+/// Build the manifest's archive records from what `input::prepare` did.
+pub fn archive_entries(
+    extractions: &[crate::archive::ExtractReport],
+    skipped: &[crate::input::SkippedArchive],
+    out_root: &Path,
+) -> Vec<ArchiveEntry> {
+    let name_of = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut entries: Vec<ArchiveEntry> = Vec::new();
+    for r in extractions {
+        let status = if r.error.is_some() {
+            "failed"
+        } else if r.reused {
+            "reused"
+        } else if r.re_extracted {
+            "re-extracted"
+        } else {
+            "extracted"
+        };
+        entries.push(ArchiveEntry {
+            archive: name_of(&r.archive),
+            archive_path: r.archive.display().to_string(),
+            size_bytes: std::fs::metadata(&r.archive).map(|m| m.len()).unwrap_or(0),
+            status: status.to_string(),
+            extracted_to: r
+                .dest
+                .strip_prefix(out_root)
+                .ok()
+                .map(|p| p.display().to_string()),
+            files_written: r.files_written,
+            bytes_written: r.bytes_written,
+            skipped_entries: r.skipped_entries,
+            skipped_reasons: r.skipped_reasons.clone(),
+            error: r.error.clone(),
+        });
+    }
+    for s in skipped {
+        entries.push(ArchiveEntry {
+            archive: name_of(&s.archive),
+            archive_path: s.archive.display().to_string(),
+            size_bytes: std::fs::metadata(&s.archive).map(|m| m.len()).unwrap_or(0),
+            status: "skipped".to_string(),
+            extracted_to: None,
+            files_written: 0,
+            bytes_written: 0,
+            skipped_entries: 0,
+            skipped_reasons: Vec::new(),
+            error: Some(s.reason.clone()),
+        });
+    }
+    entries.sort_by(|a, b| a.archive.cmp(&b.archive));
+    entries
 }
 
 pub fn write(manifest: &Manifest, out_root: &Path) -> Result<(), String> {
@@ -144,6 +231,7 @@ mod tests {
             output_id: "H".into(),
             os: "Windows 11".into(),
             collection: "Collection-H".into(),
+            source_archive: None,
             inaccessible_entries: 0,
             tools: vec![ToolEntryReport {
                 tool: "PETriage".into(),
@@ -177,6 +265,7 @@ mod tests {
             "T0",
             "T1",
             0,
+            Vec::new(),
             vec![host],
         );
         write(&m, td.path()).unwrap();

@@ -18,7 +18,8 @@ struct Cli {
 enum Command {
     /// Detect a capture and run all applicable parsers over it
     Run {
-        /// Capture directory (a Velociraptor collection or a folder of collections)
+        /// Capture: a Velociraptor collection, a folder of collections, a .zip
+        /// collection, or a folder of .zip captures
         capture: PathBuf,
         /// Output root
         #[arg(long)]
@@ -50,7 +51,7 @@ enum Command {
         /// Inspect every file for SQLite content (requires --only sqle or a list containing sqle)
         #[arg(long, requires = "only")]
         hunt: bool,
-        /// Optional TOML config for hayabusa/takajo (see docs/superpowers/specs/2026-08-22-hayabusa-takajo-config-design.md)
+        /// Optional TOML config for hayabusa/takajo (see docs/tools/TriageSuite.md, "Config and profiles")
         #[arg(long)]
         config: Option<PathBuf>,
         /// Named profile to apply from --config (must exist under [profiles.<name>])
@@ -87,13 +88,6 @@ fn main() {
             let csv_root = want_csv.then(|| out.clone());
             let json_root = want_json.then(|| out.clone());
 
-            let (capture_type, hosts) = match triage_orchestrator::capture::enumerate(&capture) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(3);
-                }
-            };
             // `hayabusa`/`takajo` are external-tool keys, not in-process `Tool` registry keys
             // (`registry::ALL_KEYS`), so they must not reach `select_with_hunt`'s --only/--skip
             // validation (it would reject them as unknown). Strip them out for that call only;
@@ -171,17 +165,47 @@ fn main() {
             };
 
             let ui = triage_orchestrator::progress_ui::ProgressUi::new(no_progress);
+
+            // Resolve the input last, after every cheap validation above: a
+            // typo'd --only or a malformed --config must fail in milliseconds,
+            // not after extracting hundreds of gigabytes.
+            let prep_opts = triage_orchestrator::input::PrepareOptions {
+                reuse_existing: !overwrite,
+                ..Default::default()
+            };
+            let prepared =
+                match triage_orchestrator::input::prepare(&capture, &out, &prep_opts, &ui) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(triage_core::error::RunExit::InputMissing.code());
+                    }
+                };
+            let capture_type = prepared.capture_type;
+            let hosts = &prepared.hosts;
+
             let mut host_entries = Vec::new();
             let mut successful_artifacts = 0u64;
             let mut failed_artifacts = 0u64;
             let mut terminal_exit = None;
-            for host in &hosts {
+            for host in hosts {
                 ui.host_header(&host.host, &host.os);
                 // Exclude the output root from discovery if it lives under the capture.
-                let exclude: Vec<PathBuf> = [csv_root.clone(), json_root.clone()]
-                    .into_iter()
-                    .flatten()
-                    .collect();
+                //
+                // An extracted archive's artifact root lives *inside* the output
+                // root (`<out>/_extracted/...`), so excluding `<out>` wholesale
+                // would hide the very evidence we just unpacked. Drop any exclude
+                // that contains this host's artifact root; tool output never lands
+                // under it, so nothing self-discovers.
+                let exclude: Vec<PathBuf> = [
+                    csv_root.clone(),
+                    json_root.clone(),
+                    Some(out.join(triage_orchestrator::input::EXTRACTED_DIR)),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|p| !host.artifact_root.starts_with(p))
+                .collect();
                 let index = triage_orchestrator::execute::build_index(
                     &host.artifact_root,
                     &tools,
@@ -241,6 +265,10 @@ fn main() {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default(),
+                    source_archive: host
+                        .source_archive
+                        .as_ref()
+                        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())),
                     inaccessible_entries: index.inaccessible,
                     tools: tool_reports,
                     external_tools,
@@ -258,6 +286,11 @@ fn main() {
                 &started,
                 &finished,
                 exit.code(),
+                triage_orchestrator::manifest::archive_entries(
+                    &prepared.extractions,
+                    &prepared.skipped,
+                    &out,
+                ),
                 host_entries,
             );
             if let Err(e) = triage_orchestrator::manifest::write(&manifest, &out) {

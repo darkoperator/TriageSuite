@@ -4,7 +4,8 @@ TriageSuite is the orchestrator binary for the workspace: rather than parsing on
 it auto-detects a forensic capture and runs every applicable TriageSuite parser over it in a
 single command. Captures are detected automatically — a Velociraptor collection (with
 `uploads.json` and `client_info.json`) triggers collection mode; a directory containing one or
-more Velociraptor collections triggers multi-host folder mode; any other directory falls back to
+more Velociraptor collections triggers multi-host folder mode; a `.zip` collection, or a folder
+of them, is extracted first and then treated the same way; any other directory falls back to
 raw mounted-tree mode (treated as a single host). The orchestrator manages output routing per
 host and per tool, bounded parallelism, output formats (CSV or NDJSON), an optional post-pass of
 two external forensic binaries (Hayabusa and Takajo), and produces a `run_manifest.json`
@@ -14,8 +15,8 @@ chain-of-custody report with per-tool counts, file statistics, and execution out
 
 ```
 Input (required):
-  <CAPTURE>              Capture directory (a Velociraptor collection, folder of collections,
-                         or mounted raw tree)
+  <CAPTURE>              A Velociraptor collection, a folder of collections, a .zip
+                         collection, a folder of .zip captures, or a mounted raw tree
 
 Output (required):
   --out <OUT>            Output root
@@ -73,6 +74,149 @@ stages, not in-process `Tool` implementations — so `--only hayabusa` (or any `
 them) is rejected as an unknown key. They can, however, be named in `--skip` as a special-cased
 force-disable; see below.
 
+## Collecting a capture (Velociraptor offline collector)
+
+TriageSuite consumes a collection; it does not create one. This section covers the minimum an
+offline collector has to be configured with for the parsers to have something to work on.
+
+### What the orchestrator requires structurally
+
+Collection mode is detected by **two files at the collection root**: `uploads.json` and
+`client_info.json`. Both must be present, and collected files must live under `uploads/`.
+`client_info.json` supplies `Hostname`, `Platform`, and `PlatformVersion`, which become the
+per-host output directory name and the OS string in `run_manifest.json`. The Velociraptor offline
+collector produces all of this by default — the practical requirement is simply *don't hand
+TriageSuite a re-zipped subfolder that lost those two files*.
+
+If those files are absent, the directory is still processed as a **raw mounted tree** (single
+host, named after the directory). Parsing works identically; only host/OS attribution is lost.
+
+### Discovery is filename-based, not path-based
+
+Each parser declares filename globs, and discovery walks the capture recursively matching the
+**filename component only** — path-component patterns never match. Two consequences:
+
+- The collector's directory layout is irrelevant. Velociraptor's URL-encoded layout
+  (`uploads/auto/C%3A/Windows/...`, `uploads/ntfs/%5C%5C.%5CC%3A/...`) works as-is, and so does
+  any other nesting.
+- Filenames must survive collection intact. A collector that renames or flattens artifacts (e.g.
+  writing `SYSTEM` as `SYSTEM_hostname.bin`) makes them invisible to discovery.
+
+### Minimum artifact set
+
+Everything below maps to `Windows.KapeFiles.Targets` target names. Enabling the compound
+`_KapeTriage` target plus a `Device` list covers every row in this table in one step, and is the
+recommended baseline.
+
+| Key | Artifact | Typical source | KapeFiles target |
+|---|---|---|---|
+| `mft` | `$MFT`, `$Boot`, `$UsnJrnl:$J` | volume root, via the NTFS accessor | `_MFT`, `_Boot`, `_J` |
+| `evtx` | `*.evtx` | `C:\Windows\System32\winevt\Logs\` | `EventLogs` |
+| `re` | `NTUSER.DAT`, `UsrClass.dat`, `SOFTWARE`, `SYSTEM`, `SAM`, `SECURITY`, `DEFAULT` | `C:\Windows\System32\config\`, user profiles | `RegistryHives` (or `RegistryHivesSystem` + `RegistryHivesUser`) |
+| `sbe` | `NTUSER.DAT`, `UsrClass.dat` | user profiles | as above |
+| `acc` | `SYSTEM` | `C:\Windows\System32\config\SYSTEM` | `RegistryHivesSystem` |
+| `amc` | `Amcache.hve` | `C:\Windows\AppCompat\Programs\` | `Amcache` |
+| `pe` | `*.pf` | `C:\Windows\Prefetch\` | `Prefetch` |
+| `le` | `*.lnk` | Recent / Desktop / Office MRU paths | `LNKFilesAndJumpLists` |
+| `jle` | `*.automaticDestinations-ms`, `*.customDestinations-ms` | `...\Recent\AutomaticDestinations\` | `LNKFilesAndJumpLists`, `JumpLists` |
+| `rb` | `$I*`, `INFO2` | `C:\$Recycle.Bin\<SID>\` | `RecycleBin_InfoFiles` (or `RecycleBin`) |
+| `srum` | `SRUDB.dat` | `C:\Windows\System32\sru\` | `SRUM` |
+| `sum` | `SystemIdentity.mdb`, `Current.mdb`, role `{GUID}.mdb` | `C:\Windows\System32\LogFiles\Sum\` | `SUM` |
+| `wxt` | `ActivitiesCache.db` | `...\ConnectedDevicesPlatform\L.<user>\` | `WindowsTimeline` |
+| `sqle` | `*.db`, `*.sqlite`, `History`, `Cookies`, … | application data paths | `SQLiteDatabases` (tool is opt-in; see above) |
+
+Compound targets are spelled with a leading underscore (`_KapeTriage`, `_SANS_Triage`,
+`_BasicCollection`), as are the NTFS meta-file targets (`_MFT`, `_Boot`, `_J`). Individual targets
+are not. Target names drift between KapeFiles/Velociraptor versions — check the artifact's own
+parameter list in your Velociraptor instance rather than assuming this table's spelling.
+
+### Companion files that are easy to miss
+
+Several parsers read files they never advertise in their discovery patterns. Collecting only the
+"main" artifact silently degrades output rather than failing loudly:
+
+- **Registry transaction logs.** `RETriage` and `SBETriage` replay `.LOG1`/`.LOG2` siblings of
+  each primary hive by default, so a hive collected without its logs is missing the most recent,
+  not-yet-flushed writes. The `RegistryHives*` targets collect these already; a hand-rolled
+  file-copy collector usually does not. (`--no-logs` opts out of replay.)
+- **The whole `Sum\` directory.** `SumETriage` is *discovered* on `SystemIdentity.mdb`, but then
+  reads `Current.mdb` and each chained role `{GUID}.mdb` from the same directory. Collecting only
+  `SystemIdentity.mdb` yields identity rows with no usage detail.
+- **The `SOFTWARE` hive, for SRUM.** `SrumETriage` resolves SIDs to usernames from the closest
+  `SOFTWARE` hive in the same capture subtree. Without it, SRUM output still parses but user
+  attribution falls back to raw SIDs.
+
+### Expect artifacts to be legitimately absent
+
+Some artifacts do not exist on a given host, and a parser reporting zero files is not a collection
+failure:
+
+- **Prefetch is disabled by default on Windows Server.** A server capture normally yields no
+  `*.pf` at all, while a workstation yields hundreds.
+- **SUM/UAL is a Windows Server role artifact.** `C:\Windows\System32\LogFiles\Sum\` does not
+  exist on client Windows.
+- **`$I` Recycle Bin files only exist for currently-deleted items.** An empty recycle bin
+  collects nothing.
+
+### ZIP archive input
+
+The offline collector ships captures as ZIPs, and `run` takes them directly — a single `.zip`,
+a folder of them, or a folder mixing `.zip`s with already-unzipped collections:
+
+```bash
+TriageSuite run ./Collection-HOST1.zip --out ./results --csv
+TriageSuite run ./engagement-zips     --out ./results --csv   # one run, every host
+```
+
+Archives are extracted to **`<out>/_extracted/<archive-name>/`** and **kept** after the run, so
+a re-run costs no extraction. Three consequences worth planning for:
+
+- **Disk.** The extracted copy roughly doubles storage for the capture, and a folder of
+  multi-GB archives is extracted in full. `_extracted/` is safe to delete between runs.
+- **Re-runs reuse.** A marker file records the source archive's name, size and mtime. A second
+  run reuses the extraction (`○ … reusing existing extraction`). If the archive changed, the
+  stale copy is **refused** rather than silently parsed — rerun with `--overwrite` to re-extract.
+  An interrupted extraction leaves no marker and is likewise refused, never treated as complete.
+- **`--overwrite` also forces re-extraction.** Previously it governed only tool output files.
+
+Both internal layouts are accepted: the collection at the archive root (what the collector
+writes) and a collection under a single wrapper directory (what re-zipping usually produces).
+A zip of a *folder of collections* works too.
+
+**Skipping.** An archive that isn't usable is reported and skipped; the run continues and its
+exit code is unaffected:
+
+```
+✔ Collection-HOST1.zip -> _extracted/Collection-HOST1 (extracted, 1284 files, 3.4 GiB, 47s)
+○ notes.zip skipped: no Velociraptor collection inside (uploads.json + client_info.json not found)
+○ broken.zip skipped: not a valid zip archive (invalid Zip archive: Could not find EOCD)
+```
+
+The one exception: if **nothing** usable is found anywhere, the run exits `3` with
+`no usable capture found in <path> (N archive(s) skipped)` rather than reporting an empty
+success — so a wrong path or a bad drop folder fails loudly in automation.
+
+**Limits.** Unencrypted archives only; an encrypted one is skipped with a clear message.
+Entries that would escape the destination (zip-slip), symlink entries, and entries using an
+unsupported compression method are skipped individually without aborting the archive. Entry
+names are written verbatim, never percent-decoded, since discovery matches on filename alone.
+
+### Worked example
+
+The configuration used for the captures this tooling was developed against:
+
+```
+Artifact: Windows.KapeFiles.Targets
+  Device:       C:,D:
+  _KapeTriage:  Y
+```
+
+That single target produced `$MFT`/`$Boot`/`$UsnJrnl:$J`, every system and user registry hive
+with transaction logs, `Amcache.hve`, several hundred `.evtx`, `.lnk` and jump lists, `SRUDB.dat`,
+the full `Sum\` directory, and `ActivitiesCache.db` — i.e. input for every parser in the table
+above. Add other artifacts (process/network/service collectors) freely; TriageSuite ignores
+anything that doesn't match a parser's patterns.
+
 ## External tools (Hayabusa / Takajo)
 
 After a host's normal in-process tools finish, the orchestrator can optionally invoke two
@@ -128,7 +272,8 @@ configuration; an explicit contradiction (`hayabusa.json = false` with `takajo.e
 in the base table or an active profile) is a config-load error and exits with code `2`, not a
 silent skip.
 
-Worked example (base tables plus one named profile):
+Worked example (base tables plus one named profile) — also shipped as `triage.example.toml`
+alongside the binaries in each release archive:
 
 ```toml
 # triage.toml — optional; a bare `triagesuite run <capture> --out <dir>` works with none of this.
@@ -240,8 +385,14 @@ When stderr is redirected (not a TTY) or when `--no-progress` is specified, plai
 
 ## Output layout
 
+`_extracted/` appears only when the input was one or more `.zip` archives; it holds the
+extracted captures and is kept after the run (see "ZIP archive input").
+
 ```
 <out>/
+  _extracted/                     # only for .zip input
+    <archive-stem>/               # the extracted capture
+    <archive-stem>.source.json    # reuse marker: source name, size, mtime
   <HOST1>/
     PETriage/
       system/
@@ -289,19 +440,35 @@ A JSON chain-of-custody report written to the output root (`<out>/run_manifest.j
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "20260710123456789",
   "orchestrator_version": "x.y.z",
   "started_utc": "ISO 8601 UTC timestamp",
   "finished_utc": "ISO 8601 UTC timestamp",
   "capture_type": "velociraptor|raw",
   "final_exit_status": 0,
+  "archives": [
+    {
+      "archive": "Collection-HOST1.zip",
+      "archive_path": "/full/path/to/Collection-HOST1.zip",
+      "size_bytes": 1705797,
+      "status": "extracted|re-extracted|reused|skipped|failed",
+      "extracted_to": "_extracted/Collection-HOST1",
+      "files_written": 1284,
+      "bytes_written": 3650722201,
+      "skipped_entries": 0,
+      "skipped_reasons": [],
+      "error": null
+    },
+    ...
+  ],
   "hosts": [
     {
       "host": "hostname",
       "output_id": "filesystem-safe-hostname",
       "os": "platform version string",
       "collection": "collection directory name",
+      "source_archive": "Collection-HOST1.zip",
       "tools": [
         {
           "tool": "PETriage",
@@ -359,14 +526,17 @@ and `6` when applicable artifacts existed but all failed.
 - `0` success (including unsupported-only discovery)
 - `2` usage (invalid flags, unknown `--only`/`--skip` key, malformed `--config` TOML, unknown
   `--profile` name, or the `takajo.enabled` / `hayabusa.json` validation conflict)
-- `3` missing input (capture path not found or not detectable)
+- `3` missing input (capture path not found or not detectable, including a `.zip` input where
+  no archive yielded a usable capture and no other collection was present)
 - `4` output/manifest failure
 - `5` mixed artifact success and failure
 - `6` applicable artifacts existed but all failed
 
 These exit codes describe the in-process tool run and manifest write; external-tool (Hayabusa /
 Takajo) outcomes are reported per-invocation in the manifest's `external_tools` array and do not
-change the process exit code.
+change the process exit code. Skipped input archives behave the same way — they are recorded in
+the manifest's `archives` array and never change the exit code, with the single exception of the
+`3` case above.
 
 ## Notes
 

@@ -470,6 +470,7 @@ mod tests {
             os: "x".into(),
             collection_dir: root.clone(),
             artifact_root: root.clone(),
+            source_archive: None,
         };
         // Empty index: nothing for files_for_tool to match.
         let idx = DiscoveryIndex {
@@ -515,6 +516,7 @@ mod tests {
             os: "x".into(),
             collection_dir: root.clone(),
             artifact_root: root.clone(),
+            source_archive: None,
         };
         let idx = DiscoveryIndex {
             candidates: HashMap::new(),
@@ -613,6 +615,7 @@ mod tests {
             os: "x".into(),
             collection_dir: root.clone(),
             artifact_root: root.clone(),
+            source_archive: None,
         };
         let entry = crate::registry::ToolEntry {
             key: "panic_tool",

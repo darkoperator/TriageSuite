@@ -41,6 +41,14 @@ nom = "7"
 rusqlite = { version = "0.32", features = ["bundled"] }
 include_dir = "0.7"
 ureq = "2"
+# Pure-Rust zip stack. default-features would pull bzip2/zstd/lzma/aes C code,
+# which the 5-target cargo-zigbuild release cannot afford. `zip`'s
+# deflate-flate2 feature enables flate2 with default-features = false, which
+# hits flate2's "you need to choose a zlib backend" compile_error, so flate2 is
+# declared directly with rust_backend (miniz_oxide — safe Rust, already in the
+# lockfile via ureq).
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 ese_parser_lib = { git = "https://github.com/darkoperator/ese_parser", package = "ese_parser_lib", rev = "7cf0ecd88740157fce9ab94dc699ed4811a29e26" }
 
 [profile.release]

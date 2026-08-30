@@ -14,6 +14,8 @@ pub struct HostCapture {
     pub os: String,
     pub collection_dir: PathBuf,
     pub artifact_root: PathBuf,
+    /// Set when this host came out of a `.zip`, for manifest provenance.
+    pub source_archive: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -56,15 +58,23 @@ fn host_from_collection(dir: &Path) -> HostCapture {
         os,
         collection_dir: dir.to_path_buf(),
         artifact_root: dir.join("uploads"),
+        source_archive: None,
     }
 }
 
-pub fn enumerate(path: &Path) -> Result<(CaptureType, Vec<HostCapture>), String> {
+/// Collections at `path`: the directory itself if it is one, otherwise its
+/// immediate children that are. No Raw fallback and no `output_id` allocation —
+/// those belong to the caller, which may be merging several roots.
+///
+/// Checking both levels is what lets an extracted archive be passed in
+/// directly, regardless of whether the collection sat at the archive root or
+/// under a wrapper directory.
+pub fn collect_collections(path: &Path) -> Vec<HostCapture> {
     if !path.is_dir() {
-        return Err(format!("not a directory: {}", path.display()));
+        return Vec::new();
     }
     if is_collection(path) {
-        return Ok((CaptureType::Velociraptor, vec![host_from_collection(path)]));
+        return vec![host_from_collection(path)];
     }
     let mut children: Vec<HostCapture> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(path) {
@@ -75,14 +85,77 @@ pub fn enumerate(path: &Path) -> Result<(CaptureType, Vec<HostCapture>), String>
             }
         }
     }
-    if !children.is_empty() {
-        children.sort_by(|a, b| a.host.cmp(&b.host));
-        let mut allocator = triage_core::attribution::ComponentAllocator::default();
-        for host in &mut children {
-            host.output_id = allocator.allocate(&host.host);
+    children
+}
+
+/// Sort deterministically and assign collision-free `output_id`s across the
+/// whole set. The `collection_dir` tie-break matters once several roots are
+/// merged: the same hostname can legitimately appear twice (once zipped, once
+/// already unzipped), and sorting on host alone would leave the allocator
+/// suffixing in `read_dir` order, i.e. non-deterministically.
+fn finalize(hosts: &mut [HostCapture]) {
+    hosts.sort_by(|a, b| {
+        a.host
+            .cmp(&b.host)
+            .then_with(|| a.collection_dir.cmp(&b.collection_dir))
+    });
+    let mut allocator = triage_core::attribution::ComponentAllocator::default();
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for host in hosts.iter_mut() {
+        let base = allocator.allocate(&host.host);
+        // ComponentAllocator disambiguates *different* hostnames that sanitize
+        // to the same component, but deliberately returns the same id for the
+        // same identity. Two distinct collections of one host therefore collide
+        // here, and would write into a single output directory — silently
+        // overwriting one capture's results with the other's. Ordinal-suffix
+        // them instead; the sort above makes the numbering deterministic.
+        let mut id = base.clone();
+        let mut n = 2u32;
+        while !used.insert(id.clone()) {
+            let suffix = format!("-{n}");
+            let keep = 80usize.saturating_sub(suffix.len());
+            let trimmed: String = base.chars().take(keep).collect();
+            id = format!("{trimmed}{suffix}");
+            n += 1;
         }
-        return Ok((CaptureType::Velociraptor, children));
+        host.output_id = id;
     }
+}
+
+/// Gather collections from several roots at once.
+///
+/// `raw_fallback` is the directory to treat as a single raw mounted tree when
+/// no collection is found anywhere. Passing `None` makes "nothing found" an
+/// error instead — which is what the archive path wants: a folder holding only
+/// ZIPs must never be mistaken for a raw capture named after the folder.
+pub fn enumerate_multi(
+    roots: &[PathBuf],
+    raw_fallback: Option<&Path>,
+) -> Result<(CaptureType, Vec<HostCapture>), String> {
+    let mut hosts: Vec<HostCapture> = Vec::new();
+    let mut seen: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        for host in collect_collections(root) {
+            // Canonicalize so the same collection reached through two roots
+            // (e.g. --out nested inside the capture) is only counted once.
+            let key = host
+                .collection_dir
+                .canonicalize()
+                .unwrap_or_else(|_| host.collection_dir.clone());
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            hosts.push(host);
+        }
+    }
+    if !hosts.is_empty() {
+        finalize(&mut hosts);
+        return Ok((CaptureType::Velociraptor, hosts));
+    }
+    let Some(path) = raw_fallback else {
+        return Err("no Velociraptor collection found".to_string());
+    };
     let host = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -95,8 +168,16 @@ pub fn enumerate(path: &Path) -> Result<(CaptureType, Vec<HostCapture>), String>
             os: "unknown".into(),
             collection_dir: path.to_path_buf(),
             artifact_root: path.to_path_buf(),
+            source_archive: None,
         }],
     ))
+}
+
+pub fn enumerate(path: &Path) -> Result<(CaptureType, Vec<HostCapture>), String> {
+    if !path.is_dir() {
+        return Err(format!("not a directory: {}", path.display()));
+    }
+    enumerate_multi(&[path.to_path_buf()], Some(path))
 }
 
 #[cfg(test)]
@@ -112,6 +193,69 @@ mod tests {
             dir.join("client_info.json"),
             format!(r#"{{"Hostname":"{host}","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}}"#),
         ).unwrap();
+    }
+
+    #[test]
+    fn enumerate_multi_merges_roots_with_unique_output_ids() {
+        let td = TempDir::new().unwrap();
+        let a = td.path().join("rootA");
+        let b = td.path().join("rootB");
+        write_collection(&a.join("Collection-A"), "A");
+        write_collection(&b.join("Collection-B"), "B");
+        let (ty, hosts) = enumerate_multi(&[a, b], None).unwrap();
+        assert!(matches!(ty, CaptureType::Velociraptor));
+        let names: Vec<_> = hosts.iter().map(|h| h.host.as_str()).collect();
+        assert_eq!(names, vec!["A", "B"]);
+        assert_ne!(hosts[0].output_id, hosts[1].output_id);
+    }
+
+    #[test]
+    fn same_hostname_in_two_roots_gets_distinct_output_ids() {
+        let td = TempDir::new().unwrap();
+        let a = td.path().join("rootA");
+        let b = td.path().join("rootB");
+        write_collection(&a.join("Collection-1"), "DUPE");
+        write_collection(&b.join("Collection-2"), "DUPE");
+        let (_, hosts) = enumerate_multi(&[a, b], None).unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[0].host, "DUPE");
+        assert_eq!(hosts[1].host, "DUPE");
+        assert_ne!(
+            hosts[0].output_id, hosts[1].output_id,
+            "same hostname from two roots must not share an output dir"
+        );
+    }
+
+    #[test]
+    fn enumerate_multi_without_raw_fallback_errors_instead_of_inventing_a_host() {
+        // The folder-of-zips case: nothing found must be an error, never a
+        // Raw host named after the folder.
+        let td = TempDir::new().unwrap();
+        let empty = td.path().join("only-zips");
+        fs::create_dir_all(&empty).unwrap();
+        fs::write(empty.join("a.zip"), b"x").unwrap();
+        assert!(enumerate_multi(&[empty], None).is_err());
+    }
+
+    #[test]
+    fn enumerate_multi_tolerates_a_missing_root() {
+        let td = TempDir::new().unwrap();
+        let real = td.path().join("real");
+        write_collection(&real.join("Collection-A"), "A");
+        let missing = td.path().join("does-not-exist");
+        let (_, hosts) = enumerate_multi(&[missing, real], None).unwrap();
+        assert_eq!(hosts.len(), 1);
+    }
+
+    #[test]
+    fn enumerate_multi_deduplicates_a_collection_reached_twice() {
+        let td = TempDir::new().unwrap();
+        let root = td.path().join("root");
+        let coll = root.join("Collection-A");
+        write_collection(&coll, "A");
+        // Same collection via its parent and via itself.
+        let (_, hosts) = enumerate_multi(&[root, coll], None).unwrap();
+        assert_eq!(hosts.len(), 1, "collection counted twice");
     }
 
     #[test]

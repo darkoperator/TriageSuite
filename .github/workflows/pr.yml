@@ -29,4 +29,5 @@ jobs:
       - run: cargo test --workspace --lib
       - run: cargo test -p triage-orchestrator --test e2e
       - run: cargo test -p triage-orchestrator --test external_tools_e2e
+      - run: cargo test -p triage-orchestrator --test zip_e2e
       - run: cargo test -p triage-core

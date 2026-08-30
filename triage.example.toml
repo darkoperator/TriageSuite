@@ -1,0 +1,30 @@
+# Sample config for `triagesuite run <capture> --out <dir> --config triage.toml`.
+# Optional — a bare `triagesuite run <capture> --out <dir>` works with none of this.
+# See docs/tools/TriageSuite.md ("Config and profiles") for the full format.
+
+[hayabusa]
+bin = "hayabusa"
+enabled = true
+csv = true
+json = true
+rules = "./rules"
+rules_config = "./rules/config"
+min_level = "informational"
+threads = 0
+proven_rules = false
+
+[takajo]
+bin = "takajo"
+enabled = true
+level = ""
+display_table = false
+
+# Named profiles apply on top of the base [hayabusa]/[takajo] tables above via
+# --profile <name>; a profile only needs to state the fields it changes.
+[profiles.quick.hayabusa]
+min_level = "high"
+proven_rules = true
+# rules, csv, json, etc. all inherited from [hayabusa]
+
+[profiles.quick.takajo]
+enabled = false   # skip takajo for a quick pass

@@ -274,6 +274,7 @@ mod tests {
             os: "unknown".to_string(),
             collection_dir: td.path().to_path_buf(),
             artifact_root: td.path().to_path_buf(),
+            source_archive: None,
         };
         let out_root = td.path().join("out");
 
@@ -342,6 +343,7 @@ mod tests {
             os: "unknown".to_string(),
             collection_dir: td.path().to_path_buf(),
             artifact_root: td.path().to_path_buf(),
+            source_archive: None,
         };
         let out_root = td.path().join("out");
         let reports = run_external_tools_for_host(&resolved, &host, &out_root);
@@ -397,6 +399,7 @@ mod tests {
             os: "unknown".to_string(),
             collection_dir: td.path().to_path_buf(),
             artifact_root: td.path().to_path_buf(),
+            source_archive: None,
         };
         let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
 
@@ -424,6 +427,7 @@ mod tests {
             os: "unknown".to_string(),
             collection_dir: td.path().to_path_buf(),
             artifact_root: td.path().to_path_buf(),
+            source_archive: None,
         };
         let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
 
@@ -450,6 +454,7 @@ mod tests {
             os: "unknown".to_string(),
             collection_dir: td.path().to_path_buf(),
             artifact_root: td.path().to_path_buf(),
+            source_archive: None,
         };
         let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
         assert!(reports.is_empty());

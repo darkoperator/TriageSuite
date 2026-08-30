@@ -39,6 +39,10 @@ chrono = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 console = "0.15"
+zip = { workspace = true }
+# Not used directly: supplies zip's deflate backend. See the note in the
+# workspace Cargo.toml — zip alone does not compile without it.
+flate2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

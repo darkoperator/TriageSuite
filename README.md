@@ -15,7 +15,7 @@
 
 *(Printed in color at the start of every `TriageSuite run`.)*
 
-This project is a collection of Rust command-line forensic parsers for Velociraptor Windows triage captures. They all produce output compatible with Eric Zimmerman tools, given that they have become kind of a industry standard, I wanted to ensure workflows stayed the same with little to no changes. All timestamps are ISO 8601 UTC (`2024-06-29T00:05:00.1234567Z`) regardless of how the source artifact stores them; this is a lesson I learned from working multiple IR engagements each year, having all timestamps in UTC just makes life easier.
+This project is a collection of Rust command-line forensic parsers for Velociraptor Windows triage captures. They all produce output compatible with Eric Zimmerman tools, given that they have become kind of a industry standard, I wanted to ensure workflows stayed the same with little to no changes. All timestamps are ISO 8601 UTC (`2024-06-29T00:05:00.1234567Z`) regardless of how the source artifact stores them; this is a lesson I learned from working over 50 IR engagements each year, having all timestamps in UTC just makes life easier.
 
 
 **Author:** Carlos (DarkOperator) Perez <carlos_perez@darkoperator.com>
@@ -286,7 +286,19 @@ output formats (CSV or NDJSON), and produces a `run_manifest.json` chain-of-cust
 TriageSuite run /mnt/triage --out ./results
 TriageSuite run /mnt/triage --out ./results --only pe,evtx,mft --csv --jobs 2
 TriageSuite run /mnt/triage --out ./results --config triage.toml --profile quick
+
+# Collector .zip archives are taken directly — one, or a whole folder of them
+TriageSuite run ./Collection-HOST1.zip --out ./results
+TriageSuite run ./engagement-zips      --out ./results
 ```
+
+Archives are extracted to `<out>/_extracted/` and kept, so re-runs skip extraction; anything
+that isn't a usable capture is reported and skipped rather than failing the run.
+
+Collecting the input: see [Collecting a capture](docs/tools/TriageSuite.md#collecting-a-capture-velociraptor-offline-collector)
+for the minimum set of artifacts a Velociraptor offline collector should be configured with,
+the artifact-to-parser mapping, and the companion files (registry transaction logs, the full
+`Sum\` directory, the `SOFTWARE` hive for SRUM) that are easy to leave out.
 
 Full reference: [docs/tools/TriageSuite.md](docs/tools/TriageSuite.md) (all flags, tool keys, progress/status behavior, output layout, the full `run_manifest.json` schema, exit codes, external-tool configuration, more examples).
 
