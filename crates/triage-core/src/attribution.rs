@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn host_prefix_with_users_segment_does_not_mask_in_capture_sid() {
         // capture stored under the analyst's own home dir
-        let p = "/Users/carlosperez/Documents/devprojects/test captures/Coll/uploads/auto/C%3A/$Recycle.Bin/S-1-5-21-111-222-333-500/$I123456";
+        let p = "/Users/analyst/Documents/devprojects/test captures/Coll/uploads/auto/C%3A/$Recycle.Bin/S-1-5-21-111-222-333-500/$I123456";
         assert_eq!(
             derive_user(Path::new(p)),
             UserDerivation::Sid("S-1-5-21-111-222-333-500".into())
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn host_prefix_does_not_mask_in_capture_user() {
-        let p = "/Users/carlosperez/cases/test captures/Coll/uploads/auto/C%3A/Users/alice/AppData/Roaming/x.lnk";
+        let p = "/Users/analyst/cases/test captures/Coll/uploads/auto/C%3A/Users/alice/AppData/Roaming/x.lnk";
         assert_eq!(
             derive_user(Path::new(p)),
             UserDerivation::Interactive("alice".into())

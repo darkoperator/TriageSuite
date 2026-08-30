@@ -5,7 +5,7 @@
 //!   `Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_AppCompatFlags2_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_AppCompatFlags2_NTUSER.DAT.csv`):
 //!   Path, BatchKeyPath, BatchValueName
 //!
 //! Batch row format (C# ValuesOut):

@@ -15,7 +15,7 @@
 //!   `Software\Microsoft\Office\16.0\OneNote\Security\Trusted Documents\TrustRecords`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_TrustedDocuments_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_TrustedDocuments_NTUSER.DAT.csv`):
 //!   EventType, BatchKeyPath, Timestamp, BatchValueName, FileName, Username
 //!
 //! Batch row format (C# ValuesOut):
@@ -250,14 +250,14 @@ mod tests {
             r"%USERPROFILE%/Downloads/layer_by_operation.xlsx",
             &raw,
             r"ROOT\SOFTWARE\Microsoft\Office\16.0\Excel\Security\Trusted Documents\TrustRecords",
-            "cperez",
+            "user1",
         );
         assert_eq!(row.detail_columns[0].1, "Enable Editing");
         assert_eq!(
             row.detail_columns[4].1,
             r"%USERPROFILE%/Downloads/layer_by_operation.xlsx"
         );
-        assert_eq!(row.detail_columns[5].1, "cperez");
+        assert_eq!(row.detail_columns[5].1, "user1");
         // Timestamp should be non-empty
         assert!(!row.detail_columns[2].1.is_empty());
     }

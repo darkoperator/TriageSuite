@@ -10,7 +10,7 @@ class Program
 {
     static void Main(string[] args)
     {
-        string dllPath = args.Length > 0 ? args[0] : "/Users/carlosperez/.nuget/packages/guidmapping/2026.5.0/lib/netstandard2.0/GuidMapping.dll";
+        string dllPath = args.Length > 0 ? args[0] : "/path/to/.nuget/packages/guidmapping/2026.5.0/lib/netstandard2.0/GuidMapping.dll";
         string outputPath = args.Length > 1 ? args[1] : "/tmp/guid_pairs_final.txt";
         
         var assembly = Assembly.LoadFrom(dllPath);

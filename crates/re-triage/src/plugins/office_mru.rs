@@ -22,7 +22,7 @@
 //! as the OfficeMRU AcceptedDelta.
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_OfficeMRU_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_OfficeMRU_NTUSER.DAT.csv`):
 //!   ValueName, BatchKeyPath, LastOpened, BatchValueName, LastClosed, FileName
 //!
 //! Batch row format (C# ValuesOut):
@@ -307,8 +307,7 @@ mod tests {
     #[test]
     fn mru_value_with_timestamp() {
         // FILETIME: 01D97D03F053ADD0 = some 2023 timestamp
-        let data =
-            "[F00000000][T01D97D03F053ADD0][O00000000]*C:\\Users\\cperez\\Desktop\\risks.csv";
+        let data = "[F00000000][T01D97D03F053ADD0][O00000000]*C:\\Users\\user1\\Desktop\\risks.csv";
         let row = build_row(
             "Item 1",
             data,
@@ -317,7 +316,7 @@ mod tests {
         );
         assert_eq!(
             row.detail_columns[5].1,
-            "C:\\Users\\cperez\\Desktop\\risks.csv"
+            "C:\\Users\\user1\\Desktop\\risks.csv"
         );
         assert!(!row.detail_columns[2].1.is_empty()); // LastOpened is set
         assert_eq!(row.detail_columns[4].1, ""); // LastClosed empty (no reading location)

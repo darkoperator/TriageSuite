@@ -8,7 +8,7 @@
 //! key_paths()    = ["ControlSet00*\\Control\\Session Manager\\AppCompatCache"]
 //!
 //! Detail-CSV column order (fixture-authoritative,
-//! from DESKTOP__carlosperez_SYSTEM__plugin_AppCompat_SYSTEM.csv):
+//! from <host>__<user>_SYSTEM__plugin_AppCompat_SYSTEM.csv):
 //!   CacheEntryPosition, BatchKeyPath, ProgramName, BatchValueName, ModifiedTime
 //!
 //! Batch row format (C# ValuesOut):

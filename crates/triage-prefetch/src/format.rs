@@ -349,14 +349,39 @@ pub fn parse_file_bytes(data: &[u8]) -> Result<PrefetchFile, ParseError> {
 mod tests {
     use super::*;
 
-    const MSEDGE: &str = "../../test captures/Collection-DESKTOP-OA8SHHC-2026-03-12T22_54_56Z/uploads/auto/C%3A/Windows/Prefetch/MSEDGE.EXE-37D25F9E.pf";
+    /// Locate a prefetch sample under any local capture. Discovering it by
+    /// name keeps the test independent of which captures are present, and
+    /// keeps capture host names out of the source tree.
+    fn find_prefetch(name_prefix: &str) -> Option<std::path::PathBuf> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test captures");
+        let mut stack = vec![root];
+        while let Some(d) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(name_prefix) && n.ends_with(".pf"))
+                {
+                    return Some(p);
+                }
+            }
+        }
+        None
+    }
 
     #[test]
     fn parses_real_win11_prefetch() {
-        let Ok(raw) = std::fs::read(MSEDGE) else {
+        let Some(path) = find_prefetch("MSEDGE.EXE-") else {
             eprintln!("captures absent; skipping");
             return;
         };
+        let raw = std::fs::read(path).unwrap();
         let pf = parse_file_bytes(&raw).unwrap();
         assert_eq!(pf.executable_name, "MSEDGE.EXE");
         assert_eq!(pf.hash, 0x37D25F9E);
@@ -376,7 +401,10 @@ mod tests {
     #[test]
     fn rejects_garbage_without_panicking() {
         assert!(parse(b"garbage").is_err());
-        let Ok(raw) = std::fs::read(MSEDGE) else {
+        let Some(path) = find_prefetch("MSEDGE.EXE-") else {
+            return;
+        };
+        let Ok(raw) = std::fs::read(path) else {
             return;
         };
         let scca = crate::decompress::decompress_mam(&raw).unwrap();

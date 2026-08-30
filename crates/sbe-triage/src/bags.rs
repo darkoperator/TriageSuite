@@ -10,7 +10,7 @@
 //! Shell key with only values (e.g. SniffedFolderType) but no child subkeys;
 //! those are items whose folder settings were initialised but not "explored"
 //! (the view mode was never saved). SBECmd emits HasExplored=False for those.
-//! Verified against the STCL1 cperez hive: NS=7 (C:, True) has Shell with
+//! Verified against a reference user hive: NS=7 (C:, True) has Shell with
 //! a GUID subkey; NS=16 (D:, False) has Shell with only a SniffedFolderType
 //! value and no subkeys.
 

@@ -604,8 +604,8 @@ mod tests {
   </System>
   <EventData>
     <Data Name="SubjectUserSid">S-1-0-0</Data>
-    <Data Name="TargetUserName">STDC1$</Data>
-    <Data Name="TargetDomainName">UMBRALABS.DEV</Data>
+    <Data Name="TargetUserName">HOST01$</Data>
+    <Data Name="TargetDomainName">EXAMPLE.TEST</Data>
     <Data Name="LogonType">3</Data>
     <Data Name="IpAddress">fe80::1</Data>
     <Data Name="TargetLogonId">0x17ba98af</Data>
@@ -666,10 +666,10 @@ Maps:
         assert_eq!(r.thread_id, "9456");
         assert_eq!(r.chunk_number, 0);
         assert_eq!(r.user_id, ""); // Security@UserID absent -> empty, not a fallback
-        assert_eq!(r.user_name, "STDC1$"); // map-derived, lives in its own column
+        assert_eq!(r.user_name, "HOST01$"); // map-derived, lives in its own column
         assert_eq!(r.remote_host, "fe80::1");
         assert_eq!(r.executable_info, "-");
-        assert_eq!(r.payload_data1, "Target: UMBRALABS.DEV\\STDC1$");
+        assert_eq!(r.payload_data1, "Target: EXAMPLE.TEST\\HOST01$");
         assert_eq!(r.keywords, "Audit success");
         assert_eq!(r.hidden_record, "False");
         assert_eq!(r.extra_data_offset, 0);
@@ -704,7 +704,7 @@ Maps:
             "a3f72d14-dc88-456c-ed77-ac006bc206a1"
         );
         // Non-hex / non-GUID values pass through unchanged.
-        assert_eq!(normalize_binxml_value("STDC1$"), "STDC1$");
+        assert_eq!(normalize_binxml_value("HOST01$"), "HOST01$");
         assert_eq!(normalize_binxml_value("fe80::1"), "fe80::1");
         assert_eq!(normalize_binxml_value("%%1842"), "%%1842");
     }

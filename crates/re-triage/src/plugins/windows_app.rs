@@ -9,7 +9,7 @@
 //! plugin_name() = "Windows App" (matches C# PluginName; note the space).
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__administrator_UsrClass__plugin_WindowsApp_UsrClass.dat.csv`):
+//! `<host>__<user>_UsrClass__plugin_WindowsApp_UsrClass.dat.csv`):
 //!   KeyName, BatchKeyPath, DisplayName, BatchValueName, InstallTime, PackageRootFolder
 //!
 //! Batch row format (C# ValuesOut):

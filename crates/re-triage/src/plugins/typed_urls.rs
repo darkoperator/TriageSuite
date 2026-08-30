@@ -6,7 +6,7 @@
 //!   `Software\Microsoft\Internet Explorer\TypedURLs`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__administrator_NTUSER__plugin_TypedURLs_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_TypedURLs_NTUSER.DAT.csv`):
 //!   Timestamp, BatchKeyPath, Url, BatchValueName, Slack
 //!
 //! Batch row format (C# TypedURL ValuesOut):

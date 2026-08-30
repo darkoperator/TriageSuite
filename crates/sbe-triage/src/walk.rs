@@ -20,7 +20,7 @@
 //! own NodeSlot value (ABSENT → 0). This gives the per-row variation seen in the
 //! fixture (e.g. `BagMRU\1` rows show 2, 4, 5, 7, 16, 19, 21).
 //!
-//! Rationale: verified by binary inspection of the STCL1 + DESKTOP evidence hives
+//! Rationale: verified by binary inspection of the reference evidence hives
 //! and cross-checked against all 10 SBECmd reference fixtures. The root-level
 //! special case is confirmed by the fact that root child subkeys (BagMRU\0,
 //! BagMRU\1, …) have non-zero NodeSlot values in multiple hives, yet ALL root
@@ -239,7 +239,7 @@ fn walk_inner(
     };
 
     // Parent key's LastWriteTime — used as LastInteracted for the MRU[0] slot.
-    // Verified against STCL1 fixtures: the MRU[0] slot (most recently accessed
+    // Verified against the reference fixtures: the MRU[0] slot (most recently accessed
     // item) gets LastInteracted = this parent key's LWT.
     let kw = key.last_key_written_date_and_time();
     let parent_lwt =
@@ -361,9 +361,9 @@ fn walk_inner(
 
         // ── FirstInteracted / LastInteracted ─────────────────────────────────────
         // SBECmd derives these from the BagMRU key/subkey LastWriteTime (LWT),
-        // NOT from the beef0026 extension block. Verified against STCL1 evidence.
+        // NOT from the beef0026 extension block. Verified against reference evidence.
         //
-        // Rule (verified across all 60 rows in the STCL1 cperez fixture):
+        // Rule (verified across all 60 rows of the reference fixture):
         //
         //   FirstInteracted = child subkey (BagMRU_parent\slot) LWT, BUT ONLY when:
         //     a) The child subkey exists AND its NodeSlot value is present (non-absent)

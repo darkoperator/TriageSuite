@@ -6,7 +6,7 @@
 //!   `Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\FirstFolder`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_FirstFolder_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_FirstFolder_NTUSER.DAT.csv`):
 //!   Executable, BatchKeyPath, FolderName, BatchValueName, MRUPosition, OpenedOn
 //!
 //! Batch row format (C# FolderInfo ValuesOut):
@@ -207,7 +207,7 @@ mod tests {
     }
 
     fn test_lw() -> DateTime<chrono::Utc> {
-        // 2023-03-15 17:35:07.6830174 UTC — from STCL1__cperez fixture
+        // 2023-03-15 17:35:07.6830174 UTC — from a reference fixture
         chrono::Utc
             .with_ymd_and_hms(2023, 3, 15, 17, 35, 7)
             .unwrap()
@@ -222,7 +222,7 @@ mod tests {
             entry_val(
                 "0",
                 r"C:\Program Files\Wireshark\Wireshark.exe",
-                r"C:\Users\cperez\Documents\",
+                r"C:\Users\user1\Documents\",
             ),
         ];
         let lw = test_lw();
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(
             rows[0].batch_value_data1,
-            r"Exe: C:\Program Files\Wireshark\Wireshark.exe Folder: C:\Users\cperez\Documents\"
+            r"Exe: C:\Program Files\Wireshark\Wireshark.exe Folder: C:\Users\user1\Documents\"
         );
         assert_eq!(rows[0].batch_value_data3, "Mru: 0");
         assert!(

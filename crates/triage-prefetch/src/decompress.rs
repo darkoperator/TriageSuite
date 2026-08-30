@@ -120,10 +120,34 @@ pub(crate) fn walk_pf(root: &std::path::Path) -> Vec<std::path::PathBuf> {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "../../test captures/Collection-DESKTOP-OA8SHHC-2026-03-12T22_54_56Z/uploads/auto/C%3A/Windows/Prefetch/MSEDGE.EXE-37D25F9E.pf";
+    /// Locate a prefetch sample under any local capture. Discovering it by
+    /// name keeps the test independent of which captures are present, and
+    /// keeps capture host names out of the source tree.
+    fn find_prefetch(name_prefix: &str) -> Option<std::path::PathBuf> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test captures");
+        let mut stack = vec![root];
+        while let Some(d) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(name_prefix) && n.ends_with(".pf"))
+                {
+                    return Some(p);
+                }
+            }
+        }
+        None
+    }
 
     fn sample() -> Option<Vec<u8>> {
-        std::fs::read(SAMPLE).ok()
+        std::fs::read(find_prefetch("MSEDGE.EXE-")?).ok()
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! plugin_name() = "UserAssist" (matches C# PluginName exactly).
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `DESKTOP__localadmin_NTUSER__plugin_UserAssist_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_UserAssist_NTUSER.DAT.csv`):
 //!   BatchKeyPath, BatchValueName, ProgramName, RunCounter, FocusCount,
 //!   FocusTime, LastExecuted
 //!

@@ -5,7 +5,7 @@
 //!   `Software\Microsoft\Windows\CurrentVersion\Explorer\WordWheelQuery`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_WordWheelQuery_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_WordWheelQuery_NTUSER.DAT.csv`):
 //!   SearchTerm, BatchKeyPath, MruPosition, BatchValueName, KeyName, LastWriteTimestamp
 //!
 //! Batch row format (C# ValuesOut):

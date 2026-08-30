@@ -5,7 +5,7 @@
 //!   `Software\Microsoft\Windows\Shell\Bags\1\Desktop`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_IconLayouts_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_IconLayouts_NTUSER.DAT.csv`):
 //!   Name, BatchKeyPath, BatchValueName
 //!
 //! Batch row format (C# ValuesOut):

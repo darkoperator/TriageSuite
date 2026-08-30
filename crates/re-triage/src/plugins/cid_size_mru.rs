@@ -5,7 +5,7 @@
 //!   `Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\CIDSizeMRU`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_CIDSizeMRU_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_CIDSizeMRU_NTUSER.DAT.csv`):
 //!   Executable, BatchKeyPath, MRUPosition, BatchValueName, OpenedOn
 //!
 //! Batch row format (C# CIDSizeInfo ValuesOut):
@@ -189,7 +189,7 @@ mod tests {
     }
 
     fn test_lw() -> DateTime<chrono::Utc> {
-        // 2023-11-25 17:06:37.7946186 UTC — from STCL1__cperez fixture
+        // 2023-11-25 17:06:37.7946186 UTC — from a reference fixture
         // Build from known components: 2023-11-25 17:06:37 + 794618600 ns
         chrono::Utc
             .with_ymd_and_hms(2023, 11, 25, 17, 6, 37)

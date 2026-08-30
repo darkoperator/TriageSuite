@@ -5,7 +5,7 @@
 //!   `Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts`
 //!
 //! Detail-CSV column order (fixture-authoritative, from
-//! `STCL1__cperez_NTUSER__plugin_FileExts_NTUSER.DAT.csv`):
+//! `<host>__<user>_NTUSER__plugin_FileExts_NTUSER.DAT.csv`):
 //!   Extension, BatchKeyPath, OpensWithExecutables, BatchValueName,
 //!   OpensWithProgramIDs, UserChoice
 //!

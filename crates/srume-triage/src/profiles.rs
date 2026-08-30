@@ -68,7 +68,7 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test captures")
     }
 
-    /// Find the SOFTWARE hive in the STCL1 collection.
+    /// Find the SOFTWARE hive in a local capture.
     fn find_software() -> Option<PathBuf> {
         if !captures_root().exists() {
             return None;
@@ -88,7 +88,6 @@ mod tests {
                     .map(|n| n.eq_ignore_ascii_case("SOFTWARE"))
                     .unwrap_or(false)
                     && p.to_string_lossy().contains("config")
-                    && p.to_string_lossy().contains("STCL1")
                 {
                     return Some(p);
                 }
@@ -108,7 +107,7 @@ mod tests {
 
     #[test]
     fn finds_software_hive_near_srudb() {
-        // Locate an STCL1 SRUDB and confirm we can discover a SOFTWARE hive
+        // Locate a SRUDB and confirm we can discover a SOFTWARE hive
         // for it (same capture subtree).
         if !captures_root().exists() {
             return;
@@ -123,9 +122,7 @@ mod tests {
                 let p = e.path();
                 if p.is_dir() {
                     stack.push(p);
-                } else if p.file_name().and_then(|n| n.to_str()) == Some("SRUDB.dat")
-                    && p.to_string_lossy().contains("STCL1")
-                {
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("SRUDB.dat") {
                     srudb = Some(p);
                 }
             }
