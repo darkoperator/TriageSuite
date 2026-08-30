@@ -88,33 +88,107 @@ pub fn collect_collections(path: &Path) -> Vec<HostCapture> {
     children
 }
 
+/// A compact `YYYYMMDDThhmmss` lifted from a collection directory name, e.g.
+/// `Collection-HOST-2026-07-24T04_57_26Z` -> `20260724T045726`. Velociraptor
+/// stamps every collection this way, which makes it a stable identity for one
+/// capture of a host.
+fn collection_timestamp(name: &str) -> Option<String> {
+    let b = name.as_bytes();
+    let digit = |i: usize| b.get(i).is_some_and(|c| c.is_ascii_digit());
+    let sep = |i: usize| b.get(i).is_some_and(|c| !c.is_ascii_alphanumeric());
+    // YYYY-MM-DD T hh?mm?ss  (Velociraptor uses `_` where a time would use `:`)
+    for i in 0..b.len() {
+        let shape = (0..4).all(|k| digit(i + k))
+            && sep(i + 4)
+            && digit(i + 5)
+            && digit(i + 6)
+            && sep(i + 7)
+            && digit(i + 8)
+            && digit(i + 9)
+            && b.get(i + 10).is_some_and(|c| *c == b'T' || *c == b't')
+            && digit(i + 11)
+            && digit(i + 12)
+            && sep(i + 13)
+            && digit(i + 14)
+            && digit(i + 15)
+            && sep(i + 16)
+            && digit(i + 17)
+            && digit(i + 18);
+        if shape {
+            let d = |r: std::ops::Range<usize>| -> String { r.map(|k| b[i + k] as char).collect() };
+            return Some(format!(
+                "{}{}{}T{}{}{}",
+                d(0..4),
+                d(5..7),
+                d(8..10),
+                d(11..13),
+                d(14..16),
+                d(17..19)
+            ));
+        }
+    }
+    None
+}
+
+/// Token distinguishing one collection of a host from another. Derived from
+/// the collection itself — never from its position in the run — so a given
+/// capture always resolves to the same output directory regardless of what
+/// else is being processed alongside it.
+fn collection_token(collection_dir: &std::path::Path) -> String {
+    let name = collection_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    collection_timestamp(&name)
+        .unwrap_or_else(|| triage_core::attribution::sanitize_component(&name))
+}
+
 /// Sort deterministically and assign collision-free `output_id`s across the
 /// whole set. The `collection_dir` tie-break matters once several roots are
 /// merged: the same hostname can legitimately appear twice (once zipped, once
-/// already unzipped), and sorting on host alone would leave the allocator
-/// suffixing in `read_dir` order, i.e. non-deterministically.
+/// already unzipped), and sorting on host alone would order them by `read_dir`,
+/// i.e. non-deterministically.
 fn finalize(hosts: &mut [HostCapture]) {
     hosts.sort_by(|a, b| {
         a.host
             .cmp(&b.host)
             .then_with(|| a.collection_dir.cmp(&b.collection_dir))
     });
+
+    // ComponentAllocator disambiguates *different* hostnames that sanitize to
+    // the same component, but deliberately returns the same id for the same
+    // identity. Two collections of one host therefore land on one component —
+    // and would write into a single output directory, silently overwriting one
+    // capture's results with the other's.
     let mut allocator = triage_core::attribution::ComponentAllocator::default();
+    let bases: Vec<String> = hosts.iter().map(|h| allocator.allocate(&h.host)).collect();
+
+    let mut contested: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for b in &bases {
+        *contested.entry(b.clone()).or_default() += 1;
+    }
+
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for host in hosts.iter_mut() {
-        let base = allocator.allocate(&host.host);
-        // ComponentAllocator disambiguates *different* hostnames that sanitize
-        // to the same component, but deliberately returns the same id for the
-        // same identity. Two distinct collections of one host therefore collide
-        // here, and would write into a single output directory — silently
-        // overwriting one capture's results with the other's. Ordinal-suffix
-        // them instead; the sort above makes the numbering deterministic.
-        let mut id = base.clone();
+    for (host, base) in hosts.iter_mut().zip(bases.iter()) {
+        // Only a contested hostname gets a suffix, so the ordinary one
+        // collection per host layout is exactly as it always was.
+        let mut id = if contested[base] > 1 {
+            let token = collection_token(&host.collection_dir);
+            let keep = 80usize.saturating_sub(token.chars().count() + 1);
+            let trimmed: String = base.chars().take(keep).collect();
+            format!("{trimmed}_{token}")
+        } else {
+            base.clone()
+        };
+        // Safety net: two collections could still share a token (same second,
+        // or identically named dirs under different roots). Never silently
+        // reuse a directory.
         let mut n = 2u32;
+        let seed = id.clone();
         while !used.insert(id.clone()) {
             let suffix = format!("-{n}");
             let keep = 80usize.saturating_sub(suffix.len());
-            let trimmed: String = base.chars().take(keep).collect();
+            let trimmed: String = seed.chars().take(keep).collect();
             id = format!("{trimmed}{suffix}");
             n += 1;
         }
@@ -206,6 +280,78 @@ mod tests {
         assert!(matches!(ty, CaptureType::Velociraptor));
         let names: Vec<_> = hosts.iter().map(|h| h.host.as_str()).collect();
         assert_eq!(names, vec!["A", "B"]);
+        assert_ne!(hosts[0].output_id, hosts[1].output_id);
+    }
+
+    #[test]
+    fn collection_timestamp_is_lifted_from_velociraptor_names() {
+        assert_eq!(
+            collection_timestamp("Collection-IT02877_rlc_com-2026-07-24T04_57_26Z").as_deref(),
+            Some("20260724T045726")
+        );
+        // Colons instead of underscores, as some exports write them.
+        assert_eq!(
+            collection_timestamp("Collection-H-2026-03-11T21:20:14Z").as_deref(),
+            Some("20260311T212014")
+        );
+        assert_eq!(collection_timestamp("Collection-NoTimestampHere"), None);
+    }
+
+    #[test]
+    fn one_collection_per_host_keeps_the_bare_hostname() {
+        let td = TempDir::new().unwrap();
+        let root = td.path().join("root");
+        write_collection(&root.join("Collection-A-2026-07-24T04_57_26Z"), "HOSTA");
+        write_collection(&root.join("Collection-B-2026-07-24T04_57_26Z"), "HOSTB");
+        let (_, hosts) = enumerate_multi(&[root], None).unwrap();
+        let ids: Vec<_> = hosts.iter().map(|h| h.output_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["HOSTA", "HOSTB"],
+            "uncontested names must not move"
+        );
+    }
+
+    /// The property this scheme exists for: an output directory is a function
+    /// of the collection alone, so adding another capture of the same host
+    /// later must not relocate the ones already written.
+    #[test]
+    fn output_id_does_not_move_when_another_collection_is_added() {
+        let td = TempDir::new().unwrap();
+        let root = td.path().join("root");
+        write_collection(&root.join("Collection-H-2026-07-24T04_57_26Z"), "H");
+        write_collection(&root.join("Collection-H-2026-07-28T11_02_13Z"), "H");
+        let (_, before) = enumerate_multi(&[root.clone()], None).unwrap();
+        let ids_before: Vec<_> = before.iter().map(|h| h.output_id.clone()).collect();
+        assert_eq!(
+            ids_before,
+            vec!["H_20260724T045726", "H_20260728T110213"],
+            "contested names carry their own collection timestamp"
+        );
+
+        // An *earlier* capture turns up and is added to the same folder.
+        write_collection(&root.join("Collection-H-2026-06-01T09_00_00Z"), "H");
+        let (_, after) = enumerate_multi(&[root], None).unwrap();
+        for id in &ids_before {
+            assert!(
+                after.iter().any(|h| &h.output_id == id),
+                "{id} moved after a third collection was added: {:?}",
+                after.iter().map(|h| &h.output_id).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn identical_tokens_still_get_unique_directories() {
+        // Same host, same timestamp, two roots: the safety net must fire
+        // rather than let both write into one directory.
+        let td = TempDir::new().unwrap();
+        let a = td.path().join("a");
+        let b = td.path().join("b");
+        write_collection(&a.join("Collection-H-2026-07-24T04_57_26Z"), "H");
+        write_collection(&b.join("Collection-H-2026-07-24T04_57_26Z"), "H");
+        let (_, hosts) = enumerate_multi(&[a, b], None).unwrap();
+        assert_eq!(hosts.len(), 2);
         assert_ne!(hosts[0].output_id, hosts[1].output_id);
     }
 

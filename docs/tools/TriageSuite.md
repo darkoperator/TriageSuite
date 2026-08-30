@@ -434,6 +434,27 @@ renamed on successful completion. Existing destinations are rejected unless `--o
 is supplied. Capture-derived host and user components are sanitized; manifests retain the
 original hostname and record the filesystem-safe `output_id`.
 
+### Repeated hostnames
+
+A single run can legitimately contain the same host more than once — the same machine
+collected on day 1 and day 5, or a re-collection after a partial run. Both collections
+report the same `Hostname`, so both would otherwise resolve to one host directory and
+overwrite each other.
+
+When a hostname is contested, each of its collections gets its own directory suffixed with
+that collection's timestamp:
+
+```
+<out>/IT02877_20260724T045726/
+<out>/IT02877_20260728T110213/
+```
+
+The suffix is derived from the collection itself, never from its position in the run, so a
+given capture always resolves to the same directory — adding another collection of the same
+host later does not relocate the ones already written. A host with a single collection is
+unaffected and keeps the bare `<out>/IT02877/`. `run_manifest.json` maps every `output_id`
+back to its `collection`.
+
 ## run_manifest.json
 
 A JSON chain-of-custody report written to the output root (`<out>/run_manifest.json`) containing:
