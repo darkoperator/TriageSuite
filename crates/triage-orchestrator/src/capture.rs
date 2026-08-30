@@ -321,7 +321,7 @@ mod tests {
         let root = td.path().join("root");
         write_collection(&root.join("Collection-H-2026-07-24T04_57_26Z"), "H");
         write_collection(&root.join("Collection-H-2026-07-28T11_02_13Z"), "H");
-        let (_, before) = enumerate_multi(&[root.clone()], None).unwrap();
+        let (_, before) = enumerate_multi(std::slice::from_ref(&root), None).unwrap();
         let ids_before: Vec<_> = before.iter().map(|h| h.output_id.clone()).collect();
         assert_eq!(
             ids_before,
