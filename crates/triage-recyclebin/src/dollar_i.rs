@@ -38,22 +38,37 @@ pub fn parse(data: &[u8]) -> Result<DeletedEntry, ParseError> {
 mod tests {
     use super::*;
 
-    const DOLLAR_I_DIR: &str = "../../test captures/Collection-STCL1_umbralabs_dev-2026-03-11T21_20_14Z/uploads/auto/C%3A/$Recycle.Bin/S-1-5-21-2152347913-3754363001-4264969470-500";
+    const CAPTURES_ROOT: &str = "../../test captures";
 
+    /// Find `$I` files under any per-SID Recycle Bin directory in any local
+    /// capture. Discovering these rather than hardcoding one collection keeps
+    /// the test working across captures — and keeps host names and SIDs out of
+    /// the source tree.
     fn any_dollar_i() -> Option<Vec<std::path::PathBuf>> {
-        let dir = std::path::Path::new(DOLLAR_I_DIR);
-        if !dir.exists() {
+        let root = std::path::Path::new(CAPTURES_ROOT);
+        if !root.exists() {
             return None;
         }
-        let mut v: Vec<_> = std::fs::read_dir(dir)
-            .ok()?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with("$I"))
-            })
-            .collect();
+        let mut v: Vec<std::path::PathBuf> = Vec::new();
+        // <captures>/<collection>/uploads/auto/C%3A/$Recycle.Bin/<SID>/$I*
+        for collection in std::fs::read_dir(root).ok()?.flatten() {
+            let bin = collection.path().join("uploads/auto/C%3A/$Recycle.Bin");
+            let Ok(sids) = std::fs::read_dir(&bin) else {
+                continue;
+            };
+            for sid in sids.flatten() {
+                let Ok(entries) = std::fs::read_dir(sid.path()) else {
+                    continue;
+                };
+                v.extend(entries.flatten().map(|e| e.path()).filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with("$I"))
+                }));
+            }
+        }
+        if v.is_empty() {
+            return None;
+        }
         v.sort();
         Some(v)
     }

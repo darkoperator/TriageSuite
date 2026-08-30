@@ -595,7 +595,7 @@ mod tests {
     <EventID>4624</EventID>
     <Level>0</Level>
     <Channel>Security</Channel>
-    <Computer>STDC1.umbralabs.dev</Computer>
+    <Computer>HOST01.example.test</Computer>
     <Execution ProcessID="796" ThreadID="9456"/>
     <Security/>
     <Keywords>0x8020000000000000</Keywords>

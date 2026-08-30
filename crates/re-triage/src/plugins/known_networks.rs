@@ -260,7 +260,7 @@ impl RegistryPlugin for KnownNetworks {
                             if is_managed_group {
                                 entry.is_managed = true;
                                 // For domain-managed networks the ProfileName in the
-                                // Profiles subkey is sometimes empty (e.g. umbralabs.dev).
+                                // Profiles subkey is sometimes empty for AD-joined hosts.
                                 // RECmd uses FirstNetwork (from Signatures\Managed) as the
                                 // network name in that case.  Never blank the name we already
                                 // have from ProfileName; only fill it from first_network when

@@ -47,7 +47,7 @@ fn sbe_key(row: &BTreeMap<String, String>, _: &[&str]) -> String {
 
 // ─── Collection path helpers ──────────────────────────────────────────────────
 
-/// Locate the STCL1 collection directory (Collection-STCL1_umbralabs_dev-*).
+/// Locate the domain-client collection directory (matched by the STCL1 tag).
 fn stcl1_dir() -> Option<PathBuf> {
     collection_dir("STCL1")
 }
@@ -57,7 +57,7 @@ fn desktop_dir() -> Option<PathBuf> {
     collection_dir("DESKTOP")
 }
 
-/// Locate the STDC1 collection directory (Collection-STDC1_umbralabs_dev-*).
+/// Locate the domain-controller collection directory (matched by the STDC1 tag).
 fn stdc1_dir() -> Option<PathBuf> {
     collection_dir("STDC1")
 }

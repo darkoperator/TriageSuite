@@ -176,18 +176,18 @@ mod tests {
 
     #[test]
     fn administrator_suffix() {
-        // Fixture ground truth: S-1-5-21-...-500 → Administrator
+        // A -500 RID is always the built-in Administrator.
         assert_eq!(
-            sid_type("S-1-5-21-2152347913-3754363001-4264969470-500"),
+            sid_type("S-1-5-21-1111111111-2222222222-3333333333-500"),
             "Administrator"
         );
     }
 
     #[test]
     fn unknown_user_sid() {
-        // Fixture ground truth: S-1-5-21-...-1313 → UnknownOrUserSid
+        // An ordinary user RID has no special classification.
         assert_eq!(
-            sid_type("S-1-5-21-2152347913-3754363001-4264969470-1313"),
+            sid_type("S-1-5-21-1111111111-2222222222-3333333333-1313"),
             "UnknownOrUserSid"
         );
     }
