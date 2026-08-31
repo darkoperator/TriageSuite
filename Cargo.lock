@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "acc-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "amc-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "anydesk-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "browser-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "evtx-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1428,7 +1428,7 @@ dependencies = [
 
 [[package]]
 name = "jle-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1474,7 +1474,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "le-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1564,7 +1564,7 @@ checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "lol-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1601,7 +1601,7 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "mft-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1895,7 +1895,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pe-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "rb-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2125,7 +2125,7 @@ dependencies = [
 
 [[package]]
 name = "re-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "sbe-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2666,7 +2666,7 @@ dependencies = [
 
 [[package]]
 name = "sqle-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2688,7 +2688,7 @@ dependencies = [
 
 [[package]]
 name = "srum-net-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2706,7 +2706,7 @@ dependencies = [
 
 [[package]]
 name = "srume-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2757,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "stub-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2777,7 +2777,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sum-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -3080,14 +3080,14 @@ dependencies = [
 
 [[package]]
 name = "triage-appcompat"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
 ]
 
 [[package]]
 name = "triage-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "indicatif",
@@ -3099,7 +3099,7 @@ dependencies = [
 
 [[package]]
 name = "triage-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "csv",
@@ -3118,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "triage-ese"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "ese_parser_lib",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "triage-evtx"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "csv",
  "evtx",
@@ -3144,11 +3144,11 @@ dependencies = [
 
 [[package]]
 name = "triage-guidmap"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "triage-jumplist"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cfb",
  "thiserror 2.0.18",
@@ -3158,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "triage-lnk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "encoding_rs",
  "thiserror 2.0.18",
@@ -3167,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "triage-mft"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "percent-encoding",
  "serde",
@@ -3178,7 +3178,7 @@ dependencies = [
 
 [[package]]
 name = "triage-orchestrator"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "acc-triage",
  "amc-triage",
@@ -3216,7 +3216,7 @@ dependencies = [
 
 [[package]]
 name = "triage-prefetch"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
  "xpress-huffman",
@@ -3224,14 +3224,14 @@ dependencies = [
 
 [[package]]
 name = "triage-recyclebin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "triage-registry"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "chrono",
@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "triage-shellitems"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "encoding_rs",
@@ -3255,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "triage-sqlite"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -3263,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "triage-testkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "csv",
  "serde_json",
@@ -3924,7 +3924,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "wxt-triage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "clap",

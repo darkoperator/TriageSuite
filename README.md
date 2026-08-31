@@ -10,7 +10,7 @@
      ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚══════╝ ╚═════╝ ╚═╝   ╚═╝   ╚══════╝
   ══════════════════════════════════════════════════════════════════════════════════════
   ├── PROJECT: TRIAGE SUITE        ├── STATUS: COMPROMISED HOST ASSESSMENT
-  └── ENGINE:  DFIR Core v0.1.0    └── TELEMETRY: ACTIVE & STREAMING
+  └── ENGINE:  DFIR Core v0.2.0    └── TELEMETRY: ACTIVE & STREAMING
 ```
 
 *(Printed in color at the start of every `TriageSuite run`.)*
