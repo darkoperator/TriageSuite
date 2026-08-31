@@ -31,13 +31,13 @@ PACKAGES=(
   jle-triage le-triage pe-triage rb-triage re-triage
   sbe-triage sqle-triage srume-triage sum-triage wxt-triage
   mft-triage evtx-triage amc-triage acc-triage lol-triage
-  srum-net-triage triage-orchestrator
+  srum-net-triage browser-triage triage-orchestrator
 )
 BINARIES=(
   JLETriage LETriage PETriage RBTriage RETriage
   SBETriage SQLETriage SrumETriage SumETriage WxTTriage
   MFTriage EvtxTriage AmcacheTriage AppCompatTriage LolTriage
-  SrumNetTriage TriageSuite
+  SrumNetTriage BrowserTriage TriageSuite
 )
 
 # --- Supported targets. ---

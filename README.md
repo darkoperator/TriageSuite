@@ -48,6 +48,7 @@ reference.
 | LolTriage | Cross-references AmcacheTriage/AppCompatTriage/MFTriage/PETriage/RBTriage output against LOLDrivers and LOLRMM reference snapshots; no Zimmerman equivalent | [docs/tools/LolTriage.md](docs/tools/LolTriage.md) |
 | SrumNetTriage | Rolls up SrumETriage's NetworkUsages/NetworkConnections output into per-day exfil-volume and per-hour-of-day activity tables; no Zimmerman equivalent | [docs/tools/SrumNetTriage.md](docs/tools/SrumNetTriage.md) |
 | TriageSuite | Orchestrator: runs every applicable tool over a capture in one command | [docs/tools/TriageSuite.md](docs/tools/TriageSuite.md) |
+| BrowserTriage | Browser artifacts (Chromium + Firefox): history, downloads, cookies, autofill, bookmarks, login metadata, searches, extensions; no Zimmerman equivalent | [docs/tools/BrowserTriage.md](docs/tools/BrowserTriage.md) |
 | Hayabusa | Optional external tool, orchestrated if found on PATH; no Zimmerman equivalent | [docs/tools/Hayabusa.md](docs/tools/Hayabusa.md) |
 | Takajo | Optional external tool, chained off Hayabusa's output; no Zimmerman equivalent | [docs/tools/Takajo.md](docs/tools/Takajo.md) |
 

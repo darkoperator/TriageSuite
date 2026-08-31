@@ -4,6 +4,9 @@ use std::fmt;
 /// Seconds between 1601-01-01 (FILETIME epoch) and 1970-01-01 (Unix epoch).
 const FILETIME_UNIX_OFFSET_SECS: i64 = 11_644_473_600;
 
+/// Microseconds between 1601-01-01 (FILETIME / WebKit epoch) and 1970-01-01.
+const WEBKIT_UNIX_OFFSET_MICROS: i64 = FILETIME_UNIX_OFFSET_SECS * 1_000_000;
+
 /// FILETIME for 9999-12-31T23:59:59.9999999Z (.NET DateTime.MaxValue).
 /// Anything later cannot be a real Windows timestamp and cannot be
 /// rendered as plain 4-digit-year ISO 8601; it is treated as unset.
@@ -61,6 +64,71 @@ impl WinTimestamp {
             return WinTimestamp(None);
         }
         WinTimestamp(DateTime::from_timestamp(secs, nanos))
+    }
+
+    /// From a WebKit/Chrome timestamp: microseconds since 1601-01-01 UTC, i.e.
+    /// `base::Time::ToDeltaSinceWindowsEpoch().InMicroseconds()`. This is the
+    /// FILETIME epoch with a 1000x coarser tick, used by Chromium's
+    /// `urls.last_visit_time`, `visits.visit_time`, `downloads.*_time`,
+    /// `cookies.*_utc`, `logins.date_*`, and the `date_added` fields in
+    /// `Bookmarks`/`Preferences` JSON.
+    ///
+    /// 0 is Chromium's universal "unset" sentinel and maps to None, as does any
+    /// negative value (it would predate the epoch) or anything out of range.
+    pub fn from_webkit_micros(micros: i64) -> Self {
+        if micros <= 0 {
+            return WinTimestamp(None);
+        }
+        // micros > 0, so this cannot underflow.
+        Self::from_unix_micros_allowing_zero(micros - WEBKIT_UNIX_OFFSET_MICROS)
+    }
+
+    /// From Mozilla PRTime: microseconds since 1970-01-01 UTC. Used by
+    /// `moz_places.last_visit_date`, `moz_historyvisits.visit_date`,
+    /// `moz_cookies.creationTime`/`lastAccessed`, `moz_formhistory.firstUsed`/
+    /// `lastUsed`, and `moz_bookmarks.dateAdded`/`lastModified`.
+    ///
+    /// 0 maps to None (Firefox's "never"); same bounds policy as `from_unix`.
+    pub fn from_unix_micros(micros: i64) -> Self {
+        if micros == 0 {
+            return WinTimestamp(None);
+        }
+        Self::from_unix_micros_allowing_zero(micros)
+    }
+
+    /// From Unix epoch milliseconds. Used by Firefox `logins.json`
+    /// (`timeCreated`/`timeLastUsed`/`timePasswordChanged`), `extensions.json`
+    /// (`installDate`/`updateDate`), and `moz_places_metadata`.
+    ///
+    /// 0 maps to None; same bounds policy as `from_unix`.
+    pub fn from_unix_millis(millis: i64) -> Self {
+        if millis == 0 {
+            return WinTimestamp(None);
+        }
+        // Euclidean, not truncating: for -1 ms the answer is
+        // 1969-12-31T23:59:59.999, and truncating division would instead give
+        // secs = 0 with a negative remainder, which is not representable.
+        let secs = millis.div_euclid(1_000);
+        let nanos = (millis.rem_euclid(1_000) as u32) * 1_000_000;
+        Self::from_unix_nanos(secs, nanos)
+    }
+
+    /// Shared microsecond split, without the zero-sentinel check. Private so
+    /// that each public constructor applies its own sentinel policy exactly
+    /// once, and so the range check stays solely in `from_unix_nanos`.
+    fn from_unix_micros_allowing_zero(micros: i64) -> Self {
+        let secs = micros.div_euclid(1_000_000);
+        let nanos = (micros.rem_euclid(1_000_000) as u32) * 1_000;
+        Self::from_unix_nanos(secs, nanos)
+    }
+}
+
+/// An unset timestamp. Spelled out rather than derived so it is unmistakable
+/// that the default is "absent", never the 1601 or 1970 epoch — the same rule
+/// the constructors follow for their zero sentinels.
+impl Default for WinTimestamp {
+    fn default() -> Self {
+        WinTimestamp(None)
     }
 }
 
@@ -273,5 +341,82 @@ mod tests {
             String::from_utf8(buf2).unwrap(),
             "A,Ts,B\n1,1970-01-01T00:00:00.0000000Z,2\n"
         );
+    }
+
+    #[test]
+    fn webkit_micros_match_a_known_chrome_timestamp() {
+        // Unix 1_700_000_000s expressed on the 1601 epoch in microseconds.
+        assert_eq!(
+            WinTimestamp::from_webkit_micros(13_344_473_600_000_000).to_string(),
+            "2023-11-14T22:13:20.0000000Z"
+        );
+        // Sub-second precision survives, unlike SQLECmd's `datetime(...)` maps.
+        assert_eq!(
+            WinTimestamp::from_webkit_micros(13_344_473_600_123_456).to_string(),
+            "2023-11-14T22:13:20.1234560Z"
+        );
+    }
+
+    #[test]
+    fn webkit_one_microsecond_is_just_past_the_1601_epoch() {
+        assert_eq!(
+            WinTimestamp::from_webkit_micros(1).to_string(),
+            "1601-01-01T00:00:00.0000010Z"
+        );
+    }
+
+    #[test]
+    fn webkit_zero_and_negative_are_none() {
+        assert!(WinTimestamp::from_webkit_micros(0).is_none());
+        assert!(WinTimestamp::from_webkit_micros(-1).is_none());
+    }
+
+    #[test]
+    fn prtime_micros_round_trip_and_zero_is_none() {
+        assert_eq!(
+            WinTimestamp::from_unix_micros(1_700_000_000_123_456).to_string(),
+            "2023-11-14T22:13:20.1234560Z"
+        );
+        assert!(WinTimestamp::from_unix_micros(0).is_none());
+        assert_eq!(
+            WinTimestamp::from_unix_micros(1_700_000_000_000_000),
+            WinTimestamp::from_unix(1_700_000_000)
+        );
+    }
+
+    #[test]
+    fn unix_millis_round_trip_and_zero_is_none() {
+        assert_eq!(
+            WinTimestamp::from_unix_millis(1_700_000_000_123).to_string(),
+            "2023-11-14T22:13:20.1230000Z"
+        );
+        assert!(WinTimestamp::from_unix_millis(0).is_none());
+        assert_eq!(
+            WinTimestamp::from_unix_millis(1_700_000_000_000),
+            WinTimestamp::from_unix(1_700_000_000)
+        );
+    }
+
+    /// Regression: truncating division would give secs = 0 with a negative
+    /// remainder here, which is not representable as (secs, nanos).
+    #[test]
+    fn negative_sub_second_values_floor_correctly() {
+        assert_eq!(
+            WinTimestamp::from_unix_micros(-1).to_string(),
+            "1969-12-31T23:59:59.9999990Z"
+        );
+        assert_eq!(
+            WinTimestamp::from_unix_millis(-1).to_string(),
+            "1969-12-31T23:59:59.9990000Z"
+        );
+    }
+
+    #[test]
+    fn out_of_range_values_are_none_for_every_epoch() {
+        for extreme in [i64::MAX, i64::MIN] {
+            assert!(WinTimestamp::from_webkit_micros(extreme).is_none());
+            assert!(WinTimestamp::from_unix_micros(extreme).is_none());
+            assert!(WinTimestamp::from_unix_millis(extreme).is_none());
+        }
     }
 }

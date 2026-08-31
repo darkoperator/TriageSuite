@@ -35,6 +35,8 @@ Execution:
   --jobs <N>             Max tools to run concurrently per host (default: CPU count)
   --heavy-jobs <N>       Max memory-heavy parsers running concurrently (default: 1)
   --no-progress          Disable progress bars (colored status markers are kept on a TTY)
+  --no-timeline          Skip BrowserTriage's derived _Timeline dataset, which is routinely
+                         larger than all of its typed datasets combined
 
 External tools (optional):
   --config <PATH>        TOML config for Hayabusa/Takajo (see External tools section below)
@@ -62,6 +64,7 @@ evtx  EvtxTool     (Windows Event Log parser)
 mft   MftTool      (Master File Table parser)
 amc   AmcacheTriage   (Amcache execution/inventory parser)
 acc   AppCompatTriage (AppCompatCache/ShimCache parser)
+browser BrowserTriage  (Chromium/Firefox browser artifact parser)
 ```
 
 SQLETriage is intentionally excluded from the default orchestrator selection. Use
@@ -124,6 +127,7 @@ recommended baseline.
 | `sum` | `SystemIdentity.mdb`, `Current.mdb`, role `{GUID}.mdb` | `C:\Windows\System32\LogFiles\Sum\` | `SUM` |
 | `wxt` | `ActivitiesCache.db` | `...\ConnectedDevicesPlatform\L.<user>\` | `WindowsTimeline` |
 | `sqle` | `*.db`, `*.sqlite`, `History`, `Cookies`, … | application data paths | `SQLiteDatabases` (tool is opt-in; see above) |
+| `browser` | `History`, `Cookies`, `Web Data`, `Bookmarks`, `Login Data`, `Preferences`, `places.sqlite`, `cookies.sqlite`, `formhistory.sqlite`, `logins.json`, `extensions.json` | browser profile directories under user profiles | `Chrome`, `Edge`, `Firefox`, `BraveBrowser`, `Opera`, `Vivaldi` (or the compound `_KapeTriage`) |
 
 Compound targets are spelled with a leading underscore (`_KapeTriage`, `_SANS_Triage`,
 `_BasicCollection`), as are the NTFS meta-file targets (`_MFT`, `_Boot`, `_J`). Individual targets
@@ -309,14 +313,21 @@ Run with the `quick` profile via `--config triage.toml --profile quick`.
 ### Disabling with --skip
 
 `hayabusa` and `takajo` can be named in `--skip` alongside ordinary tool keys, e.g.
-`--skip hayabusa,takajo` or `--skip re,hayabusa`. Internally, the orchestrator strips those two
-names out of the list before it reaches the in-process tool-registry validation (`--only`/`--skip`
-for keys like `pe`/`evtx`), since the registry doesn't know about them and would otherwise reject
-them as unknown keys. It then checks the original `--skip` list directly: if `hayabusa` is
-present, `resolved_external.hayabusa.enabled` is forced to `false`; if `takajo` is present,
-`resolved_external.takajo.enabled` is forced to `false` — regardless of what the config file or
-selected profile set `enabled` to. This makes `--skip hayabusa,takajo` an unconditional,
-CLI-level force-disable for a single run, without needing to edit or maintain a config file.
+`--skip hayabusa,takajo` or `--skip re,hayabusa`. Internally, the orchestrator strips the
+external-tool keys — read from the external-tool registry
+(`crates/triage-orchestrator/src/external/registry.rs`), not a hardcoded list — out of `--skip`
+before it reaches the in-process tool-registry validation (`--only`/`--skip` for keys like
+`pe`/`evtx`), since that registry doesn't know about them and would otherwise reject them as
+unknown keys. It then re-reads the original `--skip` list and force-disables each external tool
+named there, regardless of what the config file or selected profile set `enabled` to. This makes
+`--skip hayabusa,takajo` an unconditional, CLI-level force-disable for a single run, without
+needing to edit or maintain a config file.
+
+The filtering is deliberately one-way: **`--only` still rejects external-tool keys.** `--only`
+selects which in-process parsers run, and an external binary is not one of them, so
+`--only hayabusa` exits 2 with `unknown tool key: hayabusa` rather than silently doing nothing.
+The two registries' key spaces are kept disjoint by a unit test, since a shared key would make
+`--skip <key>` silently stop working for the in-process parser.
 
 ### run_manifest.json shape
 

@@ -71,7 +71,10 @@ pub struct OutputOpts {
     pub json_root: Option<PathBuf>,
     pub overwrite: bool,
     pub run_id: String,
-    pub hunt: bool,
+    /// Per-run switches that change how individual tools are constructed
+    /// (`--hunt`, `--no-timeline`), carried here because the worker threads
+    /// rebuild each tool themselves.
+    pub tools: crate::registry::ToolOptions,
 }
 
 /// Structured outcome of running one tool over one host's file index.
@@ -186,24 +189,29 @@ pub fn run_tool_on_host(
             }
         }
     }
-    let mut dedupe = triage_core::dedupe::DedupeSet::new();
-    files.retain(|path| match dedupe.insert(path) {
-        Ok(true) => true,
-        Ok(false) => {
-            result.deduplicated += 1;
-            false
-        }
-        Err(error) => {
-            result.unreadable += 1;
-            result.failed += 1;
-            if result.reason_samples.len() < 10 {
-                result
-                    .reason_samples
-                    .push(format!("{}: {error}", path.display()));
+    // Content dedupe is per-tool policy, not universal: a tool whose output
+    // reports *where* an artifact was found needs both copies. See
+    // `Tool::dedupe_by_content`.
+    if tool.dedupe_by_content() {
+        let mut dedupe = triage_core::dedupe::DedupeSet::new();
+        files.retain(|path| match dedupe.insert(path) {
+            Ok(true) => true,
+            Ok(false) => {
+                result.deduplicated += 1;
+                false
             }
-            false
-        }
-    });
+            Err(error) => {
+                result.unreadable += 1;
+                result.failed += 1;
+                if result.reason_samples.len() < 10 {
+                    result
+                        .reason_samples
+                        .push(format!("{}: {error}", path.display()));
+                }
+                false
+            }
+        });
+    }
     if files.is_empty() {
         return result;
     }
@@ -342,7 +350,7 @@ pub fn run_tools_bounded(
                     break;
                 }
                 let t0 = std::time::Instant::now();
-                let result = match crate::registry::tool_for_key_with_hunt(&keys[i], out.hunt) {
+                let result = match crate::registry::tool_for_key_with(&keys[i], out.tools) {
                     Some(entry) => {
                         let name = entry.tool.binary_name().to_string();
                         if let Some(u) = ui {
@@ -486,7 +494,7 @@ mod tests {
             json_root: None,
             overwrite: true,
             run_id: "20260710120000000".into(),
-            hunt: false,
+            tools: crate::registry::ToolOptions::default(),
         };
         let res = run_tool_on_host(&entry, &host, &idx, &out);
         assert_eq!(res.files_matched, 0);
@@ -527,7 +535,7 @@ mod tests {
             json_root: None,
             overwrite: true,
             run_id: "20260710120000000".into(),
-            hunt: false,
+            tools: crate::registry::ToolOptions::default(),
         };
         let keys: Vec<String> = vec!["mft".into(), "pe".into(), "evtx".into(), "sum".into()];
 
@@ -632,7 +640,7 @@ mod tests {
             json_root: None,
             overwrite: true,
             run_id: "20260710120000000".into(),
-            hunt: false,
+            tools: crate::registry::ToolOptions::default(),
         };
 
         let res = run_tool_on_host_guarded(&entry, &host, &idx, &out);
@@ -643,6 +651,92 @@ mod tests {
         assert_eq!(res.key, "panic_tool");
         assert_eq!(res.binary_name, "PanicTool");
         assert_eq!(res.parsed, 0);
+    }
+
+    /// Content dedupe is per-tool policy. Two byte-identical artifacts at
+    /// different paths are one parse for a tool that opts in (the default) and
+    /// two for a tool that opts out.
+    ///
+    /// BrowserTriage opts out because it emits a `Profile` column derived from
+    /// the path: a browser update leaves `Snapshots/<version>` copies that are
+    /// byte-identical to the live profile, and collapsing them keeps the rows
+    /// but attributes them all to whichever copy was walked first. This drives
+    /// the real `run_tool_on_host` rather than asserting on the trait method,
+    /// because the method is only worth anything if `execute` honours it.
+    #[test]
+    fn content_dedupe_is_per_tool_policy() {
+        struct CountTool(bool);
+        impl Tool for CountTool {
+            fn binary_name(&self) -> &'static str {
+                "CountTool"
+            }
+            fn patterns(&self) -> &[&'static str] {
+                &["*.count"]
+            }
+            fn validate_legacy(&self, _path: &Path) -> bool {
+                true
+            }
+            fn dedupe_by_content(&self) -> bool {
+                self.0
+            }
+            fn datasets(&self) -> &'static [triage_core::output::dataset::DatasetSpec] {
+                const DS: &[triage_core::output::dataset::DatasetSpec] =
+                    &[triage_core::output::dataset::DatasetSpec {
+                        id: "main",
+                        default_basename: "CountTool_Output",
+                        framing: triage_core::output::dataset::JsonFraming::Ndjson,
+                        csv_only: false,
+                        override_suffix: None,
+                    }];
+                DS
+            }
+            fn scope(&self) -> triage_core::tool::Scope {
+                triage_core::tool::Scope::SystemWide
+            }
+            fn parse(
+                &self,
+                _path: &Path,
+                _out: &mut triage_core::output::router::OutputRouter,
+            ) -> Result<u64, triage_core::error::TriageError> {
+                Ok(0)
+            }
+        }
+
+        // Same bytes, two paths — exactly the Snapshots/<version> shape.
+        let td = TempDir::new().unwrap();
+        let root = td.path().join("root");
+        fs::create_dir_all(root.join("a")).unwrap();
+        fs::create_dir_all(root.join("b")).unwrap();
+        fs::write(root.join("a/x.count"), b"identical").unwrap();
+        fs::write(root.join("b/x.count"), b"identical").unwrap();
+        let host = crate::capture::HostCapture {
+            host: "H".into(),
+            output_id: "H".into(),
+            os: "x".into(),
+            collection_dir: root.clone(),
+            artifact_root: root.clone(),
+            source_archive: None,
+        };
+
+        for (dedupe, want_parsed, want_skipped) in [(true, 1, 1), (false, 2, 0)] {
+            let entry = crate::registry::ToolEntry {
+                key: "count_tool",
+                tool: Box::new(CountTool(dedupe)),
+            };
+            let idx = build_index(&root, std::slice::from_ref(&entry), &[]);
+            assert_eq!(idx.candidates["count_tool"].len(), 2, "both copies found");
+            let out = OutputOpts {
+                csv_root: Some(td.path().join(format!("out-{dedupe}"))),
+                json_root: None,
+                overwrite: true,
+                run_id: "20260710120000000".into(),
+                tools: crate::registry::ToolOptions::default(),
+            };
+            let res = run_tool_on_host(&entry, &host, &idx, &out);
+            assert_eq!(res.supported, 2, "dedupe={dedupe}: both validate");
+            assert_eq!(res.parsed, want_parsed, "dedupe={dedupe}: parsed");
+            assert_eq!(res.deduplicated, want_skipped, "dedupe={dedupe}: skipped");
+        }
     }
 
     /// Data-gated: mirrors pe-triage's own capture-driven tests. Uses the
@@ -672,7 +766,7 @@ mod tests {
             json_root: None,
             overwrite: true,
             run_id: "20260710120000000".into(),
-            hunt: false,
+            tools: crate::registry::ToolOptions::default(),
         };
         let res = run_tool_on_host(&entry, &host, &idx, &out);
         assert_eq!(res.error, None);

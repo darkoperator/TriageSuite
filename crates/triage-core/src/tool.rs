@@ -69,6 +69,24 @@ pub trait Tool {
         false
     }
 
+    /// Whether the orchestrator may skip an artifact whose content is
+    /// byte-identical to one already parsed for this tool on this host.
+    ///
+    /// True for almost everything: two identical copies of the same `.pf` or
+    /// hive are the same evidence collected twice, and parsing both would
+    /// duplicate every row. This is the Zimmerman-compatible default.
+    ///
+    /// Return false when the artifact's *location* is itself part of what the
+    /// tool reports, so that two identical files at different paths are two
+    /// distinct findings rather than one. BrowserTriage is the case: it emits
+    /// a `Profile` column, and a browser update leaves `Snapshots/<version>`
+    /// copies byte-identical to the live profile's. Deduplicating those keeps
+    /// the content but silently drops the second profile's attribution, which
+    /// makes "which profiles held this extension" unanswerable.
+    fn dedupe_by_content(&self) -> bool {
+        true
+    }
+
     /// The datasets this tool can emit.
     fn datasets(&self) -> &'static [DatasetSpec];
 

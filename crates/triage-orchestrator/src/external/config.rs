@@ -1,173 +1,129 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct HayabusaConfig {
-    pub bin: String,
-    pub enabled: bool,
-    pub csv: bool,
-    pub json: bool,
-    pub logon_summary: bool,
-    pub rules: Option<String>,
-    pub rules_config: Option<String>,
-    pub min_level: Option<String>,
-    pub profile: Option<String>,
-    pub threads: Option<u32>,
-    pub clobber: bool,
-    pub sort: bool,
-    pub scan_all_evtx_files: bool,
-    pub enable_all_rules: bool,
-    pub enable_noisy_rules: bool,
-    pub enable_deprecated_rules: bool,
-    pub enable_unsupported_rules: bool,
-    pub proven_rules: bool,
-    pub time_offset: Option<String>,
-    pub timeline_start: Option<String>,
-    pub timeline_end: Option<String>,
+/// Pick a required field: the overlay wins whenever it set the field at all,
+/// including when it set it to the same value as the base.
+///
+/// Generic rather than inlined into the macro so the `.clone()` is on an opaque
+/// `T` — an inlined `overlay.enabled.clone()` on an `Option<bool>` would trip
+/// clippy's `clone_on_copy` under CI's `-D warnings`.
+fn pick<T: Clone>(overlay: &Option<T>, base: &T) -> T {
+    overlay.clone().unwrap_or_else(|| base.clone())
 }
 
-impl Default for HayabusaConfig {
-    fn default() -> Self {
-        Self {
-            bin: "hayabusa".to_string(),
-            enabled: true,
-            csv: true,
-            json: true,
-            logon_summary: true,
-            rules: None,
-            rules_config: None,
-            min_level: None,
-            profile: None,
-            threads: None,
-            clobber: false,
-            sort: false,
-            scan_all_evtx_files: false,
-            enable_all_rules: false,
-            enable_noisy_rules: false,
-            enable_deprecated_rules: false,
-            enable_unsupported_rules: false,
-            proven_rules: false,
-            time_offset: None,
-            timeline_start: None,
-            timeline_end: None,
+/// Pick an optional field. An overlay that leaves it unset falls through to the
+/// base; there is deliberately no way to un-set a base value from an overlay,
+/// matching the "additive per-field merge" contract.
+fn pick_opt<T: Clone>(overlay: &Option<T>, base: &Option<T>) -> Option<T> {
+    overlay.clone().or_else(|| base.clone())
+}
+
+/// Declare one external tool's TOML table as a single field list, generating the
+/// three types that always travel together: the typed config struct with concrete
+/// defaults, the all-`Option` profile-overlay struct, and the additive per-field
+/// `merge_overlay`.
+///
+/// `req <name>: <ty> = <default>;` is a field with a built-in default — the tool
+/// always receives a value. `opt <name>: <ty>;` is a field that means "don't pass
+/// that flag" when unset, so the tool's own default applies and the schema doesn't
+/// drift when the tool changes it across versions.
+///
+/// Field declaration order is preserved verbatim, because `deny_unknown_fields`'
+/// "expected one of `bin`, `enabled`, ..." error text enumerates fields in
+/// declaration order and that text is user-facing.
+macro_rules! tool_table {
+    ($cfg:ident / $ovl:ident { $($body:tt)* }) => {
+        tool_table!(@munch $cfg / $ovl ; [] [] [] [] ; $($body)*);
+    };
+
+    (@munch $cfg:ident / $ovl:ident ;
+     [$($cf:tt)*] [$($of:tt)*] [$($df:tt)*] [$($mf:tt)*] ;
+     req $field:ident : $ty:ty = $default:expr ; $($rest:tt)*) => {
+        tool_table!(@munch $cfg / $ovl ;
+            [$($cf)* pub $field: $ty,]
+            [$($of)* pub $field: Option<$ty>,]
+            [$($df)* $field: $default,]
+            [$($mf)* $field = pick,]
+            ; $($rest)*);
+    };
+
+    (@munch $cfg:ident / $ovl:ident ;
+     [$($cf:tt)*] [$($of:tt)*] [$($df:tt)*] [$($mf:tt)*] ;
+     opt $field:ident : $ty:ty ; $($rest:tt)*) => {
+        tool_table!(@munch $cfg / $ovl ;
+            [$($cf)* pub $field: Option<$ty>,]
+            [$($of)* pub $field: Option<$ty>,]
+            [$($df)* $field: None,]
+            [$($mf)* $field = pick_opt,]
+            ; $($rest)*);
+    };
+
+    // Terminal arm. The merge accumulator is matched as `field = picker,` pairs
+    // rather than as a finished expression: `self` and `overlay` may only be
+    // written in the same expansion as the `fn merge_overlay` that binds them,
+    // and each recursive `@munch` step is a separate expansion.
+    (@munch $cfg:ident / $ovl:ident ;
+     [$($cf:tt)*] [$($of:tt)*] [$($df:tt)*]
+     [$($mfield:ident = $mpick:ident,)*] ; ) => {
+        #[derive(Debug, Clone, PartialEq, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        pub struct $cfg { $($cf)* }
+
+        impl Default for $cfg {
+            fn default() -> Self {
+                Self { $($df)* }
+            }
         }
+
+        #[derive(Debug, Clone, Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        pub struct $ovl { $($of)* }
+
+        impl $cfg {
+            /// Additive per-field merge: only fields set (`Some`) in `overlay` override
+            /// this base value; everything else falls through unchanged (spec: Profiles
+            /// section).
+            pub fn merge_overlay(&self, overlay: &$ovl) -> $cfg {
+                $cfg {
+                    $( $mfield: $mpick(&overlay.$mfield, &self.$mfield), )*
+                }
+            }
+        }
+    };
+}
+
+tool_table! {
+    HayabusaConfig / HayabusaOverlay {
+        req bin: String = "hayabusa".to_string();
+        req enabled: bool = true;
+        req csv: bool = true;
+        req json: bool = true;
+        req logon_summary: bool = true;
+        opt rules: String;
+        opt rules_config: String;
+        opt min_level: String;
+        opt profile: String;
+        opt threads: u32;
+        req clobber: bool = false;
+        req sort: bool = false;
+        req scan_all_evtx_files: bool = false;
+        req enable_all_rules: bool = false;
+        req enable_noisy_rules: bool = false;
+        req enable_deprecated_rules: bool = false;
+        req enable_unsupported_rules: bool = false;
+        req proven_rules: bool = false;
+        opt time_offset: String;
+        opt timeline_start: String;
+        opt timeline_end: String;
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct HayabusaOverlay {
-    pub bin: Option<String>,
-    pub enabled: Option<bool>,
-    pub csv: Option<bool>,
-    pub json: Option<bool>,
-    pub logon_summary: Option<bool>,
-    pub rules: Option<String>,
-    pub rules_config: Option<String>,
-    pub min_level: Option<String>,
-    pub profile: Option<String>,
-    pub threads: Option<u32>,
-    pub clobber: Option<bool>,
-    pub sort: Option<bool>,
-    pub scan_all_evtx_files: Option<bool>,
-    pub enable_all_rules: Option<bool>,
-    pub enable_noisy_rules: Option<bool>,
-    pub enable_deprecated_rules: Option<bool>,
-    pub enable_unsupported_rules: Option<bool>,
-    pub proven_rules: Option<bool>,
-    pub time_offset: Option<String>,
-    pub timeline_start: Option<String>,
-    pub timeline_end: Option<String>,
-}
-
-impl HayabusaConfig {
-    /// Additive per-field merge: only fields set (`Some`) in `overlay` override this base
-    /// value; everything else falls through unchanged (spec: Profiles section).
-    pub fn merge_overlay(&self, overlay: &HayabusaOverlay) -> HayabusaConfig {
-        HayabusaConfig {
-            bin: overlay.bin.clone().unwrap_or_else(|| self.bin.clone()),
-            enabled: overlay.enabled.unwrap_or(self.enabled),
-            csv: overlay.csv.unwrap_or(self.csv),
-            json: overlay.json.unwrap_or(self.json),
-            logon_summary: overlay.logon_summary.unwrap_or(self.logon_summary),
-            rules: overlay.rules.clone().or_else(|| self.rules.clone()),
-            rules_config: overlay
-                .rules_config
-                .clone()
-                .or_else(|| self.rules_config.clone()),
-            min_level: overlay.min_level.clone().or_else(|| self.min_level.clone()),
-            profile: overlay.profile.clone().or_else(|| self.profile.clone()),
-            threads: overlay.threads.or(self.threads),
-            clobber: overlay.clobber.unwrap_or(self.clobber),
-            sort: overlay.sort.unwrap_or(self.sort),
-            scan_all_evtx_files: overlay
-                .scan_all_evtx_files
-                .unwrap_or(self.scan_all_evtx_files),
-            enable_all_rules: overlay.enable_all_rules.unwrap_or(self.enable_all_rules),
-            enable_noisy_rules: overlay
-                .enable_noisy_rules
-                .unwrap_or(self.enable_noisy_rules),
-            enable_deprecated_rules: overlay
-                .enable_deprecated_rules
-                .unwrap_or(self.enable_deprecated_rules),
-            enable_unsupported_rules: overlay
-                .enable_unsupported_rules
-                .unwrap_or(self.enable_unsupported_rules),
-            proven_rules: overlay.proven_rules.unwrap_or(self.proven_rules),
-            time_offset: overlay
-                .time_offset
-                .clone()
-                .or_else(|| self.time_offset.clone()),
-            timeline_start: overlay
-                .timeline_start
-                .clone()
-                .or_else(|| self.timeline_start.clone()),
-            timeline_end: overlay
-                .timeline_end
-                .clone()
-                .or_else(|| self.timeline_end.clone()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct TakajoConfig {
-    pub bin: String,
-    pub enabled: bool,
-    pub level: Option<String>,
-    pub display_table: bool,
-}
-
-impl Default for TakajoConfig {
-    fn default() -> Self {
-        Self {
-            bin: "takajo".to_string(),
-            enabled: true,
-            level: None,
-            display_table: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct TakajoOverlay {
-    pub bin: Option<String>,
-    pub enabled: Option<bool>,
-    pub level: Option<String>,
-    pub display_table: Option<bool>,
-}
-
-impl TakajoConfig {
-    pub fn merge_overlay(&self, overlay: &TakajoOverlay) -> TakajoConfig {
-        TakajoConfig {
-            bin: overlay.bin.clone().unwrap_or_else(|| self.bin.clone()),
-            enabled: overlay.enabled.unwrap_or(self.enabled),
-            level: overlay.level.clone().or_else(|| self.level.clone()),
-            display_table: overlay.display_table.unwrap_or(self.display_table),
-        }
+tool_table! {
+    TakajoConfig / TakajoOverlay {
+        req bin: String = "takajo".to_string();
+        req enabled: bool = true;
+        opt level: String;
+        req display_table: bool = false;
     }
 }
 
@@ -226,14 +182,15 @@ impl ExternalConfig {
             }
             None => (self.hayabusa.clone(), self.takajo.clone()),
         };
-        if takajo.enabled && !hayabusa.json {
-            return Err(ConfigError(
-                "takajo.enabled = true requires hayabusa.json = true \
-                 (takajo automagic needs Hayabusa's JSONL output)"
-                    .to_string(),
-            ));
+        let resolved = ResolvedConfig { hayabusa, takajo };
+        // Each tool validates its own rules against the fully-merged config; a
+        // rule that spans two tables (Takajo needing Hayabusa's JSONL) belongs to
+        // whichever tool the requirement is *for*. Registry order decides which
+        // error surfaces first, so it is deterministic.
+        for tool in crate::external::registry::ALL {
+            tool.validate(&resolved)?;
         }
-        Ok(ResolvedConfig { hayabusa, takajo })
+        Ok(resolved)
     }
 }
 
@@ -287,6 +244,26 @@ display_table = false
         assert!(cfg.takajo.enabled);
         assert_eq!(cfg.takajo.level, None);
         assert!(!cfg.takajo.display_table);
+    }
+
+    /// The `tool_table!` macro must not cost anything in error quality: a typo'd
+    /// field still has to name itself, list the valid fields in declaration order,
+    /// and point at the line in the user's file. This is why the macro generates
+    /// typed structs rather than routing tables through `toml::Value`, which
+    /// would discard the span.
+    #[test]
+    fn unknown_field_error_names_the_field_the_alternatives_and_the_line() {
+        let err = ExternalConfig::parse("[hayabusa]\nbin = \"h\"\nrulez = \"./r\"\n").unwrap_err();
+        assert!(err.0.contains("rulez"), "got: {}", err.0);
+        assert!(err.0.contains("unknown field"), "got: {}", err.0);
+        assert!(err.0.contains("line 3"), "got: {}", err.0);
+        // Declaration order, which is what the macro's field list preserves.
+        let alternatives = err.0.find("expected one of").expect("alternatives listed");
+        let tail = &err.0[alternatives..];
+        let bin = tail.find("`bin`").expect("bin listed");
+        let enabled = tail.find("`enabled`").expect("enabled listed");
+        let rules = tail.find("`rules`").expect("rules listed");
+        assert!(bin < enabled && enabled < rules, "got: {}", err.0);
     }
 
     #[test]

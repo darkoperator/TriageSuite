@@ -31,6 +31,7 @@ triage-evtx = { path = "../triage-evtx" }
 mft-triage = { path = "../mft-triage" }
 amc-triage = { path = "../amc-triage" }
 acc-triage = { path = "../acc-triage" }
+browser-triage = { path = "../browser-triage" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

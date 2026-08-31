@@ -1,9 +1,100 @@
-use crate::external_config::{HayabusaConfig, TakajoConfig};
+use crate::external::args::{os, push_flag, push_opt};
+use crate::external::config::{HayabusaConfig, ResolvedConfig};
+use crate::external::tool::{
+    Artifacts, ExternalTool, HostContext, Invocation, OutputDirPolicy, OutputSpec, Publish,
+};
 use std::ffi::OsString;
 use std::path::Path;
 
-fn os<S: AsRef<std::ffi::OsStr>>(s: S) -> OsString {
-    s.as_ref().to_os_string()
+/// Output subdirectory under each host's output root.
+const DIR: &str = "Hayabusa";
+
+/// `logon-summary`'s `--output` is a filename prefix, not a file — Hayabusa
+/// derives a variable number of `<prefix>-*.csv` names from it.
+const LOGON_SUMMARY_PREFIX: &str = "logon-summary";
+
+/// The JSONL timeline Takajo's `automagic` consumes. Named here, next to the
+/// invocation that produces it, rather than in Takajo, which only reads it.
+pub const JSONL_SLOT: &str = "hayabusa.jsonl";
+
+pub struct Hayabusa;
+
+impl ExternalTool for Hayabusa {
+    fn key(&self) -> &'static str {
+        "hayabusa"
+    }
+
+    fn enabled(&self, cfg: &ResolvedConfig) -> bool {
+        cfg.hayabusa.enabled
+    }
+
+    fn disable(&self, cfg: &mut ResolvedConfig) {
+        cfg.hayabusa.enabled = false;
+    }
+
+    fn bin<'a>(&self, cfg: &'a ResolvedConfig) -> &'a str {
+        &cfg.hayabusa.bin
+    }
+
+    fn publishable_slots(&self) -> &'static [&'static str] {
+        &[JSONL_SLOT]
+    }
+
+    fn plan(
+        &self,
+        cfg: &ResolvedConfig,
+        ctx: &HostContext<'_>,
+        _prior: &Artifacts,
+    ) -> Vec<Invocation> {
+        let hayabusa = &cfg.hayabusa;
+        let dir = ctx.host_dir.join(DIR);
+        let input = &ctx.host.artifact_root;
+        let mut plan = Vec::new();
+
+        if hayabusa.csv {
+            let out_file = dir.join("timeline.csv");
+            plan.push(Invocation {
+                report_name: "hayabusa-csv",
+                args: hayabusa_csv_args(hayabusa, input, &out_file),
+                work_dir: dir.clone(),
+                dir_policy: OutputDirPolicy::CreateIfMissing,
+                outputs: OutputSpec::Path(out_file),
+                publishes: None,
+            });
+        }
+        if hayabusa.json {
+            let out_file = dir.join("timeline.jsonl");
+            plan.push(Invocation {
+                report_name: "hayabusa-json",
+                args: hayabusa_json_args(hayabusa, input, &out_file),
+                work_dir: dir.clone(),
+                dir_policy: OutputDirPolicy::CreateIfMissing,
+                outputs: OutputSpec::Path(out_file.clone()),
+                // The driver publishes this only if the file really exists
+                // afterwards, so the Takajo chain is gated on the JSONL being on
+                // disk rather than on a zero exit code.
+                publishes: Some(Publish {
+                    slot: JSONL_SLOT,
+                    path: out_file,
+                }),
+            });
+        }
+        if hayabusa.logon_summary {
+            let prefix_path = dir.join(LOGON_SUMMARY_PREFIX);
+            plan.push(Invocation {
+                report_name: "hayabusa-logon-summary",
+                args: hayabusa_logon_summary_args(hayabusa, input, &prefix_path),
+                work_dir: dir.clone(),
+                dir_policy: OutputDirPolicy::CreateIfMissing,
+                outputs: OutputSpec::PrefixedIn {
+                    dir: dir.clone(),
+                    prefix: LOGON_SUMMARY_PREFIX.to_string(),
+                },
+                publishes: None,
+            });
+        }
+        plan
+    }
 }
 
 /// Flags always passed for non-interactive, ISO-8601/UTC, unattended timeline generation
@@ -17,21 +108,6 @@ const HARDCODED_FLAGS: &[&str] = &["--no-wizard", "--quiet", "--no-color", "--is
 /// Same non-interactive/ISO-8601 intent as `HARDCODED_FLAGS`, minus `--no-wizard` for
 /// `logon-summary`, which has no wizard mode and rejects the flag outright.
 const LOGON_SUMMARY_HARDCODED_FLAGS: &[&str] = &["--quiet", "--no-color", "--iso-8601"];
-
-fn push_opt(args: &mut Vec<OsString>, flag: &str, value: &Option<String>) {
-    if let Some(v) = value {
-        if !v.is_empty() {
-            args.push(os(flag));
-            args.push(os(v));
-        }
-    }
-}
-
-fn push_flag(args: &mut Vec<OsString>, flag: &str, enabled: bool) {
-    if enabled {
-        args.push(os(flag));
-    }
-}
 
 fn shared_args(cfg: &HayabusaConfig) -> Vec<OsString> {
     let mut args = Vec::new();
@@ -135,29 +211,9 @@ pub fn hayabusa_logon_summary_args(
     args
 }
 
-pub fn takajo_automagic_args(
-    cfg: &TakajoConfig,
-    timeline_jsonl: &Path,
-    output_dir: &Path,
-) -> Vec<OsString> {
-    let mut args = vec![
-        os("automagic"),
-        os("-t"),
-        os(timeline_jsonl),
-        os("-o"),
-        os(output_dir),
-    ];
-    push_opt(&mut args, "--level", &cfg.level);
-    if cfg.display_table {
-        args.push(os("--displayTable"));
-    }
-    args
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::external_config::TakajoConfig;
 
     fn base() -> HayabusaConfig {
         HayabusaConfig::default()
@@ -254,45 +310,5 @@ mod tests {
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
         assert!(!strs.contains(&"--min-level".to_string()));
-    }
-
-    #[test]
-    fn automagic_args_wire_timeline_input_and_output_dir() {
-        let cfg = TakajoConfig::default();
-        let args = takajo_automagic_args(
-            &cfg,
-            Path::new("/out/Hayabusa/timeline.jsonl"),
-            Path::new("/out/Takajo"),
-        );
-        let strs: Vec<String> = args
-            .iter()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            strs,
-            vec![
-                "automagic",
-                "-t",
-                "/out/Hayabusa/timeline.jsonl",
-                "-o",
-                "/out/Takajo",
-            ]
-        );
-    }
-
-    #[test]
-    fn automagic_args_include_level_and_display_table_when_set() {
-        let cfg = TakajoConfig {
-            level: Some("low".to_string()),
-            display_table: true,
-            ..Default::default()
-        };
-        let args = takajo_automagic_args(&cfg, Path::new("/t.jsonl"), Path::new("/o"));
-        let strs: Vec<String> = args
-            .iter()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect();
-        assert!(strs.windows(2).any(|w| w == ["--level", "low"]));
-        assert!(strs.contains(&"--displayTable".to_string()));
     }
 }

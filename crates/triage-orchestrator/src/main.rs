@@ -51,6 +51,10 @@ enum Command {
         /// Inspect every file for SQLite content (requires --only sqle or a list containing sqle)
         #[arg(long, requires = "only")]
         hunt: bool,
+        /// Skip BrowserTriage's derived _Timeline dataset, which is routinely
+        /// larger than all of its typed datasets combined
+        #[arg(long)]
+        no_timeline: bool,
         /// Optional TOML config for hayabusa/takajo (see docs/tools/TriageSuite.md, "Config and profiles")
         #[arg(long)]
         config: Option<PathBuf>,
@@ -75,6 +79,7 @@ fn main() {
             heavy_jobs,
             no_progress,
             hunt,
+            no_timeline,
             config,
             profile,
         } => {
@@ -88,20 +93,26 @@ fn main() {
             let csv_root = want_csv.then(|| out.clone());
             let json_root = want_json.then(|| out.clone());
 
-            // `hayabusa`/`takajo` are external-tool keys, not in-process `Tool` registry keys
-            // (`registry::ALL_KEYS`), so they must not reach `select_with_hunt`'s --only/--skip
-            // validation (it would reject them as unknown). Strip them out for that call only;
-            // the raw `skip` vec (with them still present) is consulted separately below to
-            // toggle `resolved_external`.
+            // External-tool keys are not in-process `Tool` registry keys
+            // (`registry::ALL_KEYS`), so they must not reach `select_with`'s
+            // --only/--skip validation, which would reject them as unknown. Strip them
+            // out for that call only; the raw `skip` vec is consulted again below to
+            // force-disable them on the resolved config.
+            //
+            // Deliberately asymmetric: only `skip` is filtered. `--only hayabusa` must
+            // keep erroring with "unknown tool key", because --only selects which
+            // in-process parsers run and an external tool is not one of them.
+            let external_keys = triage_orchestrator::external::registry::keys();
             let registry_skip: Vec<String> = skip
                 .iter()
-                .filter(|k| k.as_str() != "hayabusa" && k.as_str() != "takajo")
+                .filter(|k| !external_keys.contains(&k.as_str()))
                 .cloned()
                 .collect();
-            let tools = match triage_orchestrator::registry::select_with_hunt(
+            let tool_options = triage_orchestrator::registry::ToolOptions { hunt, no_timeline };
+            let tools = match triage_orchestrator::registry::select_with(
                 &only,
                 &registry_skip,
-                hunt,
+                tool_options,
             ) {
                 Ok(t) => t,
                 Err(e) => {
@@ -119,15 +130,14 @@ fn main() {
                 },
                 None => String::new(),
             };
-            let parsed_external = match triage_orchestrator::external_config::ExternalConfig::parse(
-                &external_config_text,
-            ) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(2);
-                }
-            };
+            let parsed_external =
+                match triage_orchestrator::external::ExternalConfig::parse(&external_config_text) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(2);
+                    }
+                };
             let mut resolved_external = match parsed_external.resolve(profile.as_deref()) {
                 Ok(r) => r,
                 Err(e) => {
@@ -135,17 +145,15 @@ fn main() {
                     std::process::exit(2);
                 }
             };
-            // `hayabusa`/`takajo` aren't in the in-process tool registry (they're external
-            // binaries, not `Tool` impls), so `registry::select_with_hunt` can't validate or
-            // act on them as --only/--skip keys. Handle them here as a direct override on the
-            // resolved config instead, independent of the registry's own --only/--skip
-            // validation for tools like `pe`/`evtx`/etc, which must keep working exactly as
-            // today.
-            if skip.iter().any(|k| k == "hayabusa") {
-                resolved_external.hayabusa.enabled = false;
-            }
-            if skip.iter().any(|k| k == "takajo") {
-                resolved_external.takajo.enabled = false;
+            // `--skip <external key>` is an unconditional, CLI-level force-disable for
+            // one run: it wins over whatever the config file or the selected profile set
+            // `enabled` to, without needing to edit either.
+            for key in &external_keys {
+                if skip.iter().any(|k| k == key) {
+                    triage_orchestrator::external::registry::get(key)
+                        .expect("registry::keys() entries all resolve through get()")
+                        .disable(&mut resolved_external);
+                }
             }
             let tool_keys: Vec<String> = tools.iter().map(|t| t.key.to_string()).collect();
             let jobs = jobs.unwrap_or_else(|| {
@@ -161,7 +169,7 @@ fn main() {
                 json_root: json_root.clone(),
                 overwrite,
                 run_id: run_id.clone(),
-                hunt,
+                tools: tool_options,
             };
 
             let ui = triage_orchestrator::progress_ui::ProgressUi::new(no_progress);

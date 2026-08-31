@@ -286,6 +286,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "browser-triage"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "csv",
+ "predicates",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "triage-cli",
+ "triage-core",
+ "triage-sqlite",
+]
+
+[[package]]
 name = "bstr"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3164,6 +3183,7 @@ dependencies = [
  "acc-triage",
  "amc-triage",
  "assert_cmd",
+ "browser-triage",
  "chrono",
  "clap",
  "console 0.15.11",

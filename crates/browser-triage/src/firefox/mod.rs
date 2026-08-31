@@ -1,0 +1,115 @@
+//! Firefox-family parsers and their shared decoders.
+//!
+//! Firefox differs from Chromium in three ways that matter throughout this
+//! module: timestamps are PRTime microseconds since 1970 rather than WebKit
+//! microseconds since 1601, downloads live in an annotation table rather than
+//! their own, and cookie values are stored in the clear.
+
+pub mod autofill;
+pub mod bookmarks;
+pub mod cookies;
+pub mod downloads;
+pub mod extensions;
+pub mod history;
+pub mod keywords;
+pub mod logins;
+
+/// `moz_historyvisits.visit_type`.
+const VISIT_TYPES: &[(i64, &str)] = &[
+    (1, "Link"),
+    (2, "Typed"),
+    (3, "Bookmark"),
+    (4, "Embed"),
+    (5, "Redirect Permanent"),
+    (6, "Redirect Temporary"),
+    (7, "Download"),
+    (8, "Framed Link"),
+    (9, "Reload"),
+];
+
+/// `moz_historyvisits.source` — how the visit entered this profile. An
+/// imported or synced visit did not necessarily happen on this machine, which
+/// matters when attributing activity to a host.
+const VISIT_SOURCES: &[(i64, &str)] = &[
+    (0, "Organic"),
+    (1, "Synced"),
+    (2, "Imported"),
+    (3, "Imported from Chrome"),
+    (4, "Imported from Edge"),
+    (5, "Imported from Safari"),
+    (6, "Imported from Chromium"),
+];
+
+/// `moz_bookmarks.type`.
+const BOOKMARK_TYPES: &[(i64, &str)] = &[(1, "URL"), (2, "Folder"), (3, "Separator")];
+
+pub fn decode(table: &[(i64, &'static str)], value: Option<i64>) -> String {
+    match value {
+        None => String::new(),
+        Some(v) => table
+            .iter()
+            .find(|(candidate, _)| *candidate == v)
+            .map(|(_, name)| (*name).to_string())
+            .unwrap_or_else(|| format!("Unknown ({v})")),
+    }
+}
+
+pub fn visit_type(value: Option<i64>) -> String {
+    decode(VISIT_TYPES, value)
+}
+
+pub fn visit_source(value: Option<i64>) -> String {
+    decode(VISIT_SOURCES, value)
+}
+
+pub fn bookmark_type(value: Option<i64>) -> String {
+    decode(BOOKMARK_TYPES, value)
+}
+
+/// The friendly name of a Firefox root, from its stable GUID.
+pub fn root_name(guid: &str) -> &'static str {
+    match guid {
+        "root________" => "root",
+        "menu________" => "menu",
+        "toolbar_____" => "toolbar",
+        "unfiled_____" => "unfiled",
+        "mobile______" => "mobile",
+        "tags________" => "tags",
+        _ => "",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visit_types_decode_and_report_the_unknown() {
+        assert_eq!(visit_type(Some(1)), "Link");
+        assert_eq!(visit_type(Some(7)), "Download");
+        assert_eq!(visit_type(Some(99)), "Unknown (99)");
+        assert_eq!(visit_type(None), "");
+    }
+
+    /// An imported visit did not necessarily happen on this machine.
+    #[test]
+    fn visit_sources_name_imports_and_syncs() {
+        assert_eq!(visit_source(Some(0)), "Organic");
+        assert_eq!(visit_source(Some(1)), "Synced");
+        assert_eq!(visit_source(Some(3)), "Imported from Chrome");
+    }
+
+    #[test]
+    fn bookmark_roots_resolve_from_their_stable_guids() {
+        assert_eq!(root_name("toolbar_____"), "toolbar");
+        assert_eq!(root_name("unfiled_____"), "unfiled");
+        assert_eq!(root_name("not-a-root"), "");
+    }
+
+    #[test]
+    fn bookmark_types_decode() {
+        assert_eq!(bookmark_type(Some(1)), "URL");
+        assert_eq!(bookmark_type(Some(2)), "Folder");
+        assert_eq!(bookmark_type(Some(3)), "Separator");
+    }
+}

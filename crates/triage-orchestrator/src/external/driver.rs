@@ -1,208 +1,92 @@
+use super::config::ResolvedConfig;
+use super::invoke::{files_with_prefix, invoke, path_if_exists, resolve_bin};
+use super::registry;
+use super::report::{not_found, skipped, ExternalToolReport};
+use super::tool::{Artifacts, HostContext, Invocation, OutputDirPolicy, OutputSpec};
 use crate::capture::HostCapture;
-use crate::external_args::{
-    hayabusa_csv_args, hayabusa_json_args, hayabusa_logon_summary_args, takajo_automagic_args,
-};
-use crate::external_bin::resolve_bin;
-use crate::external_config::ResolvedConfig;
-use serde::Serialize;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ExternalToolReport {
-    pub tool: String,
-    pub found: bool,
-    pub invoked: bool,
-    pub exit_code: Option<i32>,
-    pub output_paths: Vec<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-fn not_found(tool: &str) -> ExternalToolReport {
-    ExternalToolReport {
-        tool: tool.to_string(),
-        found: false,
-        invoked: false,
-        exit_code: None,
-        output_paths: Vec::new(),
-        error: None,
-    }
-}
-
-/// `find_outputs` is called only when the process exits successfully, and decides what
-/// counts as "this tool's output" — a single file/dir existence check for most tools, or
-/// a directory glob for logon-summary (which writes a variable number of `<prefix>-*.csv`
-/// files, none at all if it found nothing to summarize).
-fn invoke(
-    bin: &Path,
-    args: &[OsString],
-    tool: &str,
-    find_outputs: impl FnOnce() -> Vec<PathBuf>,
-) -> ExternalToolReport {
-    let mut cmd = Command::new(bin);
-    cmd.args(args);
-    // Takajo (2.16.1) checks that its own executable exists relative to the process's
-    // cwd and refuses to run otherwise, regardless of the absolute paths passed via its
-    // own flags — it must be invoked from its own install directory. Setting this for
-    // every external tool (not just Takajo) is a safe, general default.
-    if let Some(parent) = bin.parent() {
-        cmd.current_dir(parent);
-    }
-    match cmd.output() {
-        Ok(out) => {
-            let ok = out.status.success();
-            // Only claim output paths in the manifest if they actually exist on disk —
-            // a zero exit code alone doesn't guarantee the tool wrote anything (see
-            // execute.rs's `result.output_paths.retain(|path| path.exists());` for the
-            // same convention).
-            let output_paths = if ok { find_outputs() } else { Vec::new() };
-            let error = (!ok).then(|| {
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                if stderr.is_empty() {
-                    format!("exited with status {:?}", out.status.code())
-                } else {
-                    stderr
-                }
-            });
-            ExternalToolReport {
-                tool: tool.to_string(),
-                found: true,
-                invoked: true,
-                exit_code: out.status.code(),
-                output_paths,
-                error,
+/// Create whatever the invocation's policy says the driver owns. Errors are
+/// swallowed deliberately: if the directory can't be made, the tool itself will
+/// fail with a far more specific message than we could invent here.
+fn prepare_dir(inv: &Invocation) {
+    match inv.dir_policy {
+        OutputDirPolicy::CreateIfMissing => {
+            let _ = std::fs::create_dir_all(&inv.work_dir);
+        }
+        OutputDirPolicy::ToolCreatesLeaf => {
+            if let Some(parent) = inv.work_dir.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
         }
-        Err(e) => ExternalToolReport {
-            tool: tool.to_string(),
-            found: true,
-            invoked: false,
-            exit_code: None,
-            output_paths: Vec::new(),
-            error: Some(e.to_string()),
-        },
     }
 }
 
-/// A single-element output list if `path` exists, else empty. The common case for tools
-/// that write exactly one known file/directory (everything but `logon-summary`).
-fn path_if_exists(path: &Path) -> Vec<PathBuf> {
-    if path.exists() {
-        vec![path.to_path_buf()]
-    } else {
-        Vec::new()
+fn discover(spec: &OutputSpec) -> Vec<PathBuf> {
+    match spec {
+        OutputSpec::Path(path) => path_if_exists(path),
+        OutputSpec::PrefixedIn { dir, prefix } => files_with_prefix(dir, prefix),
     }
 }
 
-/// Files directly under `dir` whose basename starts with `prefix`, sorted for
-/// deterministic reporting. Used for `logon-summary`, which writes a variable number of
-/// `<prefix>-*.csv` files (none at all if it found nothing to summarize).
-fn files_with_prefix(dir: &Path, prefix: &str) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut matches: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with(prefix))
-        })
-        .collect();
-    matches.sort();
-    matches
-}
-
-/// Run Hayabusa (up to three times: dfir-timeline csv / dfir-timeline jsonl /
-/// logon-summary) and, if it produced a JSONL timeline and Takajo is enabled, chain
-/// Takajo `automagic` off that output. One report per invocation attempted; a tool that
-/// isn't found or isn't enabled contributes at most one report explaining why nothing
-/// ran.
+/// Walk the external-tool registry once for one host, after that host's
+/// in-process tools finish.
+///
+/// Registry order is execution order, report order, and dependency order all at
+/// once: a tool's `requires()` slot is satisfied only from artifacts published by
+/// tools already visited, so there is no second pass and no dependency graph.
+///
+/// Per tool the gates run in a fixed order that is itself load-bearing —
+/// enabled, then prerequisite, then binary resolution, then plan. Checking the
+/// prerequisite before resolving the binary is why a tool with nothing to consume
+/// reports "skipped" rather than "not found on PATH", even when both are true.
+///
+/// One report per invocation attempted; a tool that is disabled contributes none,
+/// and a tool that can't run contributes exactly one explaining why.
 pub fn run_external_tools_for_host(
     resolved: &ResolvedConfig,
     host: &HostCapture,
     out_root: &Path,
 ) -> Vec<ExternalToolReport> {
     let mut reports = Vec::new();
-    let host_dir = out_root.join(&host.output_id);
-    let hayabusa_dir = host_dir.join("Hayabusa");
-    let takajo_dir = host_dir.join("Takajo");
-    let mut jsonl_output: Option<PathBuf> = None;
+    let mut artifacts = Artifacts::default();
+    // Computed once, here: every per-host output path must derive from
+    // `output_id`, never the raw hostname, so a machine collected twice keeps a
+    // stable directory per collection.
+    let ctx = HostContext {
+        host,
+        host_dir: out_root.join(&host.output_id),
+    };
 
-    if resolved.hayabusa.enabled {
-        match resolve_bin(&resolved.hayabusa.bin) {
-            Some(bin) => {
-                if resolved.hayabusa.csv {
-                    let _ = std::fs::create_dir_all(&hayabusa_dir);
-                    let out_file = hayabusa_dir.join("timeline.csv");
-                    let args =
-                        hayabusa_csv_args(&resolved.hayabusa, &host.artifact_root, &out_file);
-                    let check = out_file.clone();
-                    reports.push(invoke(&bin, &args, "hayabusa-csv", || {
-                        path_if_exists(&check)
-                    }));
-                }
-                if resolved.hayabusa.json {
-                    let _ = std::fs::create_dir_all(&hayabusa_dir);
-                    let out_file = hayabusa_dir.join("timeline.jsonl");
-                    let args =
-                        hayabusa_json_args(&resolved.hayabusa, &host.artifact_root, &out_file);
-                    let check = out_file.clone();
-                    let report = invoke(&bin, &args, "hayabusa-json", || path_if_exists(&check));
-                    // Gate the Takajo chain on the JSONL actually existing on disk, not
-                    // merely on the subprocess reporting success with no error.
-                    if out_file.is_file() {
-                        jsonl_output = Some(out_file);
-                    }
-                    reports.push(report);
-                }
-                if resolved.hayabusa.logon_summary {
-                    let _ = std::fs::create_dir_all(&hayabusa_dir);
-                    let prefix_path = hayabusa_dir.join("logon-summary");
-                    let args = hayabusa_logon_summary_args(
-                        &resolved.hayabusa,
-                        &host.artifact_root,
-                        &prefix_path,
-                    );
-                    let dir = hayabusa_dir.clone();
-                    reports.push(invoke(&bin, &args, "hayabusa-logon-summary", || {
-                        files_with_prefix(&dir, "logon-summary")
-                    }));
+    for tool in registry::ALL {
+        if !tool.enabled(resolved) {
+            continue;
+        }
+
+        if let Some(req) = tool.requires() {
+            if artifacts.get(req.slot).is_none() {
+                reports.push(skipped(req.report_name, req.skipped_message));
+                continue;
+            }
+        }
+
+        let Some(bin) = resolve_bin(tool.bin(resolved)) else {
+            reports.push(not_found(tool.key()));
+            continue;
+        };
+
+        for inv in tool.plan(resolved, &ctx, &artifacts) {
+            prepare_dir(&inv);
+            let outputs = &inv.outputs;
+            let report = invoke(&bin, &inv.args, inv.report_name, || discover(outputs));
+            // Publish on a real filesystem check, not on the exit status: a tool
+            // can report success and still write nothing.
+            if let Some(publish) = &inv.publishes {
+                if publish.path.is_file() {
+                    artifacts.publish(publish.slot, publish.path.clone());
                 }
             }
-            None => reports.push(not_found("hayabusa")),
-        }
-    }
-
-    if resolved.takajo.enabled {
-        match jsonl_output {
-            Some(jsonl) => match resolve_bin(&resolved.takajo.bin) {
-                Some(bin) => {
-                    // Takajo's `automagic -o` creates the leaf directory itself and
-                    // refuses to run if it already exists — only ensure its parent
-                    // (host_dir) is present, never pre-create takajo_dir.
-                    let _ = std::fs::create_dir_all(&host_dir);
-                    let args = takajo_automagic_args(&resolved.takajo, &jsonl, &takajo_dir);
-                    let check = takajo_dir.clone();
-                    reports.push(invoke(&bin, &args, "takajo-automagic", || {
-                        path_if_exists(&check)
-                    }));
-                }
-                None => reports.push(not_found("takajo")),
-            },
-            None => reports.push(ExternalToolReport {
-                tool: "takajo-automagic".to_string(),
-                found: true,
-                invoked: false,
-                exit_code: None,
-                output_paths: Vec::new(),
-                error: Some(
-                    "skipped: hayabusa did not produce a JSONL timeline for this host".to_string(),
-                ),
-            }),
+            reports.push(report);
         }
     }
 
@@ -212,7 +96,7 @@ pub fn run_external_tools_for_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::external_config::{HayabusaConfig, TakajoConfig};
+    use crate::external::config::{HayabusaConfig, TakajoConfig};
     use std::fs;
     use tempfile::TempDir;
 
@@ -261,7 +145,7 @@ mod tests {
         let hayabusa_stub = write_stub(&stub_dir, "hayabusa", "--output", false);
         let takajo_stub = write_stub(&stub_dir, "takajo", "-o", true);
 
-        let mut resolved = crate::external_config::ResolvedConfig {
+        let mut resolved = crate::external::config::ResolvedConfig {
             hayabusa: HayabusaConfig::default(),
             takajo: TakajoConfig::default(),
         };
@@ -330,7 +214,7 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&takajo_stub, perms).unwrap();
 
-        let mut resolved = crate::external_config::ResolvedConfig {
+        let mut resolved = crate::external::config::ResolvedConfig {
             hayabusa: HayabusaConfig::default(),
             takajo: TakajoConfig::default(),
         };
@@ -384,7 +268,7 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&bin, perms).unwrap();
 
-        let mut resolved = crate::external_config::ResolvedConfig {
+        let mut resolved = crate::external::config::ResolvedConfig {
             hayabusa: HayabusaConfig::default(),
             takajo: TakajoConfig::default(),
         };
@@ -415,7 +299,7 @@ mod tests {
     #[test]
     fn hayabusa_not_found_reports_and_skips_takajo() {
         let td = TempDir::new().unwrap();
-        let mut resolved = crate::external_config::ResolvedConfig {
+        let mut resolved = crate::external::config::ResolvedConfig {
             hayabusa: HayabusaConfig::default(),
             takajo: TakajoConfig::default(),
         };
@@ -441,7 +325,7 @@ mod tests {
     #[test]
     fn disabled_tools_produce_no_reports() {
         let td = TempDir::new().unwrap();
-        let mut resolved = crate::external_config::ResolvedConfig {
+        let mut resolved = crate::external::config::ResolvedConfig {
             hayabusa: HayabusaConfig::default(),
             takajo: TakajoConfig::default(),
         };
@@ -458,5 +342,47 @@ mod tests {
         };
         let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
         assert!(reports.is_empty());
+    }
+
+    /// A tool that reads stdin would block forever on an inherited terminal,
+    /// with nothing in the output to say why. Every external invocation runs
+    /// with stdin closed, so the read returns EOF immediately.
+    #[cfg(unix)]
+    #[test]
+    fn external_tools_run_with_stdin_closed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = TempDir::new().unwrap();
+        let stub_dir = td.path().join("bin");
+        fs::create_dir_all(&stub_dir).unwrap();
+        let bin = stub_dir.join("hayabusa");
+        fs::write(&bin, "#!/bin/sh\nread line\nexit 0\n").unwrap();
+        let mut perms = fs::metadata(&bin).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&bin, perms).unwrap();
+
+        let mut resolved = crate::external::config::ResolvedConfig {
+            hayabusa: HayabusaConfig::default(),
+            takajo: TakajoConfig::default(),
+        };
+        resolved.hayabusa.bin = bin.to_str().unwrap().to_string();
+        resolved.hayabusa.json = false; // isolate to the csv invocation
+        resolved.hayabusa.logon_summary = false;
+        resolved.takajo.enabled = false;
+
+        let host = HostCapture {
+            host: "H".to_string(),
+            output_id: "H".to_string(),
+            os: "unknown".to_string(),
+            collection_dir: td.path().to_path_buf(),
+            artifact_root: td.path().to_path_buf(),
+            source_archive: None,
+        };
+        let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
+
+        // `read` fails at EOF, so reaching `exit 0` at all proves the process was
+        // never left waiting for input.
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].exit_code, Some(0), "report: {:?}", reports[0]);
     }
 }
