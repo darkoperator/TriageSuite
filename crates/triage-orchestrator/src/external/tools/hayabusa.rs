@@ -145,9 +145,10 @@ fn shared_args(cfg: &HayabusaConfig) -> Vec<OsString> {
 /// command; format is chosen with `-t`/`--output-type` (csv/json/jsonl) instead of by
 /// which command you ran. The old `json-timeline -L/--JSONL-output` flag is gone — use
 /// `--output-type jsonl` (#1906).
-pub fn hayabusa_csv_args(
+fn dfir_timeline_args(
     cfg: &HayabusaConfig,
     input_dir: &Path,
+    output_type: &str,
     output_file: &Path,
 ) -> Vec<OsString> {
     let mut args = vec![
@@ -155,7 +156,7 @@ pub fn hayabusa_csv_args(
         os("--directory"),
         os(input_dir),
         os("--output-type"),
-        os("csv"),
+        os(output_type),
     ];
     args.extend(HARDCODED_FLAGS.iter().copied().map(os));
     args.extend(shared_args(cfg));
@@ -164,23 +165,20 @@ pub fn hayabusa_csv_args(
     args
 }
 
+pub fn hayabusa_csv_args(
+    cfg: &HayabusaConfig,
+    input_dir: &Path,
+    output_file: &Path,
+) -> Vec<OsString> {
+    dfir_timeline_args(cfg, input_dir, "csv", output_file)
+}
+
 pub fn hayabusa_json_args(
     cfg: &HayabusaConfig,
     input_dir: &Path,
     output_file: &Path,
 ) -> Vec<OsString> {
-    let mut args = vec![
-        os("dfir-timeline"),
-        os("--directory"),
-        os(input_dir),
-        os("--output-type"),
-        os("jsonl"),
-    ];
-    args.extend(HARDCODED_FLAGS.iter().copied().map(os));
-    args.extend(shared_args(cfg));
-    args.push(os("--output"));
-    args.push(os(output_file));
-    args
+    dfir_timeline_args(cfg, input_dir, "jsonl", output_file)
 }
 
 /// `logon-summary` is not sigma-rule-based, so only the flags it actually documents are

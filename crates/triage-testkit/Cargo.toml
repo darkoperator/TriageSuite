@@ -10,6 +10,10 @@ description = "Compatibility-test harness comparing TriageSuite output to Zimmer
 [dependencies]
 csv.workspace = true
 serde_json.workspace = true
+# Synthetic Velociraptor collection zips. flate2 is declared for the same
+# reason as in the orchestrator: zip alone does not compile without it.
+zip.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

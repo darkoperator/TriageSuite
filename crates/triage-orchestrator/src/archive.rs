@@ -22,9 +22,8 @@ use std::path::{Path, PathBuf};
 use zip::result::ZipError;
 use zip::ZipArchive;
 
-/// Marker files that identify a Velociraptor collection, mirroring
-/// `capture::is_collection`.
-const MARKERS: [&str; 2] = ["uploads.json", "client_info.json"];
+use crate::capture::COLLECTION_MARKERS;
+use crate::MAX_REASON_SAMPLES;
 
 /// Reason an archive did not become a capture. Every variant is a skip, not a
 /// hard failure: one bad file in a drop folder must not abort the whole run.
@@ -42,17 +41,16 @@ pub enum ArchiveSkip {
     Stale(String),
 }
 
-impl ArchiveSkip {
-    pub fn message(&self) -> String {
+impl std::fmt::Display for ArchiveSkip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ArchiveSkip::NotAnArchive(e) => format!("not a valid zip archive ({e})"),
-            ArchiveSkip::Encrypted => "encrypted archives are not supported".to_string(),
-            ArchiveSkip::NotACollection => {
-                "no Velociraptor collection inside (uploads.json + client_info.json not found)"
-                    .to_string()
-            }
-            ArchiveSkip::Overlapping => "archive has overlapping entries".to_string(),
-            ArchiveSkip::Stale(why) => format!("{why}; rerun with --overwrite"),
+            ArchiveSkip::NotAnArchive(e) => write!(f, "not a valid zip archive ({e})"),
+            ArchiveSkip::Encrypted => f.write_str("encrypted archives are not supported"),
+            ArchiveSkip::NotACollection => f.write_str(
+                "no Velociraptor collection inside (uploads.json + client_info.json not found)",
+            ),
+            ArchiveSkip::Overlapping => f.write_str("archive has overlapping entries"),
+            ArchiveSkip::Stale(why) => write!(f, "{why}; rerun with --overwrite"),
         }
     }
 }
@@ -100,13 +98,31 @@ pub struct ExtractReport {
     pub files_written: u64,
     pub bytes_written: u64,
     pub skipped_entries: u64,
-    /// Capped, matching `ToolRunResult::reason_samples`.
+    /// Capped at `MAX_REASON_SAMPLES`, matching `ToolRunResult::reason_samples`.
     pub skipped_reasons: Vec<String>,
     pub error: Option<String>,
     pub duration: std::time::Duration,
 }
 
-const MAX_REASONS: usize = 10;
+impl ExtractReport {
+    /// A report for an archive that was not extracted this run because a
+    /// previous, still-valid extraction at `dest` was reused. The counts are
+    /// the ones that run recorded.
+    pub fn reused(archive: &Path, dest: &Path, files_written: u64, bytes_written: u64) -> Self {
+        ExtractReport {
+            archive: archive.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reused: true,
+            re_extracted: false,
+            files_written,
+            bytes_written,
+            skipped_entries: 0,
+            skipped_reasons: Vec::new(),
+            error: None,
+            duration: std::time::Duration::default(),
+        }
+    }
+}
 
 pub fn is_zip_path(path: &Path) -> bool {
     path.extension()
@@ -163,7 +179,7 @@ fn holds_collection(archive: &ZipArchive<BufReader<File>>) -> bool {
             2 => (parts[0].to_string(), parts[1]),
             _ => continue, // deeper than one wrapper directory
         };
-        for (i, marker) in MARKERS.iter().enumerate() {
+        for (i, marker) in COLLECTION_MARKERS.iter().enumerate() {
             if file.eq_ignore_ascii_case(marker) {
                 seen.entry(prefix.clone()).or_default()[i] = true;
             }
@@ -236,33 +252,27 @@ pub fn extract(
 
     let note = |report: &mut ExtractReport, reason: String| {
         report.skipped_entries += 1;
-        if report.skipped_reasons.len() < MAX_REASONS {
+        if report.skipped_reasons.len() < MAX_REASON_SAMPLES {
             report.skipped_reasons.push(reason);
         }
     };
 
-    let file = match File::open(&insp.path) {
-        Ok(f) => f,
-        Err(e) => {
-            report.error = Some(e.to_string());
-            report.duration = started.elapsed();
-            return report;
-        }
-    };
-    let mut archive = match ZipArchive::new(BufReader::new(file)) {
+    let opened = File::open(&insp.path)
+        .map_err(|e| e.to_string())
+        .and_then(|f| ZipArchive::new(BufReader::new(f)).map_err(|e| e.to_string()))
+        .and_then(|a| {
+            std::fs::create_dir_all(dest)
+                .map(|_| a)
+                .map_err(|e| e.to_string())
+        });
+    let mut archive = match opened {
         Ok(a) => a,
         Err(e) => {
-            report.error = Some(e.to_string());
+            report.error = Some(e);
             report.duration = started.elapsed();
             return report;
         }
     };
-
-    if let Err(e) = std::fs::create_dir_all(dest) {
-        report.error = Some(e.to_string());
-        report.duration = started.elapsed();
-        return report;
-    }
 
     let mut next_tick: u128 = 0;
     for i in 0..archive.len() {
@@ -368,11 +378,13 @@ pub fn extract(
 mod tests {
     use super::*;
     use std::io::Write;
+    use triage_testkit::synthetic::write_collection_zip;
     use zip::write::SimpleFileOptions;
     use zip::CompressionMethod;
 
-    /// Build a zip from (name, contents) pairs. Stored, so these tests don't
-    /// depend on the deflate backend.
+    /// Build a zip from (name, contents) pairs, for the tests that need
+    /// entries the standard synthetic collection does not have. Stored, so
+    /// these tests don't depend on the deflate backend.
     fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
         let f = File::create(path).unwrap();
         let mut w = zip::ZipWriter::new(f);
@@ -384,34 +396,11 @@ mod tests {
         w.finish().unwrap();
     }
 
-    fn collection_entries(prefix: &str) -> Vec<(String, Vec<u8>)> {
-        vec![
-            (format!("{prefix}uploads.json"), b"{}".to_vec()),
-            (
-                format!("{prefix}client_info.json"),
-                br#"{"Hostname":"H1"}"#.to_vec(),
-            ),
-            (
-                format!("{prefix}uploads/auto/C%3A/Windows/Prefetch/A.pf"),
-                b"pf".to_vec(),
-            ),
-        ]
-    }
-
-    fn write_collection_zip(path: &Path, prefix: &str) {
-        let owned = collection_entries(prefix);
-        let refs: Vec<(&str, &[u8])> = owned
-            .iter()
-            .map(|(n, b)| (n.as_str(), b.as_slice()))
-            .collect();
-        make_zip(path, &refs);
-    }
-
     #[test]
     fn probes_collection_at_archive_root() {
         let td = tempfile::tempdir().unwrap();
         let z = td.path().join("c.zip");
-        write_collection_zip(&z, "");
+        write_collection_zip(&z, "", "H1");
         assert!(matches!(probe(&z), Probe::Usable(_)));
     }
 
@@ -419,7 +408,7 @@ mod tests {
     fn probes_collection_under_a_wrapper_directory() {
         let td = tempfile::tempdir().unwrap();
         let z = td.path().join("c.zip");
-        write_collection_zip(&z, "Collection-H1-2026/");
+        write_collection_zip(&z, "Collection-H1-2026/", "H1");
         assert!(matches!(probe(&z), Probe::Usable(_)));
     }
 
@@ -449,7 +438,7 @@ mod tests {
     fn markers_deeper_than_one_wrapper_do_not_count() {
         let td = tempfile::tempdir().unwrap();
         let z = td.path().join("deep.zip");
-        write_collection_zip(&z, "a/b/c/");
+        write_collection_zip(&z, "a/b/c/", "H1");
         assert!(matches!(
             probe(&z),
             Probe::Skip(ArchiveSkip::NotACollection)

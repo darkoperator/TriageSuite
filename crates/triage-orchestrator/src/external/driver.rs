@@ -96,73 +96,49 @@ pub fn run_external_tools_for_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::external::config::{HayabusaConfig, TakajoConfig};
+    use crate::capture::test_host;
     use std::fs;
     use tempfile::TempDir;
-
     #[cfg(unix)]
-    mod unix_stubs {
-        use super::*;
-        use std::os::unix::fs::PermissionsExt;
+    use triage_testkit::synthetic::{write_executable, write_stub};
 
-        /// Writes an executable stub script that, when invoked, scans its own argv for the
-        /// `output_flag` and, for the argument immediately following it, either writes a
-        /// placeholder file at that path (`as_dir == false`) or creates it as a directory
-        /// containing a `report.txt` (`as_dir == true`) — enough to exercise the real
-        /// orchestration/chaining logic without needing the actual 60MB+ binaries.
-        pub(super) fn write_stub(
-            dir: &Path,
-            name: &str,
-            output_flag: &str,
-            as_dir: bool,
-        ) -> PathBuf {
-            let path = dir.join(name);
-            let body = if as_dir {
-                format!(
-                    "#!/bin/sh\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"{output_flag}\" ]; then\n    mkdir -p \"$a\"\n    echo stub > \"$a/report.txt\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n"
-                )
-            } else {
-                format!(
-                    "#!/bin/sh\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"{output_flag}\" ]; then\n    echo stub > \"$a\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n"
-                )
-            };
-            fs::write(&path, body).unwrap();
-            let mut perms = fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&path, perms).unwrap();
-            path
-        }
+    /// A config whose only difference from the defaults is that the two
+    /// binaries resolve to the given paths.
+    fn config_with_bins(hayabusa: &Path, takajo: &Path) -> ResolvedConfig {
+        let mut resolved = ResolvedConfig::default();
+        resolved.hayabusa.bin = hayabusa.to_str().unwrap().to_string();
+        resolved.takajo.bin = takajo.to_str().unwrap().to_string();
+        resolved
     }
-    #[cfg(unix)]
-    use unix_stubs::write_stub;
+
+    /// A config that runs exactly one invocation: hayabusa-csv against `bin`.
+    fn csv_only_config(bin: &Path) -> ResolvedConfig {
+        let mut resolved = ResolvedConfig::default();
+        resolved.hayabusa.bin = bin.to_str().unwrap().to_string();
+        resolved.hayabusa.json = false;
+        resolved.hayabusa.logon_summary = false;
+        resolved.takajo.enabled = false;
+        resolved
+    }
+
+    fn stub_dir(td: &TempDir) -> PathBuf {
+        let dir = td.path().join("bin");
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[cfg(unix)]
     #[test]
     fn chains_takajo_off_hayabusas_jsonl_output() {
         let td = TempDir::new().unwrap();
-        let stub_dir = td.path().join("bin");
-        fs::create_dir_all(&stub_dir).unwrap();
-        let hayabusa_stub = write_stub(&stub_dir, "hayabusa", "--output", false);
-        let takajo_stub = write_stub(&stub_dir, "takajo", "-o", true);
-
-        let mut resolved = crate::external::config::ResolvedConfig {
-            hayabusa: HayabusaConfig::default(),
-            takajo: TakajoConfig::default(),
-        };
-        resolved.hayabusa.bin = hayabusa_stub.to_str().unwrap().to_string();
-        resolved.takajo.bin = takajo_stub.to_str().unwrap().to_string();
-
-        let host = HostCapture {
-            host: "H".to_string(),
-            output_id: "H".to_string(),
-            os: "unknown".to_string(),
-            collection_dir: td.path().to_path_buf(),
-            artifact_root: td.path().to_path_buf(),
-            source_archive: None,
-        };
+        let stubs = stub_dir(&td);
+        let resolved = config_with_bins(
+            &write_stub(&stubs, "hayabusa", "--output", false),
+            &write_stub(&stubs, "takajo", "-o", true),
+        );
         let out_root = td.path().join("out");
 
-        let reports = run_external_tools_for_host(&resolved, &host, &out_root);
+        let reports = run_external_tools_for_host(&resolved, &test_host(td.path()), &out_root);
 
         let names: Vec<&str> = reports.iter().map(|r| r.tool.as_str()).collect();
         assert_eq!(
@@ -201,36 +177,20 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn does_not_pre_create_the_takajo_output_directory() {
-        use std::os::unix::fs::PermissionsExt;
-
         let td = TempDir::new().unwrap();
-        let stub_dir = td.path().join("bin");
-        fs::create_dir_all(&stub_dir).unwrap();
-        let hayabusa_stub = write_stub(&stub_dir, "hayabusa", "--output", false);
-        let body = "#!/bin/sh\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"-o\" ]; then\n    if [ -d \"$a\" ]; then\n      echo \"directory already exists: $a\" >&2\n      exit 1\n    fi\n    mkdir -p \"$a\"\n    echo stub > \"$a/report.txt\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n";
-        let takajo_stub = stub_dir.join("takajo");
-        fs::write(&takajo_stub, body).unwrap();
-        let mut perms = fs::metadata(&takajo_stub).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&takajo_stub, perms).unwrap();
-
-        let mut resolved = crate::external::config::ResolvedConfig {
-            hayabusa: HayabusaConfig::default(),
-            takajo: TakajoConfig::default(),
-        };
-        resolved.hayabusa.bin = hayabusa_stub.to_str().unwrap().to_string();
-        resolved.takajo.bin = takajo_stub.to_str().unwrap().to_string();
-
-        let host = HostCapture {
-            host: "H".to_string(),
-            output_id: "H".to_string(),
-            os: "unknown".to_string(),
-            collection_dir: td.path().to_path_buf(),
-            artifact_root: td.path().to_path_buf(),
-            source_archive: None,
-        };
+        let stubs = stub_dir(&td);
+        let takajo_stub = stubs.join("takajo");
+        write_executable(
+            &takajo_stub,
+            "#!/bin/sh\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"-o\" ]; then\n    if [ -d \"$a\" ]; then\n      echo \"directory already exists: $a\" >&2\n      exit 1\n    fi\n    mkdir -p \"$a\"\n    echo stub > \"$a/report.txt\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n",
+        );
+        let resolved = config_with_bins(
+            &write_stub(&stubs, "hayabusa", "--output", false),
+            &takajo_stub,
+        );
         let out_root = td.path().join("out");
-        let reports = run_external_tools_for_host(&resolved, &host, &out_root);
+
+        let reports = run_external_tools_for_host(&resolved, &test_host(td.path()), &out_root);
 
         let takajo_report = reports
             .iter()
@@ -252,40 +212,21 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn invokes_the_tool_with_cwd_set_to_its_own_directory() {
-        use std::os::unix::fs::PermissionsExt;
-
         let td = TempDir::new().unwrap();
-        let stub_dir = td.path().join("bin");
-        fs::create_dir_all(&stub_dir).unwrap();
-        let expected_cwd = stub_dir.canonicalize().unwrap();
-        let body = format!(
-            "#!/bin/sh\nif [ \"$(pwd -P)\" != \"{}\" ]; then\n  echo \"wrong cwd: $(pwd -P)\" >&2\n  exit 1\nfi\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"--output\" ]; then\n    echo stub > \"$a\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n",
-            expected_cwd.display()
+        let stubs = stub_dir(&td);
+        let expected_cwd = stubs.canonicalize().unwrap();
+        let bin = stubs.join("cwd-sensitive-tool");
+        write_executable(
+            &bin,
+            &format!(
+                "#!/bin/sh\nif [ \"$(pwd -P)\" != \"{}\" ]; then\n  echo \"wrong cwd: $(pwd -P)\" >&2\n  exit 1\nfi\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"--output\" ]; then\n    echo stub > \"$a\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n",
+                expected_cwd.display()
+            ),
         );
-        let bin = stub_dir.join("cwd-sensitive-tool");
-        fs::write(&bin, body).unwrap();
-        let mut perms = fs::metadata(&bin).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&bin, perms).unwrap();
+        let resolved = csv_only_config(&bin);
 
-        let mut resolved = crate::external::config::ResolvedConfig {
-            hayabusa: HayabusaConfig::default(),
-            takajo: TakajoConfig::default(),
-        };
-        resolved.hayabusa.bin = bin.to_str().unwrap().to_string();
-        resolved.hayabusa.json = false; // isolate to the csv invocation
-        resolved.hayabusa.logon_summary = false; // isolate to the csv invocation
-        resolved.takajo.enabled = false;
-
-        let host = HostCapture {
-            host: "H".to_string(),
-            output_id: "H".to_string(),
-            os: "unknown".to_string(),
-            collection_dir: td.path().to_path_buf(),
-            artifact_root: td.path().to_path_buf(),
-            source_archive: None,
-        };
-        let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
+        let reports =
+            run_external_tools_for_host(&resolved, &test_host(td.path()), &td.path().join("out"));
 
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].exit_code, Some(0), "report: {:?}", reports[0]);
@@ -299,21 +240,11 @@ mod tests {
     #[test]
     fn hayabusa_not_found_reports_and_skips_takajo() {
         let td = TempDir::new().unwrap();
-        let mut resolved = crate::external::config::ResolvedConfig {
-            hayabusa: HayabusaConfig::default(),
-            takajo: TakajoConfig::default(),
-        };
+        let mut resolved = ResolvedConfig::default();
         resolved.hayabusa.bin = "definitely-not-a-real-binary-xyz123".to_string();
 
-        let host = HostCapture {
-            host: "H".to_string(),
-            output_id: "H".to_string(),
-            os: "unknown".to_string(),
-            collection_dir: td.path().to_path_buf(),
-            artifact_root: td.path().to_path_buf(),
-            source_archive: None,
-        };
-        let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
+        let reports =
+            run_external_tools_for_host(&resolved, &test_host(td.path()), &td.path().join("out"));
 
         assert_eq!(reports.len(), 2); // hayabusa "not found" + takajo "skipped"
         assert_eq!(reports[0].tool, "hayabusa");
@@ -325,22 +256,12 @@ mod tests {
     #[test]
     fn disabled_tools_produce_no_reports() {
         let td = TempDir::new().unwrap();
-        let mut resolved = crate::external::config::ResolvedConfig {
-            hayabusa: HayabusaConfig::default(),
-            takajo: TakajoConfig::default(),
-        };
+        let mut resolved = ResolvedConfig::default();
         resolved.hayabusa.enabled = false;
         resolved.takajo.enabled = false;
 
-        let host = HostCapture {
-            host: "H".to_string(),
-            output_id: "H".to_string(),
-            os: "unknown".to_string(),
-            collection_dir: td.path().to_path_buf(),
-            artifact_root: td.path().to_path_buf(),
-            source_archive: None,
-        };
-        let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
+        let reports =
+            run_external_tools_for_host(&resolved, &test_host(td.path()), &td.path().join("out"));
         assert!(reports.is_empty());
     }
 
@@ -350,35 +271,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn external_tools_run_with_stdin_closed() {
-        use std::os::unix::fs::PermissionsExt;
-
         let td = TempDir::new().unwrap();
-        let stub_dir = td.path().join("bin");
-        fs::create_dir_all(&stub_dir).unwrap();
-        let bin = stub_dir.join("hayabusa");
-        fs::write(&bin, "#!/bin/sh\nread line\nexit 0\n").unwrap();
-        let mut perms = fs::metadata(&bin).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&bin, perms).unwrap();
+        let bin = stub_dir(&td).join("hayabusa");
+        write_executable(&bin, "#!/bin/sh\nread line\nexit 0\n");
+        let resolved = csv_only_config(&bin);
 
-        let mut resolved = crate::external::config::ResolvedConfig {
-            hayabusa: HayabusaConfig::default(),
-            takajo: TakajoConfig::default(),
-        };
-        resolved.hayabusa.bin = bin.to_str().unwrap().to_string();
-        resolved.hayabusa.json = false; // isolate to the csv invocation
-        resolved.hayabusa.logon_summary = false;
-        resolved.takajo.enabled = false;
-
-        let host = HostCapture {
-            host: "H".to_string(),
-            output_id: "H".to_string(),
-            os: "unknown".to_string(),
-            collection_dir: td.path().to_path_buf(),
-            artifact_root: td.path().to_path_buf(),
-            source_archive: None,
-        };
-        let reports = run_external_tools_for_host(&resolved, &host, &td.path().join("out"));
+        let reports =
+            run_external_tools_for_host(&resolved, &test_host(td.path()), &td.path().join("out"));
 
         // `read` fails at EOF, so reaching `exit 0` at all proves the process was
         // never left waiting for input.

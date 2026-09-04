@@ -1,25 +1,27 @@
-// (filled in Tasks 6-7)
-
 use crate::capture::HostCapture;
-use crate::registry::ToolEntry;
-use globset::{Glob, GlobSetBuilder};
+use crate::registry::{ToolEntry, ToolOptions};
+use crate::MAX_REASON_SAMPLES;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
+use std::time::Instant;
 use triage_cli::progress::NullProgress;
 use triage_core::error::RunExit;
 use triage_core::output::layout::OutputLayoutMode;
 use triage_core::output::router::{OutputRouter, RouterOptions};
-use triage_core::tool::Validation;
+use triage_core::tool::{ResourceClass, Validation};
 
 /// Single recursive walk over `root` matching the union of all selected
-/// tools' filename globs. One walk feeds every tool via `files_for_tool`.
+/// tools' filename globs. One walk feeds every tool.
 pub struct DiscoveryIndex {
     pub candidates: HashMap<String, Vec<PathBuf>>,
     pub inaccessible: u64,
 }
 
 pub fn build_index(root: &Path, tools: &[ToolEntry], exclude: &[PathBuf]) -> DiscoveryIndex {
-    let plans: Vec<(&str, globset::GlobSet)> = tools
+    let plans: Vec<(&str, GlobSet)> = tools
         .iter()
         .map(|entry| (entry.key, glob_set(entry.tool.patterns())))
         .collect();
@@ -33,10 +35,9 @@ pub fn build_index(root: &Path, tools: &[ToolEntry], exclude: &[PathBuf]) -> Dis
             let lower = name.to_string_lossy().to_lowercase();
             for (key, set) in &plans {
                 if set.is_match(&lower) {
-                    candidates
-                        .entry((*key).to_string())
-                        .or_default()
-                        .push(path.to_path_buf());
+                    if let Some(files) = candidates.get_mut(*key) {
+                        files.push(path.to_path_buf());
+                    }
                 }
             }
         });
@@ -49,21 +50,17 @@ pub fn build_index(root: &Path, tools: &[ToolEntry], exclude: &[PathBuf]) -> Dis
     }
 }
 
-fn glob_set(patterns: &[&'static str]) -> globset::GlobSet {
+/// Case-insensitive filename matcher for one tool's patterns. The patterns are
+/// static strings the tool ships with, so one that fails to compile is a
+/// programming error, not a runtime condition.
+fn glob_set(patterns: &[&'static str]) -> GlobSet {
     let mut b = GlobSetBuilder::new();
     for p in patterns {
-        // Case-insensitive filename match.
-        if let Ok(g) = Glob::new(&p.to_lowercase()) {
-            b.add(g);
-        }
+        b.add(Glob::new(&p.to_lowercase()).expect("tool pattern must be a valid glob"));
     }
-    b.build()
-        .unwrap_or_else(|_| GlobSetBuilder::new().build().unwrap())
+    b.build().expect("tool patterns must build a glob set")
 }
 
-/// Filter the shared discovery index down to one tool's own `patterns()`,
-/// then confirm each candidate with `tool.validate()`. A single file in the
-/// index may pass this for multiple tools (many-to-many dispatch).
 /// Where a `run_tool_on_host` invocation should write its output, and
 /// whether it may overwrite existing files.
 pub struct OutputOpts {
@@ -74,7 +71,7 @@ pub struct OutputOpts {
     /// Per-run switches that change how individual tools are constructed
     /// (`--hunt`, `--no-timeline`), carried here because the worker threads
     /// rebuild each tool themselves.
-    pub tools: crate::registry::ToolOptions,
+    pub tools: ToolOptions,
 }
 
 /// Structured outcome of running one tool over one host's file index.
@@ -96,6 +93,49 @@ pub struct ToolRunResult {
     pub exit: Option<RunExit>,
 }
 
+impl ToolRunResult {
+    /// An empty result for `key`: every count zero, nothing failed.
+    pub fn new(key: impl Into<String>, binary_name: impl Into<String>) -> Self {
+        ToolRunResult {
+            key: key.into(),
+            binary_name: binary_name.into(),
+            files_matched: 0,
+            supported: 0,
+            unsupported: 0,
+            corrupt: 0,
+            unreadable: 0,
+            deduplicated: 0,
+            reason_samples: Vec::new(),
+            parsed: 0,
+            failed: 0,
+            records: 0,
+            output_paths: Vec::new(),
+            error: None,
+            exit: None,
+        }
+    }
+
+    /// A result for a tool that never ran at all, carrying `message` as both
+    /// its run-level error and its only reason sample.
+    pub fn fatal(key: impl Into<String>, binary_name: impl Into<String>, message: String) -> Self {
+        ToolRunResult {
+            reason_samples: vec![message.clone()],
+            error: Some(message),
+            exit: Some(RunExit::Fatal),
+            ..Self::new(key, binary_name)
+        }
+    }
+
+    /// Record why one file was not parsed. Keeps the first few, so a run over
+    /// thousands of unsupported files still produces a readable manifest.
+    fn note(&mut self, path: &Path, reason: impl std::fmt::Display) {
+        if self.reason_samples.len() < MAX_REASON_SAMPLES {
+            self.reason_samples
+                .push(format!("{}: {reason}", path.display()));
+        }
+    }
+}
+
 /// Apply the workspace-wide aggregate exit semantics after all applicable
 /// artifacts have run.
 pub fn aggregate_exit(successful: u64, failed: u64, terminal: Option<RunExit>) -> RunExit {
@@ -113,11 +153,12 @@ pub fn aggregate_exit(successful: u64, failed: u64, terminal: Option<RunExit>) -
 }
 
 /// Run a single tool over a single host's shared discovery index. Filters
-/// `index` down to this tool's files (Task 6's `files_for_tool`), builds a
-/// per-host `OutputRouter` rooted at `<csv_root>/<host.host>` (and likewise
-/// for `json_root`), drives parsing via `triage_cli::runner::parse_validated`
-/// with a `NullProgress` (the orchestrator owns its own progress rendering
-/// across hosts/tools, not per-call), then flushes the router.
+/// `index` down to this tool's files, confirms each with `tool.validate()`,
+/// builds a per-host `OutputRouter` rooted at `<csv_root>/<output_id>` (and
+/// likewise for `json_root`), drives parsing via
+/// `triage_cli::runner::parse_validated` with a `NullProgress` (the
+/// orchestrator owns its own progress rendering across hosts/tools, not
+/// per-call), then flushes the router.
 ///
 /// Uses `OutputLayoutMode::Nested` (`<root>/<BinaryName>/<identity>/...`)
 /// rather than the CLI's default Flat layout: the orchestrator already fans
@@ -137,24 +178,9 @@ pub fn run_tool_on_host(
 ) -> ToolRunResult {
     let tool = entry.tool.as_ref();
     let candidates = index.candidates.get(entry.key).cloned().unwrap_or_default();
+    let mut result = ToolRunResult::new(entry.key, tool.binary_name());
+    result.files_matched = candidates.len() as u64;
     let mut files = Vec::new();
-    let mut result = ToolRunResult {
-        key: entry.key.to_string(),
-        binary_name: tool.binary_name().to_string(),
-        files_matched: candidates.len() as u64,
-        supported: 0,
-        unsupported: 0,
-        corrupt: 0,
-        unreadable: 0,
-        deduplicated: 0,
-        reason_samples: Vec::new(),
-        parsed: 0,
-        failed: 0,
-        records: 0,
-        output_paths: Vec::new(),
-        error: None,
-        exit: None,
-    };
     for path in candidates {
         match tool.validate(&path) {
             Validation::Supported => {
@@ -163,29 +189,17 @@ pub fn run_tool_on_host(
             }
             Validation::Unsupported { reason } => {
                 result.unsupported += 1;
-                if result.reason_samples.len() < 10 {
-                    result
-                        .reason_samples
-                        .push(format!("{}: {reason}", path.display()));
-                }
+                result.note(&path, reason);
             }
             Validation::Corrupt { reason } => {
                 result.corrupt += 1;
                 result.failed += 1;
-                if result.reason_samples.len() < 10 {
-                    result
-                        .reason_samples
-                        .push(format!("{}: {reason}", path.display()));
-                }
+                result.note(&path, reason);
             }
             Validation::Unreadable { error } => {
                 result.unreadable += 1;
                 result.failed += 1;
-                if result.reason_samples.len() < 10 {
-                    result
-                        .reason_samples
-                        .push(format!("{}: {error}", path.display()));
-                }
+                result.note(&path, error);
             }
         }
     }
@@ -203,11 +217,7 @@ pub fn run_tool_on_host(
             Err(error) => {
                 result.unreadable += 1;
                 result.failed += 1;
-                if result.reason_samples.len() < 10 {
-                    result
-                        .reason_samples
-                        .push(format!("{}: {error}", path.display()));
-                }
+                result.note(path, error);
                 false
             }
         });
@@ -216,11 +226,9 @@ pub fn run_tool_on_host(
         return result;
     }
 
-    let csv_root = out.csv_root.as_ref().map(|r| r.join(&host.output_id));
-    let json_root = out.json_root.as_ref().map(|r| r.join(&host.output_id));
     let router_opts = RouterOptions {
-        csv_root,
-        json_root,
+        csv_root: out.csv_root.as_ref().map(|r| r.join(&host.output_id)),
+        json_root: out.json_root.as_ref().map(|r| r.join(&host.output_id)),
         csvf: None,
         jsonf: None,
         pretty: false,
@@ -274,50 +282,71 @@ fn run_tool_on_host_guarded(
     index: &DiscoveryIndex,
     out: &OutputOpts,
 ) -> ToolRunResult {
-    let key = entry.key.to_string();
-    let binary_name = entry.tool.binary_name().to_string();
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_tool_on_host(entry, host, index, out)
-    })) {
-        Ok(r) => r,
-        Err(_) => {
-            eprintln!(
-                "Warning: tool '{key}' panicked during parsing; recorded as a run-level error"
-            );
-            ToolRunResult {
-                key,
-                binary_name,
-                files_matched: 0,
-                supported: 0,
-                unsupported: 0,
-                corrupt: 0,
-                unreadable: 0,
-                deduplicated: 0,
-                reason_samples: vec!["tool panicked during parsing".into()],
-                parsed: 0,
-                failed: 0,
-                records: 0,
-                output_paths: Vec::new(),
-                error: Some("tool panicked during parsing".to_string()),
-                exit: Some(RunExit::Fatal),
-            }
+    }))
+    .unwrap_or_else(|_| {
+        eprintln!(
+            "Warning: tool '{}' panicked during parsing; recorded as a run-level error",
+            entry.key
+        );
+        ToolRunResult::fatal(
+            entry.key,
+            entry.tool.binary_name(),
+            "tool panicked during parsing".to_string(),
+        )
+    })
+}
+
+/// Counting semaphore for memory-heavy tools: at most `limit` hold a slot at
+/// once, and a `HeavySlot` releases its slot on drop.
+struct HeavyGate {
+    limit: usize,
+    active: Mutex<usize>,
+    ready: Condvar,
+}
+
+impl HeavyGate {
+    fn new(limit: usize) -> Self {
+        HeavyGate {
+            limit: limit.max(1),
+            active: Mutex::new(0),
+            ready: Condvar::new(),
         }
+    }
+
+    fn acquire(&self) -> HeavySlot<'_> {
+        let mut active = self.active.lock().unwrap();
+        while *active >= self.limit {
+            active = self.ready.wait(active).unwrap();
+        }
+        *active += 1;
+        HeavySlot(self)
+    }
+}
+
+struct HeavySlot<'a>(&'a HeavyGate);
+
+impl Drop for HeavySlot<'_> {
+    fn drop(&mut self) {
+        *self.0.active.lock().unwrap() -= 1;
+        self.0.ready.notify_one();
     }
 }
 
 /// Run several tools (named by their `--only`/`--skip` keys) over one host's
-/// shared discovery index, at most `jobs` running concurrently, preserving
-/// result order to match `keys`.
+/// shared discovery index, at most `jobs` running concurrently and at most
+/// `heavy_jobs` of them memory-heavy, preserving result order to match `keys`.
 ///
 /// `Box<dyn Tool>` is not `Sync` (`Tool` carries no `Send + Sync` bound), so
 /// a `&ToolEntry` cannot cross a `std::thread::scope` spawn boundary — the
 /// registry only hands out owned `Box<dyn Tool>` values, never `Sync`
 /// references to them. Instead each worker thread pulls the next key by
-/// index from an atomic counter and calls `registry::tool_for_key` itself,
-/// building a fresh `ToolEntry` *inside* the thread rather than sharing one
-/// constructed on the caller's thread. `host`, `index`, and `out` are plain
-/// `&` data (no interior `dyn Tool`), so they are `Send + Sync` and can be
-/// shared across the scoped threads directly.
+/// index from an atomic counter and calls `registry::tool_for_key_with`
+/// itself, building a fresh `ToolEntry` *inside* the thread rather than
+/// sharing one constructed on the caller's thread. `host`, `index`, and `out`
+/// are plain `&` data (no interior `dyn Tool`), so they are `Send + Sync` and
+/// can be shared across the scoped threads directly.
 pub fn run_tools_bounded(
     keys: &[String],
     host: &HostCapture,
@@ -327,77 +356,40 @@ pub fn run_tools_bounded(
     heavy_jobs: usize,
     ui: Option<&crate::progress_ui::ProgressUi>,
 ) -> Vec<ToolRunResult> {
-    let jobs = jobs.max(1);
-    let heavy_jobs = heavy_jobs.max(1);
     let total = keys.len();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let done = std::sync::atomic::AtomicUsize::new(0);
-    let slots: Vec<std::sync::Mutex<Option<ToolRunResult>>> = (0..keys.len())
-        .map(|_| std::sync::Mutex::new(None))
-        .collect();
-    let host_start = std::time::Instant::now();
-    let heavy_state = (std::sync::Mutex::new(0usize), std::sync::Condvar::new());
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let slots: Vec<Mutex<Option<ToolRunResult>>> = (0..total).map(|_| Mutex::new(None)).collect();
+    let heavy = HeavyGate::new(heavy_jobs);
+    let host_start = Instant::now();
 
     std::thread::scope(|scope| {
-        for _ in 0..jobs.min(keys.len().max(1)) {
-            let next = &next;
-            let done = &done;
-            let slots = &slots;
-            let heavy_state = &heavy_state;
+        for _ in 0..jobs.clamp(1, total.max(1)) {
+            let (next, done, slots, heavy) = (&next, &done, &slots, &heavy);
             scope.spawn(move || loop {
-                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if i >= keys.len() {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= total {
                     break;
                 }
-                let t0 = std::time::Instant::now();
+                let t0 = Instant::now();
                 let result = match crate::registry::tool_for_key_with(&keys[i], out.tools) {
                     Some(entry) => {
-                        let name = entry.tool.binary_name().to_string();
                         if let Some(u) = ui {
-                            u.tool_started(&name);
+                            u.tool_started(entry.tool.binary_name());
                         }
-                        let heavy =
-                            entry.tool.resource_class() == triage_core::tool::ResourceClass::Heavy;
-                        if heavy {
-                            let (lock, ready) = heavy_state;
-                            let mut active = lock.lock().unwrap();
-                            while *active >= heavy_jobs {
-                                active = ready.wait(active).unwrap();
-                            }
-                            *active += 1;
-                            drop(active);
-                        }
-                        let result = run_tool_on_host_guarded(&entry, host, index, out);
-                        if heavy {
-                            let (lock, ready) = heavy_state;
-                            let mut active = lock.lock().unwrap();
-                            *active -= 1;
-                            ready.notify_one();
-                        }
-                        result
+                        let _slot = (entry.tool.resource_class() == ResourceClass::Heavy)
+                            .then(|| heavy.acquire());
+                        run_tool_on_host_guarded(&entry, host, index, out)
                     }
-                    None => ToolRunResult {
-                        key: keys[i].clone(),
-                        binary_name: keys[i].clone(),
-                        files_matched: 0,
-                        supported: 0,
-                        unsupported: 0,
-                        corrupt: 0,
-                        unreadable: 0,
-                        deduplicated: 0,
-                        reason_samples: vec![format!("unknown tool key: {}", keys[i])],
-                        parsed: 0,
-                        failed: 0,
-                        records: 0,
-                        output_paths: Vec::new(),
-                        error: Some(format!("unknown tool key: {}", keys[i])),
-                        exit: Some(RunExit::Fatal),
-                    },
+                    None => ToolRunResult::fatal(
+                        &keys[i],
+                        &keys[i],
+                        format!("unknown tool key: {}", keys[i]),
+                    ),
                 };
-                let dur = t0.elapsed();
-                let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Some(u) = ui {
-                    u.tool_finished(n, total, &result, dur);
+                    u.tool_finished(n, total, &result, t0.elapsed());
                 }
                 *slots[i].lock().unwrap() = Some(result);
             });
@@ -417,7 +409,37 @@ pub fn run_tools_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use triage_core::tool::Tool;
+    use std::fs;
+    use tempfile::TempDir;
+    use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+    use triage_core::tool::{Scope, Tool};
+
+    use crate::capture::test_host as host_at;
+
+    fn csv_opts(csv_root: PathBuf) -> OutputOpts {
+        OutputOpts {
+            csv_root: Some(csv_root),
+            json_root: None,
+            overwrite: true,
+            run_id: "20260710120000000".into(),
+            tools: ToolOptions::default(),
+        }
+    }
+
+    fn pe_entry() -> ToolEntry {
+        ToolEntry {
+            key: "pe",
+            tool: Box::new(pe_triage::PeTool::default()),
+        }
+    }
+
+    const ONE_DATASET: &[DatasetSpec] = &[DatasetSpec {
+        id: "main",
+        default_basename: "Test_Output",
+        framing: JsonFraming::Ndjson,
+        csv_only: false,
+        override_suffix: None,
+    }];
 
     #[test]
     fn aggregate_exit_distinguishes_partial_and_all_failed() {
@@ -429,8 +451,6 @@ mod tests {
             RunExit::OutputFailure
         );
     }
-    use std::fs;
-    use tempfile::TempDir;
 
     #[test]
     fn build_index_finds_union_of_patterns() {
@@ -439,11 +459,8 @@ mod tests {
         fs::write(td.path().join("Windows/Prefetch/A.pf"), b"x").unwrap();
         fs::write(td.path().join("Windows/SYSTEM"), b"regf").unwrap();
         let tools = vec![
-            crate::registry::ToolEntry {
-                key: "pe",
-                tool: Box::new(pe_triage::PeTool::default()),
-            },
-            crate::registry::ToolEntry {
+            pe_entry(),
+            ToolEntry {
                 key: "re",
                 tool: Box::new(re_triage::RegistryTool::default()),
             },
@@ -472,31 +489,12 @@ mod tests {
         let td = TempDir::new().unwrap();
         let root = td.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let host = crate::capture::HostCapture {
-            host: "H".into(),
-            output_id: "H".into(),
-            os: "x".into(),
-            collection_dir: root.clone(),
-            artifact_root: root.clone(),
-            source_archive: None,
-        };
-        // Empty index: nothing for files_for_tool to match.
         let idx = DiscoveryIndex {
             candidates: HashMap::new(),
             inaccessible: 0,
         };
-        let entry = crate::registry::ToolEntry {
-            key: "pe",
-            tool: Box::new(pe_triage::PeTool::default()),
-        };
-        let out = OutputOpts {
-            csv_root: Some(td.path().join("out")),
-            json_root: None,
-            overwrite: true,
-            run_id: "20260710120000000".into(),
-            tools: crate::registry::ToolOptions::default(),
-        };
-        let res = run_tool_on_host(&entry, &host, &idx, &out);
+        let out = csv_opts(td.path().join("out"));
+        let res = run_tool_on_host(&pe_entry(), &host_at(&root), &idx, &out);
         assert_eq!(res.files_matched, 0);
         assert_eq!(res.parsed, 0);
         assert_eq!(res.error, None);
@@ -518,31 +516,18 @@ mod tests {
         let td = TempDir::new().unwrap();
         let root = td.path().join("root");
         fs::create_dir_all(&root).unwrap();
-        let host = crate::capture::HostCapture {
-            host: "H".into(),
-            output_id: "H".into(),
-            os: "x".into(),
-            collection_dir: root.clone(),
-            artifact_root: root.clone(),
-            source_archive: None,
-        };
+        let host = host_at(&root);
         let idx = DiscoveryIndex {
             candidates: HashMap::new(),
             inaccessible: 0,
         };
-        let out = OutputOpts {
-            csv_root: Some(td.path().join("out")),
-            json_root: None,
-            overwrite: true,
-            run_id: "20260710120000000".into(),
-            tools: crate::registry::ToolOptions::default(),
-        };
+        let out = csv_opts(td.path().join("out"));
         let keys: Vec<String> = vec!["mft".into(), "pe".into(), "evtx".into(), "sum".into()];
 
         let sequential: Vec<ToolRunResult> = keys
             .iter()
             .map(|k| {
-                let entry = crate::registry::tool_for_key(k).unwrap();
+                let entry = crate::registry::tool_for_key_with(k, ToolOptions::default()).unwrap();
                 run_tool_on_host(&entry, &host, &idx, &out)
             })
             .collect();
@@ -590,24 +575,16 @@ mod tests {
             fn validate_legacy(&self, _path: &Path) -> bool {
                 true
             }
-            fn datasets(&self) -> &'static [triage_core::output::dataset::DatasetSpec] {
-                const DS: &[triage_core::output::dataset::DatasetSpec] =
-                    &[triage_core::output::dataset::DatasetSpec {
-                        id: "main",
-                        default_basename: "PanicTool_Output",
-                        framing: triage_core::output::dataset::JsonFraming::Ndjson,
-                        csv_only: false,
-                        override_suffix: None,
-                    }];
-                DS
+            fn datasets(&self) -> &'static [DatasetSpec] {
+                ONE_DATASET
             }
-            fn scope(&self) -> triage_core::tool::Scope {
-                triage_core::tool::Scope::SystemWide
+            fn scope(&self) -> Scope {
+                Scope::SystemWide
             }
             fn parse(
                 &self,
                 _path: &Path,
-                _out: &mut triage_core::output::router::OutputRouter,
+                _out: &mut OutputRouter,
             ) -> Result<u64, triage_core::error::TriageError> {
                 panic!("simulated parser panic on corrupt input");
             }
@@ -617,15 +594,7 @@ mod tests {
         let root = td.path().join("root");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("evil.panic"), b"corrupt").unwrap();
-        let host = crate::capture::HostCapture {
-            host: "H".into(),
-            output_id: "H".into(),
-            os: "x".into(),
-            collection_dir: root.clone(),
-            artifact_root: root.clone(),
-            source_archive: None,
-        };
-        let entry = crate::registry::ToolEntry {
+        let entry = ToolEntry {
             key: "panic_tool",
             tool: Box::new(PanicTool),
         };
@@ -635,15 +604,9 @@ mod tests {
             1,
             "fixture file must be discovered"
         );
-        let out = OutputOpts {
-            csv_root: Some(td.path().join("out")),
-            json_root: None,
-            overwrite: true,
-            run_id: "20260710120000000".into(),
-            tools: crate::registry::ToolOptions::default(),
-        };
+        let out = csv_opts(td.path().join("out"));
 
-        let res = run_tool_on_host_guarded(&entry, &host, &idx, &out);
+        let res = run_tool_on_host_guarded(&entry, &host_at(&root), &idx, &out);
         assert!(
             res.error.is_some(),
             "panicking parse must surface as a per-tool error, not abort the run"
@@ -679,24 +642,16 @@ mod tests {
             fn dedupe_by_content(&self) -> bool {
                 self.0
             }
-            fn datasets(&self) -> &'static [triage_core::output::dataset::DatasetSpec] {
-                const DS: &[triage_core::output::dataset::DatasetSpec] =
-                    &[triage_core::output::dataset::DatasetSpec {
-                        id: "main",
-                        default_basename: "CountTool_Output",
-                        framing: triage_core::output::dataset::JsonFraming::Ndjson,
-                        csv_only: false,
-                        override_suffix: None,
-                    }];
-                DS
+            fn datasets(&self) -> &'static [DatasetSpec] {
+                ONE_DATASET
             }
-            fn scope(&self) -> triage_core::tool::Scope {
-                triage_core::tool::Scope::SystemWide
+            fn scope(&self) -> Scope {
+                Scope::SystemWide
             }
             fn parse(
                 &self,
                 _path: &Path,
-                _out: &mut triage_core::output::router::OutputRouter,
+                _out: &mut OutputRouter,
             ) -> Result<u64, triage_core::error::TriageError> {
                 Ok(0)
             }
@@ -709,29 +664,16 @@ mod tests {
         fs::create_dir_all(root.join("b")).unwrap();
         fs::write(root.join("a/x.count"), b"identical").unwrap();
         fs::write(root.join("b/x.count"), b"identical").unwrap();
-        let host = crate::capture::HostCapture {
-            host: "H".into(),
-            output_id: "H".into(),
-            os: "x".into(),
-            collection_dir: root.clone(),
-            artifact_root: root.clone(),
-            source_archive: None,
-        };
+        let host = host_at(&root);
 
         for (dedupe, want_parsed, want_skipped) in [(true, 1, 1), (false, 2, 0)] {
-            let entry = crate::registry::ToolEntry {
+            let entry = ToolEntry {
                 key: "count_tool",
                 tool: Box::new(CountTool(dedupe)),
             };
             let idx = build_index(&root, std::slice::from_ref(&entry), &[]);
             assert_eq!(idx.candidates["count_tool"].len(), 2, "both copies found");
-            let out = OutputOpts {
-                csv_root: Some(td.path().join(format!("out-{dedupe}"))),
-                json_root: None,
-                overwrite: true,
-                run_id: "20260710120000000".into(),
-                tools: crate::registry::ToolOptions::default(),
-            };
+            let out = csv_opts(td.path().join(format!("out-{dedupe}")));
             let res = run_tool_on_host(&entry, &host, &idx, &out);
             assert_eq!(res.supported, 2, "dedupe={dedupe}: both validate");
             assert_eq!(res.parsed, want_parsed, "dedupe={dedupe}: parsed");
@@ -756,18 +698,9 @@ mod tests {
             .expect("at least one host in test captures")
             .clone();
         let td = TempDir::new().unwrap();
-        let entry = crate::registry::ToolEntry {
-            key: "pe",
-            tool: Box::new(pe_triage::PeTool::default()),
-        };
+        let entry = pe_entry();
         let idx = build_index(&host.artifact_root, std::slice::from_ref(&entry), &[]);
-        let out = OutputOpts {
-            csv_root: Some(td.path().join("out")),
-            json_root: None,
-            overwrite: true,
-            run_id: "20260710120000000".into(),
-            tools: crate::registry::ToolOptions::default(),
-        };
+        let out = csv_opts(td.path().join("out"));
         let res = run_tool_on_host(&entry, &host, &idx, &out);
         assert_eq!(res.error, None);
         assert!(res.parsed >= 1, "expected at least one parsed .pf file");

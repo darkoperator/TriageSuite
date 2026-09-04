@@ -17,6 +17,8 @@ pub fn resolve_bin(configured: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Run `bin` with `args` to completion and fold the outcome into a report.
+///
 /// `find_outputs` is called only when the process exits successfully, and decides what
 /// counts as "this tool's output" — a single file/dir existence check for most tools, or
 /// a directory glob for logon-summary (which writes a variable number of `<prefix>-*.csv`

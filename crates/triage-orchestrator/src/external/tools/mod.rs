@@ -1,5 +1,4 @@
-//! One module per external tool: its argv builders and, from the registry
-//! refactor onward, its `ExternalTool` impl.
+//! One module per external tool: its `ExternalTool` impl and argv builders.
 
 pub mod hayabusa;
 pub mod takajo;

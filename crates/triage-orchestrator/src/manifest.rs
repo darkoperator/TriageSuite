@@ -1,6 +1,13 @@
 use crate::capture::CaptureType;
+use crate::file_name_lossy;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+
+/// Manifest schema version. 2 added `archives[]` and `hosts[].source_archive`
+/// for zip input.
+pub const SCHEMA_VERSION: u32 = 2;
+
+pub const ORCHESTRATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize)]
 pub struct Manifest {
@@ -9,7 +16,7 @@ pub struct Manifest {
     pub orchestrator_version: String,
     pub started_utc: String,
     pub finished_utc: String,
-    pub capture_type: String,
+    pub capture_type: CaptureType,
     pub final_exit_status: i32,
     /// Input archives seen this run. Omitted entirely when the capture was
     /// already an unzipped directory, so those manifests are unchanged.
@@ -18,14 +25,38 @@ pub struct Manifest {
     pub hosts: Vec<HostEntry>,
 }
 
+/// What happened to one input archive this run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArchiveStatus {
+    Extracted,
+    ReExtracted,
+    Reused,
+    Skipped,
+    Failed,
+}
+
+impl From<&crate::archive::ExtractReport> for ArchiveStatus {
+    fn from(r: &crate::archive::ExtractReport) -> Self {
+        if r.error.is_some() {
+            ArchiveStatus::Failed
+        } else if r.reused {
+            ArchiveStatus::Reused
+        } else if r.re_extracted {
+            ArchiveStatus::ReExtracted
+        } else {
+            ArchiveStatus::Extracted
+        }
+    }
+}
+
 /// Chain-of-custody record for one input `.zip`.
 #[derive(Serialize)]
 pub struct ArchiveEntry {
     pub archive: String,
     pub archive_path: String,
     pub size_bytes: u64,
-    /// "extracted" | "re-extracted" | "reused" | "skipped" | "failed"
-    pub status: String,
+    pub status: ArchiveStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extracted_to: Option<String>,
     pub files_written: u64,
@@ -71,6 +102,29 @@ pub struct ToolEntryReport {
     pub error: Option<String>,
 }
 
+impl From<crate::execute::ToolRunResult> for ToolEntryReport {
+    fn from(r: crate::execute::ToolRunResult) -> Self {
+        ToolEntryReport {
+            tool: r.binary_name,
+            key: r.key,
+            files_matched: r.files_matched,
+            // Kept equal to `files_matched` for manifest-schema compatibility.
+            discovered_candidates: r.files_matched,
+            supported: r.supported,
+            unsupported: r.unsupported,
+            corrupt: r.corrupt,
+            unreadable: r.unreadable,
+            parsed: r.parsed,
+            failed: r.failed,
+            deduplicated: r.deduplicated,
+            records: r.records,
+            output_paths: r.output_paths,
+            reason_samples: r.reason_samples,
+            error: r.error,
+        }
+    }
+}
+
 pub fn now_iso() -> String {
     // chrono's `%.7f` specifier panics (unsupported in chrono 0.4 -- it only
     // recognizes .3f/.6f/.9f); instead extract subsecond nanoseconds, convert
@@ -89,32 +143,9 @@ pub fn run_id() -> String {
     chrono::Utc::now().format("%Y%m%d%H%M%S%3f").to_string()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn build(
-    capture_type: CaptureType,
-    run_id: &str,
-    started: &str,
-    finished: &str,
-    final_exit_status: i32,
-    archives: Vec<ArchiveEntry>,
-    hosts: Vec<HostEntry>,
-) -> Manifest {
-    let ty = match capture_type {
-        CaptureType::Velociraptor => "velociraptor",
-        CaptureType::Raw => "raw",
-    };
-    Manifest {
-        // 2: added `archives[]` and `hosts[].source_archive` for zip input.
-        schema_version: 2,
-        run_id: run_id.to_string(),
-        orchestrator_version: env!("CARGO_PKG_VERSION").to_string(),
-        started_utc: started.to_string(),
-        finished_utc: finished.to_string(),
-        capture_type: ty.to_string(),
-        final_exit_status,
-        archives,
-        hosts,
-    }
+/// Size on disk, or 0 if the file cannot be stat'ed.
+fn size_of(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
 /// Build the manifest's archive records from what `input::prepare` did.
@@ -123,53 +154,35 @@ pub fn archive_entries(
     skipped: &[crate::input::SkippedArchive],
     out_root: &Path,
 ) -> Vec<ArchiveEntry> {
-    let name_of = |p: &Path| {
-        p.file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    };
-    let mut entries: Vec<ArchiveEntry> = Vec::new();
-    for r in extractions {
-        let status = if r.error.is_some() {
-            "failed"
-        } else if r.reused {
-            "reused"
-        } else if r.re_extracted {
-            "re-extracted"
-        } else {
-            "extracted"
-        };
-        entries.push(ArchiveEntry {
-            archive: name_of(&r.archive),
-            archive_path: r.archive.display().to_string(),
-            size_bytes: std::fs::metadata(&r.archive).map(|m| m.len()).unwrap_or(0),
-            status: status.to_string(),
-            extracted_to: r
-                .dest
-                .strip_prefix(out_root)
-                .ok()
-                .map(|p| p.display().to_string()),
-            files_written: r.files_written,
-            bytes_written: r.bytes_written,
-            skipped_entries: r.skipped_entries,
-            skipped_reasons: r.skipped_reasons.clone(),
-            error: r.error.clone(),
-        });
-    }
-    for s in skipped {
-        entries.push(ArchiveEntry {
-            archive: name_of(&s.archive),
-            archive_path: s.archive.display().to_string(),
-            size_bytes: std::fs::metadata(&s.archive).map(|m| m.len()).unwrap_or(0),
-            status: "skipped".to_string(),
-            extracted_to: None,
-            files_written: 0,
-            bytes_written: 0,
-            skipped_entries: 0,
-            skipped_reasons: Vec::new(),
-            error: Some(s.reason.clone()),
-        });
-    }
+    let extracted = extractions.iter().map(|r| ArchiveEntry {
+        archive: file_name_lossy(&r.archive),
+        archive_path: r.archive.display().to_string(),
+        size_bytes: size_of(&r.archive),
+        status: r.into(),
+        extracted_to: r
+            .dest
+            .strip_prefix(out_root)
+            .ok()
+            .map(|p| p.display().to_string()),
+        files_written: r.files_written,
+        bytes_written: r.bytes_written,
+        skipped_entries: r.skipped_entries,
+        skipped_reasons: r.skipped_reasons.clone(),
+        error: r.error.clone(),
+    });
+    let skipped = skipped.iter().map(|s| ArchiveEntry {
+        archive: file_name_lossy(&s.archive),
+        archive_path: s.archive.display().to_string(),
+        size_bytes: size_of(&s.archive),
+        status: ArchiveStatus::Skipped,
+        extracted_to: None,
+        files_written: 0,
+        bytes_written: 0,
+        skipped_entries: 0,
+        skipped_reasons: Vec::new(),
+        error: Some(s.reason.clone()),
+    });
+    let mut entries: Vec<ArchiveEntry> = extracted.chain(skipped).collect();
     entries.sort_by(|a, b| a.archive.cmp(&b.archive));
     entries
 }
@@ -259,18 +272,21 @@ mod tests {
                 error: None,
             }],
         };
-        let m = build(
-            crate::capture::CaptureType::Velociraptor,
-            "20260710120000000",
-            "T0",
-            "T1",
-            0,
-            Vec::new(),
-            vec![host],
-        );
+        let m = Manifest {
+            schema_version: SCHEMA_VERSION,
+            run_id: "20260710120000000".into(),
+            orchestrator_version: ORCHESTRATOR_VERSION.into(),
+            started_utc: "T0".into(),
+            finished_utc: "T1".into(),
+            capture_type: CaptureType::Velociraptor,
+            final_exit_status: 0,
+            archives: Vec::new(),
+            hosts: vec![host],
+        };
         write(&m, td.path()).unwrap();
         let text = std::fs::read_to_string(td.path().join("run_manifest.json")).unwrap();
         assert!(text.contains("\"capture_type\": \"velociraptor\""));
+        assert!(text.contains("\"schema_version\": 2"));
         assert!(text.contains("\"records\": 99"));
         assert!(text.contains("\"tool\": \"hayabusa-csv\""));
     }

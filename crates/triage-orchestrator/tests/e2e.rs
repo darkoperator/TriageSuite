@@ -9,19 +9,13 @@
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
+use triage_testkit::synthetic::write_collection;
 
 #[test]
 fn run_over_a_synthetic_collection_produces_manifest_and_output() {
     let td = TempDir::new().unwrap();
     let coll = td.path().join("Collection-HOSTX-2026");
-    let pf_dir = coll.join("uploads/auto/C%3A/Windows/Prefetch");
-    fs::create_dir_all(&pf_dir).unwrap();
-    fs::write(coll.join("uploads.json"), "{}").unwrap();
-    fs::write(
-        coll.join("client_info.json"),
-        r#"{"Hostname":"HOSTX","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}"#,
-    )
-    .unwrap();
+    write_collection(&coll, "HOSTX");
 
     let out = td.path().join("out");
     Command::cargo_bin("TriageSuite")

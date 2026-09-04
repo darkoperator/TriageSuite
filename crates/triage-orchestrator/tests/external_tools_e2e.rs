@@ -7,45 +7,17 @@
 
 use assert_cmd::Command;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use tempfile::TempDir;
+use triage_testkit::synthetic::{write_collection, write_stub};
 
-fn write_stub(
-    dir: &std::path::Path,
-    name: &str,
-    output_flag: &str,
-    as_dir: bool,
-) -> std::path::PathBuf {
-    let path = dir.join(name);
-    let body = if as_dir {
-        format!(
-            "#!/bin/sh\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"{output_flag}\" ]; then\n    mkdir -p \"$a\"\n    echo stub > \"$a/report.txt\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n"
-        )
-    } else {
-        format!(
-            "#!/bin/sh\nprev=\"\"\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"{output_flag}\" ]; then\n    echo stub > \"$a\"\n  fi\n  prev=\"$a\"\ndone\nexit 0\n"
-        )
-    };
-    fs::write(&path, body).unwrap();
-    let mut perms = fs::metadata(&path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&path, perms).unwrap();
-    path
-}
-
-#[test]
-fn config_and_profile_drive_stubbed_hayabusa_and_takajo() {
+/// A synthetic collection, the two stubs, and a config pointing at them with
+/// `extra` appended after the two tool tables. Returns (tempdir, collection,
+/// config path).
+fn stubbed_collection(extra: &str) -> (TempDir, PathBuf, PathBuf) {
     let td = TempDir::new().unwrap();
-
-    // Synthetic Velociraptor collection (same shape as tests/e2e.rs).
     let coll = td.path().join("Collection-HOSTX-2026");
-    fs::create_dir_all(coll.join("uploads/auto/C%3A/Windows/System32/winevt/Logs")).unwrap();
-    fs::write(coll.join("uploads.json"), "{}").unwrap();
-    fs::write(
-        coll.join("client_info.json"),
-        r#"{"Hostname":"HOSTX","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}"#,
-    )
-    .unwrap();
+    write_collection(&coll, "HOSTX");
 
     let stub_dir = td.path().join("bin");
     fs::create_dir_all(&stub_dir).unwrap();
@@ -56,26 +28,23 @@ fn config_and_profile_drive_stubbed_hayabusa_and_takajo() {
     fs::write(
         &config_path,
         format!(
-            r#"
-[hayabusa]
-bin = "{hb}"
-
-[takajo]
-bin = "{tj}"
-
-[profiles.quick.hayabusa]
-min_level = "high"
-
-[profiles.quick.takajo]
-enabled = false
-"#,
+            "[hayabusa]\nbin = \"{hb}\"\n\n[takajo]\nbin = \"{tj}\"\n{extra}",
             hb = hayabusa_stub.to_str().unwrap(),
             tj = takajo_stub.to_str().unwrap(),
         ),
     )
     .unwrap();
 
+    (td, coll, config_path)
+}
+
+#[test]
+fn config_and_profile_drive_stubbed_hayabusa_and_takajo() {
+    let (td, coll, config_path) = stubbed_collection(
+        "\n[profiles.quick.hayabusa]\nmin_level = \"high\"\n\n[profiles.quick.takajo]\nenabled = false\n",
+    );
     let out = td.path().join("out");
+
     Command::cargo_bin("TriageSuite")
         .unwrap()
         .args([
@@ -109,45 +78,13 @@ enabled = false
     assert!(out.join("HOSTX/Hayabusa/timeline.csv").is_file());
 }
 
-/// Build the same synthetic collection the test above uses, plus the two stubs
-/// and a config pointing at them. Returns (tempdir, collection, config path).
-fn stubbed_collection() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
-    let td = TempDir::new().unwrap();
-    let coll = td.path().join("Collection-HOSTX-2026");
-    fs::create_dir_all(coll.join("uploads/auto/C%3A/Windows/System32/winevt/Logs")).unwrap();
-    fs::write(coll.join("uploads.json"), "{}").unwrap();
-    fs::write(
-        coll.join("client_info.json"),
-        r#"{"Hostname":"HOSTX","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}"#,
-    )
-    .unwrap();
-
-    let stub_dir = td.path().join("bin");
-    fs::create_dir_all(&stub_dir).unwrap();
-    let hayabusa_stub = write_stub(&stub_dir, "hayabusa", "--output", false);
-    let takajo_stub = write_stub(&stub_dir, "takajo", "-o", true);
-
-    let config_path = td.path().join("triage.toml");
-    fs::write(
-        &config_path,
-        format!(
-            "[hayabusa]\nbin = \"{hb}\"\n\n[takajo]\nbin = \"{tj}\"\n",
-            hb = hayabusa_stub.to_str().unwrap(),
-            tj = takajo_stub.to_str().unwrap(),
-        ),
-    )
-    .unwrap();
-
-    (td, coll, config_path)
-}
-
 /// `--skip` accepts external-tool keys and in-process parser keys in one list.
 /// The external keys are stripped before the in-process registry validates the
 /// list — otherwise it would reject them as unknown — and then force-disable
 /// their tools.
 #[test]
 fn skip_disables_an_external_tool_without_tripping_registry_validation() {
-    let (td, coll, config_path) = stubbed_collection();
+    let (td, coll, config_path) = stubbed_collection("");
     let out = td.path().join("out");
 
     Command::cargo_bin("TriageSuite")
@@ -188,7 +125,7 @@ fn skip_disables_an_external_tool_without_tripping_registry_validation() {
 /// stays an error rather than silently becoming a no-op.
 #[test]
 fn only_still_rejects_an_external_tool_key() {
-    let (td, coll, _config_path) = stubbed_collection();
+    let (td, coll, _config_path) = stubbed_collection("");
     let out = td.path().join("out");
 
     Command::cargo_bin("TriageSuite")

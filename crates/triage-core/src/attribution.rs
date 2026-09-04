@@ -3,6 +3,11 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Longest output path component `sanitize_component` will produce, in
+/// characters. Callers that append a suffix to a component must trim to
+/// stay within it.
+pub const MAX_COMPONENT_CHARS: usize = 80;
+
 /// Profile names treated as special (non-interactive) per spec section 4.1.
 pub const SPECIAL_PROFILES: &[&str] = &[
     "default",
@@ -151,8 +156,8 @@ pub fn sanitize_component(name: &str) -> String {
     } else {
         mapped
     };
-    if safe.chars().count() > 80 {
-        safe = safe.chars().take(80).collect();
+    if safe.chars().count() > MAX_COMPONENT_CHARS {
+        safe = safe.chars().take(MAX_COMPONENT_CHARS).collect();
     }
     safe
 }

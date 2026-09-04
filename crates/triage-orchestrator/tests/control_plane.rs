@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use serde_json::Value;
 use std::fs;
+use triage_testkit::synthetic::write_collection;
 
 #[test]
 fn corrupt_only_run_exits_six_and_audits_failure() {
@@ -34,13 +35,7 @@ fn corrupt_only_run_exits_six_and_audits_failure() {
 fn manifest_preserves_host_and_uses_safe_output_id() {
     let temp = tempfile::tempdir().unwrap();
     let collection = temp.path().join("Collection-hostile");
-    fs::create_dir_all(collection.join("uploads")).unwrap();
-    fs::write(collection.join("uploads.json"), "{}").unwrap();
-    fs::write(
-        collection.join("client_info.json"),
-        r#"{"Hostname":"../CON","Platform":"Windows"}"#,
-    )
-    .unwrap();
+    write_collection(&collection, "../CON");
     let out = temp.path().join("out");
 
     Command::cargo_bin("TriageSuite")

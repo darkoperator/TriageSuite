@@ -156,6 +156,15 @@ pub fn prepare(
     // they must not extract over each other.
     let mut stems = triage_core::attribution::ComponentAllocator::default();
 
+    let mut skip = |path: &PathBuf, reason: ArchiveSkip| {
+        let reason = reason.to_string();
+        ui.archive_skipped(path, &reason);
+        skipped.push(SkippedArchive {
+            archive: path.clone(),
+            reason,
+        });
+    };
+
     for path in &archives {
         let stem = path
             .file_stem()
@@ -168,11 +177,7 @@ pub fn prepare(
         let inspection = match archive::probe(path) {
             Probe::Usable(i) => i,
             Probe::Skip(reason) => {
-                ui.archive_skipped(path, &reason.message());
-                skipped.push(SkippedArchive {
-                    archive: path.clone(),
-                    reason: reason.message(),
-                });
+                skip(path, reason);
                 continue;
             }
         };
@@ -182,48 +187,19 @@ pub fn prepare(
         // a different one of the same name can never be parsed as stale
         // evidence.
         if dest.exists() && opts.reuse_existing {
-            match read_marker(&marker) {
+            let stale = match read_marker(&marker) {
                 Some(m) if marker_matches(&m, path) => {
-                    let report = ExtractReport {
-                        archive: path.clone(),
-                        dest: dest.clone(),
-                        reused: true,
-                        re_extracted: false,
-                        files_written: m.files_written,
-                        bytes_written: m.bytes_written,
-                        skipped_entries: 0,
-                        skipped_reasons: Vec::new(),
-                        error: None,
-                        duration: std::time::Duration::default(),
-                    };
+                    let report =
+                        ExtractReport::reused(path, &dest, m.files_written, m.bytes_written);
                     ui.archive_finished(&report);
                     extractions.push(report);
                     continue;
                 }
-                Some(_) => {
-                    let reason = ArchiveSkip::Stale(
-                        "existing extraction is from a different archive".to_string(),
-                    )
-                    .message();
-                    ui.archive_skipped(path, &reason);
-                    skipped.push(SkippedArchive {
-                        archive: path.clone(),
-                        reason,
-                    });
-                    continue;
-                }
-                None => {
-                    let reason =
-                        ArchiveSkip::Stale("existing extraction is incomplete".to_string())
-                            .message();
-                    ui.archive_skipped(path, &reason);
-                    skipped.push(SkippedArchive {
-                        archive: path.clone(),
-                        reason,
-                    });
-                    continue;
-                }
-            }
+                Some(_) => "existing extraction is from a different archive",
+                None => "existing extraction is incomplete",
+            };
+            skip(path, ArchiveSkip::Stale(stale.to_string()));
+            continue;
         }
 
         let re_extracting = dest.exists();
@@ -258,22 +234,16 @@ pub fn prepare(
     }
 
     // No Raw fallback once archives are in play: a folder holding only ZIPs
-    // must never be mistaken for a raw capture named after the folder.
-    let raw_fallback = if archives.is_empty() {
-        scan_root.as_deref()
-    } else {
-        None
-    };
-
-    let (capture_type, mut hosts) =
-        capture::enumerate_multi(&roots, raw_fallback).map_err(|_| {
-            let detail = if skipped.is_empty() {
-                String::new()
-            } else {
-                format!(" ({} archive(s) skipped)", skipped.len())
-            };
-            format!("no usable capture found in {}{detail}", capture.display())
-        })?;
+    // must never be mistaken for a raw capture named after the folder. (The
+    // archive-free directory case already returned above.)
+    let (capture_type, mut hosts) = capture::enumerate_multi(&roots, None).map_err(|_| {
+        let detail = if skipped.is_empty() {
+            String::new()
+        } else {
+            format!(" ({} archive(s) skipped)", skipped.len())
+        };
+        format!("no usable capture found in {}{detail}", capture.display())
+    })?;
 
     // Stamp provenance so the manifest can record which archive a host came from.
     for host in hosts.iter_mut() {
@@ -297,35 +267,11 @@ pub fn prepare(
 mod tests {
     use super::*;
     use std::fs;
-    use std::io::Write;
     use tempfile::TempDir;
-    use zip::write::SimpleFileOptions;
-    use zip::CompressionMethod;
+    use triage_testkit::synthetic::{write_collection, write_collection_zip};
 
     fn ui() -> ProgressUi {
         ProgressUi::new(true)
-    }
-
-    fn write_collection_zip(path: &Path, prefix: &str, host: &str) {
-        let f = fs::File::create(path).unwrap();
-        let mut w = zip::ZipWriter::new(f);
-        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-        w.start_file(format!("{prefix}uploads.json"), opts).unwrap();
-        w.write_all(b"{}").unwrap();
-        w.start_file(format!("{prefix}client_info.json"), opts)
-            .unwrap();
-        w.write_all(
-            format!(r#"{{"Hostname":"{host}","Platform":"Windows","PlatformVersion":"11"}}"#)
-                .as_bytes(),
-        )
-        .unwrap();
-        w.start_file(
-            format!("{prefix}uploads/auto/C%3A/Windows/Prefetch/A.pf"),
-            opts,
-        )
-        .unwrap();
-        w.write_all(b"pf").unwrap();
-        w.finish().unwrap();
     }
 
     #[test]
@@ -372,14 +318,7 @@ mod tests {
         let dir = td.path().join("mixed");
         fs::create_dir_all(&dir).unwrap();
         write_collection_zip(&dir.join("A.zip"), "", "ZIPPED");
-        let plain = dir.join("Collection-PLAIN");
-        fs::create_dir_all(plain.join("uploads/auto")).unwrap();
-        fs::write(plain.join("uploads.json"), "{}").unwrap();
-        fs::write(
-            plain.join("client_info.json"),
-            r#"{"Hostname":"PLAIN","Platform":"Windows","PlatformVersion":"11"}"#,
-        )
-        .unwrap();
+        write_collection(&dir.join("Collection-PLAIN"), "PLAIN");
         let out = td.path().join("out");
         let p = prepare(&dir, &out, &PrepareOptions::default(), &ui()).unwrap();
         let mut names: Vec<_> = p.hosts.iter().map(|h| h.host.clone()).collect();
@@ -418,14 +357,7 @@ mod tests {
     fn plain_directory_is_unchanged_and_creates_no_extracted_dir() {
         let td = TempDir::new().unwrap();
         let dir = td.path().join("plain");
-        let coll = dir.join("Collection-P");
-        fs::create_dir_all(coll.join("uploads/auto")).unwrap();
-        fs::write(coll.join("uploads.json"), "{}").unwrap();
-        fs::write(
-            coll.join("client_info.json"),
-            r#"{"Hostname":"P","Platform":"Windows","PlatformVersion":"11"}"#,
-        )
-        .unwrap();
+        write_collection(&dir.join("Collection-P"), "P");
         let out = td.path().join("out");
         let p = prepare(&dir, &out, &PrepareOptions::default(), &ui()).unwrap();
         assert_eq!(p.hosts.len(), 1);
@@ -455,9 +387,16 @@ mod tests {
         let first = prepare(&z, &out, &PrepareOptions::default(), &ui()).unwrap();
         assert_eq!(first.hosts[0].host, "ORIGINAL");
 
-        // Replace the archive with different content under the same name.
-        std::thread::sleep(std::time::Duration::from_millis(1100)); // distinct mtime
+        // Replace the archive with different content under the same name, and
+        // give it a distinct mtime without waiting a second for the clock.
         write_collection_zip(&z, "", "REPLACED");
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        fs::File::options()
+            .write(true)
+            .open(&z)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
 
         // The archive changed, so the existing extraction is refused rather
         // than silently reused. It was the only archive, so there is nothing

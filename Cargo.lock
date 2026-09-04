@@ -3204,7 +3204,6 @@ dependencies = [
  "srume-triage",
  "sum-triage",
  "tempfile",
- "thiserror 2.0.18",
  "toml",
  "triage-cli",
  "triage-core",
@@ -3266,8 +3265,10 @@ name = "triage-testkit"
 version = "0.2.0"
 dependencies = [
  "csv",
+ "flate2",
  "serde_json",
  "tempfile",
+ "zip",
 ]
 
 [[package]]

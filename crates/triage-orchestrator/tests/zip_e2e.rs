@@ -7,46 +7,14 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use tempfile::TempDir;
+use triage_testkit::synthetic::{write_collection, COLLECTION_MARKER_FILE};
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
-
-/// Synthetic Velociraptor collection, same shape as tests/e2e.rs.
-fn write_collection(dir: &Path, host: &str) {
-    fs::create_dir_all(dir.join("uploads/auto/C%3A/Windows/Prefetch")).unwrap();
-    fs::write(dir.join("uploads.json"), "{}").unwrap();
-    fs::write(
-        dir.join("client_info.json"),
-        format!(
-            r#"{{"Hostname":"{host}","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}}"#
-        ),
-    )
-    .unwrap();
-}
 
 /// Zip a collection with its contents at the archive root, which is how the
 /// offline collector writes them.
 fn zip_collection(zip_path: &Path, host: &str) {
-    let f = fs::File::create(zip_path).unwrap();
-    let mut w = zip::ZipWriter::new(f);
-    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-    w.start_file("uploads.json", opts).unwrap();
-    w.write_all(b"{}").unwrap();
-    w.start_file("client_info.json", opts).unwrap();
-    w.write_all(
-        format!(
-            r#"{{"Hostname":"{host}","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}}"#
-        )
-        .as_bytes(),
-    )
-    .unwrap();
-    // A URL-encoded path segment, as Velociraptor writes them. Discovery
-    // matches on filename only, so this must survive extraction verbatim.
-    // Deliberately an extension no parser claims: this test is about
-    // extraction fidelity, not about parsing a synthetic artifact.
-    w.start_file("uploads/auto/C%3A/Windows/Prefetch/MARKER.txt", opts)
-        .unwrap();
-    w.write_all(b"marker").unwrap();
-    w.finish().unwrap();
+    triage_testkit::synthetic::write_collection_zip(zip_path, "", host);
 }
 
 fn run(args: &[&str]) -> std::process::Output {
@@ -86,11 +54,10 @@ fn a_single_zip_is_extracted_and_parsed() {
     assert_eq!(m["archives"][0]["status"], "extracted");
 
     // Extraction is kept, and the URL-encoded path survived byte-for-byte.
+    // Discovery matches on filename only, so this must not be decoded.
     let extracted = out.join("_extracted/Collection-H1");
     assert!(extracted.is_dir(), "_extracted should be kept");
-    assert!(extracted
-        .join("uploads/auto/C%3A/Windows/Prefetch/MARKER.txt")
-        .is_file());
+    assert!(extracted.join(COLLECTION_MARKER_FILE).is_file());
 }
 
 #[test]

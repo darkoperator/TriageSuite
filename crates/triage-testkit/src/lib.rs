@@ -1191,3 +1191,5 @@ mod tests {
         );
     }
 }
+
+pub mod synthetic;

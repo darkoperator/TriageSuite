@@ -1,7 +1,16 @@
+use crate::file_name_lossy;
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use triage_core::attribution::{sanitize_component, ComponentAllocator, MAX_COMPONENT_CHARS};
 
-#[derive(Debug, Clone, Copy)]
+/// Files that make a directory a Velociraptor collection.
+pub(crate) const COLLECTION_MARKERS: [&str; 2] = ["uploads.json", "client_info.json"];
+
+const UNKNOWN_OS: &str = "unknown";
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CaptureType {
     Velociraptor,
     Raw,
@@ -29,14 +38,11 @@ struct ClientInfo {
 }
 
 fn is_collection(dir: &Path) -> bool {
-    dir.join("uploads.json").is_file() && dir.join("client_info.json").is_file()
+    COLLECTION_MARKERS.iter().all(|m| dir.join(m).is_file())
 }
 
 fn host_from_collection(dir: &Path) -> HostCapture {
-    let fallback = dir
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let fallback = file_name_lossy(dir);
     let (host, os) = match std::fs::read_to_string(dir.join("client_info.json"))
         .ok()
         .and_then(|s| serde_json::from_str::<ClientInfo>(&s).ok())
@@ -46,14 +52,14 @@ fn host_from_collection(dir: &Path) -> HostCapture {
             let os = match (ci.platform, ci.platform_version) {
                 (Some(p), Some(v)) => format!("{p} {v}"),
                 (Some(p), None) => p,
-                _ => "unknown".into(),
+                _ => UNKNOWN_OS.into(),
             };
             (host, os)
         }
-        None => (fallback, "unknown".into()),
+        None => (fallback, UNKNOWN_OS.into()),
     };
     HostCapture {
-        output_id: triage_core::attribution::sanitize_component(&host),
+        output_id: sanitize_component(&host),
         host,
         os,
         collection_dir: dir.to_path_buf(),
@@ -134,13 +140,16 @@ fn collection_timestamp(name: &str) -> Option<String> {
 /// the collection itself — never from its position in the run — so a given
 /// capture always resolves to the same output directory regardless of what
 /// else is being processed alongside it.
-fn collection_token(collection_dir: &std::path::Path) -> String {
-    let name = collection_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    collection_timestamp(&name)
-        .unwrap_or_else(|| triage_core::attribution::sanitize_component(&name))
+fn collection_token(collection_dir: &Path) -> String {
+    let name = file_name_lossy(collection_dir);
+    collection_timestamp(&name).unwrap_or_else(|| sanitize_component(&name))
+}
+
+/// `base` cut so that `base + suffix` stays within the output-component limit.
+fn fit_with_suffix(base: &str, suffix: &str) -> String {
+    let keep = MAX_COMPONENT_CHARS.saturating_sub(suffix.chars().count());
+    let trimmed: String = base.chars().take(keep).collect();
+    format!("{trimmed}{suffix}")
 }
 
 /// Sort deterministically and assign collision-free `output_id`s across the
@@ -160,36 +169,31 @@ fn finalize(hosts: &mut [HostCapture]) {
     // identity. Two collections of one host therefore land on one component —
     // and would write into a single output directory, silently overwriting one
     // capture's results with the other's.
-    let mut allocator = triage_core::attribution::ComponentAllocator::default();
+    let mut allocator = ComponentAllocator::default();
     let bases: Vec<String> = hosts.iter().map(|h| allocator.allocate(&h.host)).collect();
 
-    let mut contested: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut contested: HashMap<&str, usize> = HashMap::new();
     for b in &bases {
-        *contested.entry(b.clone()).or_default() += 1;
+        *contested.entry(b).or_default() += 1;
     }
 
-    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut used: HashSet<String> = HashSet::new();
     for (host, base) in hosts.iter_mut().zip(bases.iter()) {
         // Only a contested hostname gets a suffix, so the ordinary one
         // collection per host layout is exactly as it always was.
-        let mut id = if contested[base] > 1 {
+        let seed = if contested[base.as_str()] > 1 {
             let token = collection_token(&host.collection_dir);
-            let keep = 80usize.saturating_sub(token.chars().count() + 1);
-            let trimmed: String = base.chars().take(keep).collect();
-            format!("{trimmed}_{token}")
+            fit_with_suffix(base, &format!("_{token}"))
         } else {
             base.clone()
         };
         // Safety net: two collections could still share a token (same second,
         // or identically named dirs under different roots). Never silently
         // reuse a directory.
+        let mut id = seed.clone();
         let mut n = 2u32;
-        let seed = id.clone();
         while !used.insert(id.clone()) {
-            let suffix = format!("-{n}");
-            let keep = 80usize.saturating_sub(suffix.len());
-            let trimmed: String = seed.chars().take(keep).collect();
-            id = format!("{trimmed}{suffix}");
+            id = fit_with_suffix(&seed, &format!("-{n}"));
             n += 1;
         }
         host.output_id = id;
@@ -230,16 +234,13 @@ pub fn enumerate_multi(
     let Some(path) = raw_fallback else {
         return Err("no Velociraptor collection found".to_string());
     };
-    let host = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let host = file_name_lossy(path);
     Ok((
         CaptureType::Raw,
         vec![HostCapture {
-            output_id: triage_core::attribution::sanitize_component(&host),
+            output_id: sanitize_component(&host),
             host,
-            os: "unknown".into(),
+            os: UNKNOWN_OS.into(),
             collection_dir: path.to_path_buf(),
             artifact_root: path.to_path_buf(),
             source_archive: None,
@@ -254,20 +255,25 @@ pub fn enumerate(path: &Path) -> Result<(CaptureType, Vec<HostCapture>), String>
     enumerate_multi(&[path.to_path_buf()], Some(path))
 }
 
+/// A host named `H` whose collection and artifact root are both `root`.
+#[cfg(test)]
+pub(crate) fn test_host(root: &Path) -> HostCapture {
+    HostCapture {
+        host: "H".into(),
+        output_id: "H".into(),
+        os: UNKNOWN_OS.into(),
+        collection_dir: root.to_path_buf(),
+        artifact_root: root.to_path_buf(),
+        source_archive: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    fn write_collection(dir: &std::path::Path, host: &str) {
-        fs::create_dir_all(dir.join("uploads/auto")).unwrap();
-        fs::write(dir.join("uploads.json"), "{}").unwrap();
-        fs::write(
-            dir.join("client_info.json"),
-            format!(r#"{{"Hostname":"{host}","Platform":"Microsoft Windows 11 Enterprise","PlatformVersion":"23H2"}}"#),
-        ).unwrap();
-    }
+    use triage_testkit::synthetic::{write_collection, COLLECTION_OS};
 
     #[test]
     fn enumerate_multi_merges_roots_with_unique_output_ids() {
@@ -413,7 +419,7 @@ mod tests {
         assert!(matches!(ty, CaptureType::Velociraptor));
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].host, "HOST1");
-        assert_eq!(hosts[0].os, "Microsoft Windows 11 Enterprise 23H2");
+        assert_eq!(hosts[0].os, COLLECTION_OS);
         assert_eq!(hosts[0].artifact_root, coll.join("uploads"));
     }
 

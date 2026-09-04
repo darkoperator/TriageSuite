@@ -81,8 +81,7 @@ macro_rules! tool_table {
 
         impl $cfg {
             /// Additive per-field merge: only fields set (`Some`) in `overlay` override
-            /// this base value; everything else falls through unchanged (spec: Profiles
-            /// section).
+            /// this base value; everything else falls through unchanged.
             pub fn merge_overlay(&self, overlay: &$ovl) -> $cfg {
                 $cfg {
                     $( $mfield: $mpick(&overlay.$mfield, &self.$mfield), )*
@@ -142,7 +141,7 @@ pub struct ExternalConfig {
     pub profiles: HashMap<String, ProfileOverlay>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolvedConfig {
     pub hayabusa: HayabusaConfig,
     pub takajo: TakajoConfig,
@@ -165,7 +164,7 @@ impl ExternalConfig {
     }
 
     /// Apply the named profile (additive overlay) on top of the base tables, then validate
-    /// the result. `profile: None` resolves the base tables as-is (spec: Precedence).
+    /// the result. `profile: None` resolves the base tables as-is.
     pub fn resolve(&self, profile: Option<&str>) -> Result<ResolvedConfig, ConfigError> {
         let (hayabusa, takajo) = match profile {
             Some(name) => {
