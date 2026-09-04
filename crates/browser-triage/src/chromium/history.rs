@@ -123,6 +123,7 @@ pub fn parse(
                     .map(super::transition_qualifiers)
                     .unwrap_or_default(),
                 transition_raw,
+                visit_source: String::new(),
                 visit_duration_secs,
                 visit_count: sql::int(sql::cell(row, 10)),
                 typed_count: sql::int(sql::cell(row, 11)),
@@ -187,6 +188,7 @@ pub fn parse(
             visit_type: String::new(),
             transition_qualifiers: String::new(),
             transition_raw: None,
+            visit_source: String::new(),
             visit_duration_secs: None,
             visit_count: sql::int(sql::cell(row, 3)),
             typed_count: sql::int(sql::cell(row, 4)),

@@ -59,6 +59,12 @@ pub struct HistoryRecord {
     /// yet know about is still recoverable from the output.
     #[serde(rename = "Transition Raw")]
     pub transition_raw: Option<i64>,
+    /// Decoded `moz_historyvisits.source`: how the navigation was initiated
+    /// (`Organic`, `Sponsored`, `Bookmarked`, `Searched`). Firefox only, and
+    /// only on a visit row — it describes the navigation, not where the record
+    /// came from, so it says nothing about syncing or importing.
+    #[serde(rename = "Visit Source")]
+    pub visit_source: String,
     /// `visits.visit_duration` (microseconds) rendered as seconds. Chromium only.
     #[serde(rename = "Visit Duration (s)")]
     pub visit_duration_secs: Option<f64>,
@@ -646,6 +652,7 @@ mod tests {
                 "Visit Type",
                 "Transition Qualifiers",
                 "Transition Raw",
+                "Visit Source",
                 "Visit Duration (s)",
                 "Visit Count",
                 "Typed Count",

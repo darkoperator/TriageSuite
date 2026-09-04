@@ -260,7 +260,7 @@ impl Tool for BrowserTool {
         let id = profile::identify(path, kind);
         let source = path.display().to_string();
         let mut timeline = Timeline::new(&id, &source, !self.no_timeline);
-        let mut written = 0u64;
+        let mut subs = SubParsers::new();
 
         match kind {
             ArtifactKind::ChromiumHistory => {
@@ -268,134 +268,118 @@ impl Tool for BrowserTool {
                 // One damaged table must not cost us the others: `History`
                 // carries history, downloads and searches, and a failure in
                 // any one of them is a per-table problem, not a per-file one.
-                soft(
+                subs.run(
                     chromium::history::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "urls/visits",
-                    &mut written,
                 )?;
-                soft(
+                subs.run(
                     chromium::downloads::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "downloads",
-                    &mut written,
                 )?;
-                soft(
+                subs.run(
                     chromium::keywords::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "keyword_search_terms",
-                    &mut written,
                 )?;
             }
             ArtifactKind::ChromiumCookies => {
                 let db = open_db(path)?;
-                soft(
+                subs.run(
                     chromium::cookies::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "cookies",
-                    &mut written,
                 )?;
             }
             ArtifactKind::ChromiumWebData => {
                 let db = open_db(path)?;
-                soft(
+                subs.run(
                     chromium::autofill::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "autofill",
-                    &mut written,
                 )?;
             }
             ArtifactKind::ChromiumLogins => {
                 let db = open_db(path)?;
-                soft(
+                subs.run(
                     chromium::logins::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "logins",
-                    &mut written,
                 )?;
             }
             ArtifactKind::ChromiumBookmarks => {
-                soft(
+                subs.run(
                     chromium::bookmarks::parse(path, &id, out, &mut timeline),
                     path,
                     "Bookmarks",
-                    &mut written,
                 )?;
             }
             ArtifactKind::ChromiumPreferences => {
-                soft(
+                subs.run(
                     chromium::extensions::parse(path, &id, out, &mut timeline),
                     path,
                     "Preferences extensions",
-                    &mut written,
                 )?;
             }
             ArtifactKind::FirefoxPlaces => {
                 let db = open_db(path)?;
                 // places.sqlite holds four of the eight artifacts, so a
                 // failure in one table must not cost the other three.
-                soft(
+                subs.run(
                     firefox::history::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "moz_places/moz_historyvisits",
-                    &mut written,
                 )?;
-                soft(
+                subs.run(
                     firefox::downloads::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "moz_annos downloads",
-                    &mut written,
                 )?;
-                soft(
+                subs.run(
                     firefox::bookmarks::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "moz_bookmarks",
-                    &mut written,
                 )?;
-                soft(
+                subs.run(
                     firefox::keywords::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "firefox search terms",
-                    &mut written,
                 )?;
             }
             ArtifactKind::FirefoxCookies => {
                 let db = open_db(path)?;
-                soft(
+                subs.run(
                     firefox::cookies::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "moz_cookies",
-                    &mut written,
                 )?;
             }
             ArtifactKind::FirefoxFormHistory => {
                 let db = open_db(path)?;
-                soft(
+                subs.run(
                     firefox::autofill::parse(&db, path, &id, out, &mut timeline),
                     path,
                     "moz_formhistory",
-                    &mut written,
                 )?;
             }
             ArtifactKind::FirefoxLogins => {
-                soft(
+                subs.run(
                     firefox::logins::parse(path, &id, out, &mut timeline),
                     path,
                     "logins.json",
-                    &mut written,
                 )?;
             }
             ArtifactKind::FirefoxExtensions => {
-                soft(
+                subs.run(
                     firefox::extensions::parse(path, &id, out, &mut timeline),
                     path,
                     "extensions.json",
-                    &mut written,
                 )?;
             }
         }
 
-        Ok(written + timeline.emitted)
+        Ok(subs.finish()? + timeline.emitted)
     }
 }
 
@@ -406,21 +390,72 @@ impl Tool for BrowserTool {
 /// rows in the same file. An *output* failure propagates, because the shared
 /// runner treats `TriageError::Output` as terminal and continuing would risk a
 /// partially written file.
-fn soft(
+pub(crate) fn soft(
     result: Result<u64, TriageError>,
     path: &Path,
     what: &str,
     total: &mut u64,
 ) -> Result<(), TriageError> {
-    match result {
-        Ok(rows) => {
-            *total += rows;
-            Ok(())
+    let mut subs = SubParsers::new();
+    subs.written = *total;
+    subs.run(result, path, what)?;
+    *total = subs.written;
+    Ok(())
+}
+
+/// Accumulates the sub-parsers of one artifact.
+///
+/// A single file can hold several independent tables — `History` carries three
+/// and `places.sqlite` four — and one damaged table must not cost the others.
+/// But a file whose tables *all* failed must be recorded as a failure rather
+/// than as a successfully parsed file that happened to contain nothing, because
+/// an empty dataset is otherwise indistinguishable from an empty profile.
+pub(crate) struct SubParsers {
+    pub written: u64,
+    first_error: Option<TriageError>,
+}
+
+impl SubParsers {
+    pub(crate) fn new() -> Self {
+        SubParsers {
+            written: 0,
+            first_error: None,
         }
-        Err(error @ TriageError::Output { .. }) => Err(error),
-        Err(error) => {
-            tracing::warn!("{}: {what}: {error}", path.display());
-            Ok(())
+    }
+
+    /// Run one sub-parser, adding its rows to the running count.
+    ///
+    /// A source-data failure is warned about and remembered so its siblings
+    /// still produce output. An *output* failure propagates immediately,
+    /// because the shared runner treats `TriageError::Output` as terminal and
+    /// continuing would risk a partially written file.
+    pub(crate) fn run(
+        &mut self,
+        result: Result<u64, TriageError>,
+        path: &Path,
+        what: &str,
+    ) -> Result<(), TriageError> {
+        match result {
+            Ok(rows) => {
+                self.written += rows;
+                Ok(())
+            }
+            Err(error @ TriageError::Output { .. }) => Err(error),
+            Err(error) => {
+                tracing::warn!("{}: {what}: {error}", path.display());
+                if self.first_error.is_none() {
+                    self.first_error = Some(error);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The row count, or the first failure when nothing at all was written.
+    pub(crate) fn finish(self) -> Result<u64, TriageError> {
+        match self.first_error {
+            Some(error) if self.written == 0 => Err(error),
+            _ => Ok(self.written),
         }
     }
 }

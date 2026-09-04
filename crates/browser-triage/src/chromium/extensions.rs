@@ -38,20 +38,39 @@ const LOCATIONS: &[(i64, &str)] = &[
 /// `extensions.settings.<id>.state`.
 const STATES: &[(i64, &str)] = &[(0, "Disabled"), (1, "Enabled"), (2, "Externally Killed")];
 
-/// `disable_reasons`, a bitmask.
+/// `disable_reasons`, a bitmask, transcribed from
+/// `extensions/browser/disable_reason.h`.
+///
+/// The shift numbers are not contiguous: Chromium retired several reasons and
+/// left their bits unused, so a table built by doubling from the previous entry
+/// silently misnames everything above the first gap. The deprecated bits are
+/// kept and labelled, because a profile written by an older Chrome can still
+/// carry them.
 const DISABLE_REASONS: &[(i64, &str)] = &[
-    (1, "User Action"),
-    (2, "Permissions Increase"),
-    (4, "Reload"),
-    (8, "Unsupported Requirement"),
-    (16, "Sideload Wipeout"),
-    (32, "Unknown From Sync"),
-    (128, "Not Verified"),
-    (256, "Greylist"),
-    (512, "Corrupted"),
-    (1024, "Remote Install"),
-    (4096, "Blocked By Policy"),
-    (8192, "Custodian Approval Required"),
+    (1 << 0, "User Action"),
+    (1 << 1, "Permissions Increase"),
+    (1 << 2, "Reload"),
+    (1 << 3, "Unsupported Requirement"),
+    (1 << 4, "Sideload Wipeout"),
+    (1 << 5, "Unknown From Sync (deprecated)"),
+    (1 << 6, "Permissions Consent (deprecated)"),
+    (1 << 7, "Known Disabled (deprecated)"),
+    (1 << 8, "Not Verified"),
+    (1 << 9, "Greylist"),
+    (1 << 10, "Corrupted"),
+    (1 << 11, "Remote Install"),
+    (1 << 12, "Inactive Ephemeral App (deprecated)"),
+    (1 << 13, "External Extension"),
+    (1 << 14, "Update Required By Policy"),
+    (1 << 15, "Custodian Approval Required"),
+    (1 << 16, "Blocked By Policy"),
+    (1 << 19, "Reinstall"),
+    (1 << 20, "Not Allowlisted"),
+    (1 << 22, "Published In Store Required By Policy"),
+    (1 << 23, "Unsupported Manifest Version"),
+    (1 << 24, "Unsupported Developer Extension"),
+    (1 << 25, "Unknown"),
+    (1 << 26, "Blocked By Cloud Policy Check"),
 ];
 
 fn decode(table: &[(i64, &'static str)], value: Option<i64>) -> String {
@@ -253,12 +272,40 @@ mod tests {
         assert_eq!(decode(LOCATIONS, None), "");
     }
 
+    /// Pinned to `extensions/browser/disable_reason.h`. The shift numbers skip
+    /// retired reasons, so these are asserted individually rather than against
+    /// the table, which is how a doubled-from-the-previous-entry table shipped
+    /// with six reasons misnamed.
+    #[test]
+    fn disable_reason_bits_match_the_upstream_header() {
+        for (shift, name) in [
+            (0, "User Action"),
+            (1, "Permissions Increase"),
+            (2, "Reload"),
+            (3, "Unsupported Requirement"),
+            (4, "Sideload Wipeout"),
+            (8, "Not Verified"),
+            (9, "Greylist"),
+            (10, "Corrupted"),
+            (11, "Remote Install"),
+            (13, "External Extension"),
+            (14, "Update Required By Policy"),
+            (15, "Custodian Approval Required"),
+            (16, "Blocked By Policy"),
+        ] {
+            assert_eq!(decode_bitmask(Some(1 << shift)), name, "1 << {shift}");
+        }
+    }
+
     #[test]
     fn disable_reason_bits_decode_and_join() {
         assert_eq!(decode_bitmask(Some(0)), "");
         assert_eq!(decode_bitmask(None), "");
         assert_eq!(decode_bitmask(Some(1)), "User Action");
-        assert_eq!(decode_bitmask(Some(1 | 512)), "User Action|Corrupted");
+        assert_eq!(
+            decode_bitmask(Some((1 << 0) | (1 << 10))),
+            "User Action|Corrupted"
+        );
         assert_eq!(decode_bitmask(Some(1 << 30)), "Unknown (1073741824)");
     }
 

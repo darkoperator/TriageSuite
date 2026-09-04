@@ -39,10 +39,12 @@ const SCHEMES: &[(i64, &str)] = &[
 /// fired, so the row can say so rather than silently presenting one epoch as
 /// the other.
 pub fn webkit_or_time_t(value: i64) -> (WinTimestamp, bool) {
-    const MAX_PLAUSIBLE_TIME_T: i64 = 100_000_000_000;
+    const MAX_PLAUSIBLE_TIME_T: u64 = 100_000_000_000;
     if value == 0 {
         (WinTimestamp::none(), false)
-    } else if value.abs() < MAX_PLAUSIBLE_TIME_T {
+    } else if value.unsigned_abs() < MAX_PLAUSIBLE_TIME_T {
+        // `unsigned_abs`, not `abs`: the value comes straight from an evidence
+        // cell, and `i64::MIN.abs()` panics wherever overflow checks are on.
         (WinTimestamp::from_unix(value), true)
     } else {
         (WinTimestamp::from_webkit_micros(value), false)
@@ -202,5 +204,17 @@ mod tests {
         let (timestamp, legacy) = webkit_or_time_t(0);
         assert!(timestamp.is_none());
         assert!(!legacy);
+    }
+
+    /// The value is an unconstrained integer read from an evidence cell, so
+    /// the extremes must not panic. `i64::MIN.abs()` overflows, which made a
+    /// crafted `date_created` abort the parse wherever overflow checks are on.
+    #[test]
+    fn the_integer_extremes_do_not_panic() {
+        for value in [i64::MIN, i64::MIN + 1, i64::MAX, -1] {
+            let (timestamp, _) = webkit_or_time_t(value);
+            // Out of representable range either way; the point is reaching here.
+            assert!(timestamp.is_none() || !timestamp.to_string().is_empty());
+        }
     }
 }

@@ -10,8 +10,15 @@
 //! The tool this crate replaced folded `Snapshots/<version>/Default` into
 //! `Default` and lost 41% of its output to the resulting collisions. The
 //! guarantee here is structural rather than a special case: the profile is the
-//! **full relative path** beneath the `User Data` / `Profiles` anchor, so two
-//! different directories can never produce the same profile string.
+//! **full relative path** below the product directory, so two different
+//! directories can never produce the same profile string.
+//!
+//! Identification is table-driven, over [`LAYOUTS`]. Each row names a product
+//! directory and the container that platform interposes between it and the
+//! profile, and the container is consumed only when it is actually present —
+//! Windows has one, macOS and Linux do not. An earlier revision required the
+//! container, so every macOS and Linux path fell through to [`degraded`] and
+//! Chrome, Edge and Brave on one host collapsed into a single identity.
 
 use crate::artifact::ArtifactKind;
 use std::path::Path;
@@ -50,9 +57,12 @@ pub struct BrowserId {
     pub note: String,
 }
 
-/// Chromium's profile container. Everything below it is the profile path.
+/// Chromium's profile container on Windows. Everything below it is the profile
+/// path. macOS and Linux have no equivalent, which is why it is optional in
+/// [`Layout`] rather than being required to identify a Chromium install.
 const CHROMIUM_ANCHOR: &str = "User Data";
-/// Firefox's profile container.
+/// Firefox's profile container on Windows and macOS. Linux keeps profiles
+/// directly under `~/.mozilla/firefox`, with no container.
 const FIREFOX_ANCHOR: &str = "Profiles";
 
 /// The only directory Chromium ever interposes between a profile and one of the
@@ -64,45 +74,103 @@ const FIREFOX_ANCHOR: &str = "Profiles";
 /// artifacts, so a longer list would buy nothing and cost safety.
 const STRIPPED_LEAF: &str = "Network";
 
-/// Product directory -> (browser, channel), matched against the segment
-/// immediately above `User Data`.
-const CHROMIUM_BRANDS: &[(&str, &str, &str)] = &[
-    ("Chrome", "Chrome", "Stable"),
-    ("Chrome Beta", "Chrome", "Beta"),
-    ("Chrome Dev", "Chrome", "Dev"),
-    ("Chrome SxS", "Chrome", "Canary"),
-    ("Chrome for Testing", "Chrome", "Testing"),
-    ("Edge", "Edge", "Stable"),
-    ("Edge Beta", "Edge", "Beta"),
-    ("Edge Dev", "Edge", "Dev"),
-    ("Edge SxS", "Edge", "Canary"),
-    ("Brave-Browser", "Brave", "Stable"),
-    ("Brave-Browser-Beta", "Brave", "Beta"),
-    ("Brave-Browser-Nightly", "Brave", "Nightly"),
-    ("Vivaldi", "Vivaldi", "Stable"),
-    ("Vivaldi Snapshot", "Vivaldi", "Snapshot"),
-    ("Chromium", "Chromium", "Stable"),
-    ("Arc", "Arc", "Stable"),
-];
+/// One known install layout.
+///
+/// The container is optional *at match time*, not per-row: Windows interposes
+/// `User Data` between the product directory and the profile, while macOS and
+/// Linux put the profile directly under the product. One row therefore covers
+/// a product on every platform, and the container is consumed only when it is
+/// actually present.
+struct Layout {
+    /// The product directory as it appears on disk, matched case-insensitively.
+    product: &'static str,
+    container: Option<&'static str>,
+    browser: &'static str,
+    channel: &'static str,
+    family: Family,
+}
 
-/// Opera has no `User Data`; the product directory *is* the profile directory.
-const OPERA_BRANDS: &[(&str, &str, &str)] = &[
-    ("Opera Stable", "Opera", "Stable"),
-    ("Opera Beta", "Opera", "Beta"),
-    ("Opera Developer", "Opera", "Dev"),
-    ("Opera GX Stable", "Opera GX", "Stable"),
-    ("Opera Crypto Stable", "Opera Crypto", "Stable"),
-    ("Opera Neon", "Opera Neon", "Stable"),
-];
+const fn chromium(product: &'static str, browser: &'static str, channel: &'static str) -> Layout {
+    Layout {
+        product,
+        container: Some(CHROMIUM_ANCHOR),
+        browser,
+        channel,
+        family: Family::Chromium,
+    }
+}
 
-const FIREFOX_BRANDS: &[(&str, &str, &str)] = &[
-    ("Firefox", "Firefox", "Stable"),
-    ("Firefox Developer Edition", "Firefox", "Dev"),
-    ("Firefox Nightly", "Firefox", "Nightly"),
-    ("LibreWolf", "LibreWolf", ""),
-    ("Waterfox", "Waterfox", ""),
-    ("SeaMonkey", "SeaMonkey", ""),
-    ("Pale Moon", "Pale Moon", ""),
+/// Opera never has a container: the product directory *is* the profile.
+const fn opera(product: &'static str, browser: &'static str, channel: &'static str) -> Layout {
+    Layout {
+        product,
+        container: None,
+        browser,
+        channel,
+        family: Family::Chromium,
+    }
+}
+
+const fn firefox(product: &'static str, browser: &'static str, channel: &'static str) -> Layout {
+    Layout {
+        product,
+        container: Some(FIREFOX_ANCHOR),
+        browser,
+        channel,
+        family: Family::Firefox,
+    }
+}
+
+/// Every install layout this crate recognizes. The deepest match wins, so a
+/// capture staged beneath a directory that happens to share a product name
+/// cannot shadow the real one.
+const LAYOUTS: &[Layout] = &[
+    // Windows and macOS product directories.
+    chromium("Chrome", "Chrome", "Stable"),
+    chromium("Chrome Beta", "Chrome", "Beta"),
+    chromium("Chrome Dev", "Chrome", "Dev"),
+    chromium("Chrome SxS", "Chrome", "Canary"),
+    chromium("Chrome for Testing", "Chrome", "Testing"),
+    chromium("Edge", "Edge", "Stable"),
+    chromium("Microsoft Edge", "Edge", "Stable"),
+    chromium("Edge Beta", "Edge", "Beta"),
+    chromium("Microsoft Edge Beta", "Edge", "Beta"),
+    chromium("Edge Dev", "Edge", "Dev"),
+    chromium("Microsoft Edge Dev", "Edge", "Dev"),
+    chromium("Edge SxS", "Edge", "Canary"),
+    chromium("Microsoft Edge Canary", "Edge", "Canary"),
+    chromium("Brave-Browser", "Brave", "Stable"),
+    chromium("Brave-Browser-Beta", "Brave", "Beta"),
+    chromium("Brave-Browser-Nightly", "Brave", "Nightly"),
+    chromium("Vivaldi", "Vivaldi", "Stable"),
+    chromium("Vivaldi Snapshot", "Vivaldi", "Snapshot"),
+    chromium("Chromium", "Chromium", "Stable"),
+    chromium("Arc", "Arc", "Stable"),
+    // Linux package directories under ~/.config, which name the channel in the
+    // directory itself and never carry a container.
+    chromium("google-chrome", "Chrome", "Stable"),
+    chromium("google-chrome-beta", "Chrome", "Beta"),
+    chromium("google-chrome-unstable", "Chrome", "Dev"),
+    chromium("microsoft-edge", "Edge", "Stable"),
+    chromium("microsoft-edge-beta", "Edge", "Beta"),
+    chromium("microsoft-edge-dev", "Edge", "Dev"),
+    chromium("brave-browser", "Brave", "Stable"),
+    chromium("vivaldi", "Vivaldi", "Stable"),
+    opera("Opera Stable", "Opera", "Stable"),
+    opera("Opera Beta", "Opera", "Beta"),
+    opera("Opera Developer", "Opera", "Dev"),
+    opera("Opera GX Stable", "Opera GX", "Stable"),
+    opera("Opera Crypto Stable", "Opera Crypto", "Stable"),
+    opera("Opera Neon", "Opera Neon", "Stable"),
+    // `firefox` also matches the Linux `~/.mozilla/firefox` directory, which
+    // has no `Profiles` container.
+    firefox("Firefox", "Firefox", "Stable"),
+    firefox("Firefox Developer Edition", "Firefox", "Dev"),
+    firefox("Firefox Nightly", "Firefox", "Nightly"),
+    firefox("LibreWolf", "LibreWolf", ""),
+    firefox("Waterfox", "Waterfox", ""),
+    firefox("SeaMonkey", "SeaMonkey", ""),
+    firefox("Pale Moon", "Pale Moon", ""),
 ];
 
 pub fn family_of(kind: ArtifactKind) -> Family {
@@ -116,11 +184,17 @@ pub fn family_of(kind: ArtifactKind) -> Family {
     }
 }
 
-fn lookup(table: &[(&str, &str, &str)], segment: &str) -> Option<(String, String)> {
-    table
-        .iter()
-        .find(|(dir, _, _)| eq_ci(dir, segment))
-        .map(|(_, browser, channel)| ((*browser).to_string(), (*channel).to_string()))
+/// The deepest segment matching a layout for `family`, with that layout.
+///
+/// Deepest, not first, so a capture staged under a directory that happens to be
+/// named after a browser cannot shadow the real install further down.
+fn deepest_layout<'a>(dir: &[String], family: Family) -> Option<(usize, &'a Layout)> {
+    (0..dir.len()).rev().find_map(|i| {
+        LAYOUTS
+            .iter()
+            .find(|layout| layout.family == family && eq_ci(layout.product, &dir[i]))
+            .map(|layout| (i, layout))
+    })
 }
 
 /// Index of the last segment equal to `anchor`, case-insensitively. Last, not
@@ -146,103 +220,108 @@ pub fn identify(path: &Path, kind: ArtifactKind) -> BrowserId {
         &all[..all.len() - 1]
     };
 
+    if let Some((index, layout)) = deepest_layout(dir, family) {
+        return from_layout(dir, index, layout);
+    }
+    // A fork this crate does not know, but whose container is still present.
+    if let Some(id) = from_anchor(dir, family) {
+        return id;
+    }
+    degraded(dir, family, anchor_of(family))
+}
+
+fn anchor_of(family: Family) -> &'static str {
     match family {
-        Family::Chromium => identify_chromium(dir, family),
-        Family::Firefox => identify_firefox(dir, family),
+        Family::Chromium => CHROMIUM_ANCHOR,
+        Family::Firefox => FIREFOX_ANCHOR,
     }
 }
 
-fn identify_chromium(dir: &[String], family: Family) -> BrowserId {
-    if let Some(anchor) = last_anchor(dir, CHROMIUM_ANCHOR) {
-        let mut profile_segs: Vec<&str> = dir[anchor + 1..].iter().map(String::as_str).collect();
-        // `<profile>/Network/Cookies` (Chrome 96+). One strip, never more.
-        if profile_segs.last().is_some_and(|s| eq_ci(s, STRIPPED_LEAF)) {
-            profile_segs.pop();
+/// The profile path below a product directory, and the identification to go
+/// with it.
+fn from_layout(dir: &[String], index: usize, layout: &Layout) -> BrowserId {
+    let mut start = index + 1;
+    // Consume the container only when this platform actually has one.
+    if let Some(container) = layout.container {
+        if dir.get(start).is_some_and(|seg| eq_ci(seg, container)) {
+            start += 1;
         }
-        let profile = if profile_segs.is_empty() {
-            // The artifact sits directly in `User Data` — unusual but real for
-            // `Local State`-adjacent files; name it after the anchor itself
-            // rather than inventing a profile.
-            CHROMIUM_ANCHOR.to_string()
-        } else {
-            profile_segs.join("/")
-        };
-
-        let (browser, channel) = anchor
-            .checked_sub(1)
-            .and_then(|i| lookup(CHROMIUM_BRANDS, &dir[i]))
-            .unwrap_or_else(|| {
-                let product = anchor.checked_sub(1).map(|i| dir[i].as_str()).unwrap_or("");
-                (format!("Chromium ({product})"), String::new())
-            });
-
-        return BrowserId {
-            family,
-            browser,
-            channel,
-            profile,
-            note: String::new(),
-        };
     }
+    let profile = profile_below(dir, start, layout.family)
+        // Nothing below the product directory: Opera, where the product dir is
+        // the profile, and the rare artifact sitting beside the profiles.
+        .unwrap_or_else(|| dir[index].clone());
 
-    // Opera keeps its profile directly in the product directory.
-    if let Some(idx) = dir
-        .iter()
-        .rposition(|seg| lookup(OPERA_BRANDS, seg).is_some())
-    {
-        let (browser, channel) = lookup(OPERA_BRANDS, &dir[idx]).expect("rposition matched");
-        let mut profile_segs: Vec<&str> = dir[idx..].iter().map(String::as_str).collect();
-        if profile_segs.len() > 1 && profile_segs.last().is_some_and(|s| eq_ci(s, STRIPPED_LEAF)) {
-            profile_segs.pop();
-        }
-        return BrowserId {
-            family,
-            browser,
-            channel,
-            profile: profile_segs.join("/"),
-            note: String::new(),
-        };
-    }
-
-    degraded(dir, family, CHROMIUM_ANCHOR)
-}
-
-fn identify_firefox(dir: &[String], family: Family) -> BrowserId {
-    let Some(anchor) = last_anchor(dir, FIREFOX_ANCHOR) else {
-        return degraded(dir, family, FIREFOX_ANCHOR);
+    let channel = match layout.family {
+        Family::Firefox => firefox_channel(&profile, layout.channel),
+        Family::Chromium => layout.channel.to_string(),
     };
-    let profile = dir[anchor + 1..].join("/");
-    let profile = if profile.is_empty() {
-        FIREFOX_ANCHOR.to_string()
-    } else {
-        profile
-    };
-
-    let (browser, mut channel) = anchor
-        .checked_sub(1)
-        .and_then(|i| lookup(FIREFOX_BRANDS, &dir[i]))
-        .unwrap_or_else(|| {
-            let product = anchor.checked_sub(1).map(|i| dir[i].as_str()).unwrap_or("");
-            (format!("Firefox ({product})"), String::new())
-        });
-
-    // Firefox encodes the channel in the profile name as well as the product
-    // directory, and the profile name is the more reliable of the two when a
-    // single install hosts several channels' profiles.
-    let lower = profile.to_ascii_lowercase();
-    if lower.ends_with(".default-esr") {
-        channel = "ESR".to_string();
-    } else if lower.ends_with(".dev-edition-default") {
-        channel = "Dev".to_string();
-    }
 
     BrowserId {
+        family: layout.family,
+        browser: layout.browser.to_string(),
+        channel,
+        profile,
+        note: String::new(),
+    }
+}
+
+/// The `/`-joined profile path, or `None` when there is nothing below `start`.
+fn profile_below(dir: &[String], start: usize, family: Family) -> Option<String> {
+    let mut segs: Vec<&str> = dir.get(start..)?.iter().map(String::as_str).collect();
+    // `<profile>/Network/Cookies` (Chrome 96+). One strip, never more, and
+    // never the last remaining segment: a profile literally named `Network`
+    // must survive, or it would collide with the profile above it.
+    if family == Family::Chromium
+        && segs.len() > 1
+        && segs.last().is_some_and(|s| eq_ci(s, STRIPPED_LEAF))
+    {
+        segs.pop();
+    }
+    (!segs.is_empty()).then(|| segs.join("/"))
+}
+
+/// Firefox encodes the channel in the profile name as well as the product
+/// directory, and the profile name is the more reliable of the two when a
+/// single install hosts several channels' profiles — which is the normal case
+/// on Windows and macOS, where every channel shares one `Profiles` directory.
+fn firefox_channel(profile: &str, default: &str) -> String {
+    let lower = profile.to_ascii_lowercase();
+    for (suffix, channel) in [
+        (".default-esr", "ESR"),
+        (".dev-edition-default", "Dev"),
+        (".default-nightly", "Nightly"),
+        (".default-beta", "Beta"),
+    ] {
+        if lower.ends_with(suffix) {
+            return channel.to_string();
+        }
+    }
+    default.to_string()
+}
+
+/// A container with an unrecognized product above it: still a confident
+/// profile path, with the fork named rather than discarded.
+fn from_anchor(dir: &[String], family: Family) -> Option<BrowserId> {
+    let anchor = last_anchor(dir, anchor_of(family))?;
+    let product = anchor.checked_sub(1).map(|i| dir[i].as_str()).unwrap_or("");
+    let profile =
+        profile_below(dir, anchor + 1, family).unwrap_or_else(|| anchor_of(family).to_string());
+    let browser = match family {
+        Family::Chromium => format!("Chromium ({product})"),
+        Family::Firefox => format!("Firefox ({product})"),
+    };
+    let channel = match family {
+        Family::Firefox => firefox_channel(&profile, ""),
+        Family::Chromium => String::new(),
+    };
+    Some(BrowserId {
         family,
         browser,
         channel,
         profile,
         note: String::new(),
-    }
+    })
 }
 
 /// Best-effort attribution when no anchor is present — an artifact handed over
@@ -370,10 +449,152 @@ mod tests {
 
     /// A profile literally named `Network` must survive; only a trailing
     /// `Network` *below* a profile is a container.
+    ///
+    /// This previously asserted the profile was `User Data`, because the strip
+    /// was unconditional and emptied the path. That collapsed
+    /// `User Data/Network/<artifact>` and `User Data/<artifact>` onto one
+    /// profile string, which is the collision class this module exists to
+    /// prevent.
     #[test]
     fn a_profile_named_network_is_not_stripped_away() {
         let got = chromium("/Google/Chrome/User Data/Network/History");
-        assert_eq!(got.profile, CHROMIUM_ANCHOR);
+        assert_eq!(got.profile, "Network");
+        assert_ne!(
+            got.profile,
+            chromium("/Google/Chrome/User Data/History").profile,
+            "a profile named Network must not collide with the product root"
+        );
+    }
+
+    /// macOS and Linux put the profile directly under the product directory,
+    /// with no `User Data`. Every one of these used to fall through to
+    /// `degraded()`, so Chrome, Edge and Brave on one host all reported as
+    /// `Chromium (Unknown)` with profile `Default` and became one identity.
+    #[test]
+    fn macos_and_linux_chromium_layouts_are_attributed() {
+        let cases = [
+            (
+                "/Users/a/Library/Application Support/Google/Chrome/Default/History",
+                "Chrome",
+                "Stable",
+                "Default",
+            ),
+            (
+                "/Users/a/Library/Application Support/Microsoft Edge/Profile 1/History",
+                "Edge",
+                "Stable",
+                "Profile 1",
+            ),
+            (
+                "/Users/a/Library/Application Support/BraveSoftware/Brave-Browser/Default/History",
+                "Brave",
+                "Stable",
+                "Default",
+            ),
+            (
+                "/home/a/.config/google-chrome/Default/History",
+                "Chrome",
+                "Stable",
+                "Default",
+            ),
+            (
+                "/home/a/.config/google-chrome-beta/Default/History",
+                "Chrome",
+                "Beta",
+                "Default",
+            ),
+            (
+                "/home/a/.config/BraveSoftware/Brave-Browser/Profile 2/History",
+                "Brave",
+                "Stable",
+                "Profile 2",
+            ),
+            (
+                "/home/a/.config/chromium/Default/History",
+                "Chromium",
+                "Stable",
+                "Default",
+            ),
+        ];
+        for (path, browser, channel, profile) in cases {
+            let got = chromium(path);
+            assert_eq!(got.browser, browser, "{path}");
+            assert_eq!(got.channel, channel, "{path}");
+            assert_eq!(got.profile, profile, "{path}");
+            assert!(got.note.is_empty(), "{path}");
+        }
+    }
+
+    /// Three browsers on one macOS host must remain three identities.
+    #[test]
+    fn macos_browsers_do_not_collapse_into_one_identity() {
+        let root = "/Users/a/Library/Application Support";
+        let chrome = chromium(&format!("{root}/Google/Chrome/Default/History"));
+        let edge = chromium(&format!("{root}/Microsoft Edge/Default/History"));
+        let brave = chromium(&format!(
+            "{root}/BraveSoftware/Brave-Browser/Default/History"
+        ));
+        let ids = [&chrome, &edge, &brave].map(|id| (&id.browser, &id.profile));
+        assert_eq!(ids[0].1, ids[1].1, "the profile name is shared");
+        assert_ne!(ids[0].0, ids[1].0);
+        assert_ne!(ids[1].0, ids[2].0);
+        assert_ne!(ids[0].0, ids[2].0);
+    }
+
+    /// The same snapshot collision the module was written for, on macOS.
+    #[test]
+    fn macos_snapshot_profiles_stay_distinct() {
+        let root = "/Users/a/Library/Application Support/Google/Chrome";
+        let live = chromium(&format!("{root}/Default/History"));
+        let snap = chromium(&format!("{root}/Snapshots/116.0.5845.97/Default/History"));
+        assert_eq!(live.profile, "Default");
+        assert_eq!(snap.profile, "Snapshots/116.0.5845.97/Default");
+    }
+
+    /// Linux Firefox keeps profiles under `~/.mozilla/firefox` with no
+    /// `Profiles` container, and macOS has the container.
+    #[test]
+    fn firefox_resolves_with_and_without_the_profiles_container() {
+        let linux = firefox("/home/a/.mozilla/firefox/ab12cd.default-release/places.sqlite");
+        assert_eq!(linux.browser, "Firefox");
+        assert_eq!(linux.profile, "ab12cd.default-release");
+        assert!(linux.note.is_empty());
+
+        let macos = firefox(
+            "/Users/a/Library/Application Support/Firefox/Profiles/xy.default-release/places.sqlite",
+        );
+        assert_eq!(macos.browser, "Firefox");
+        assert_eq!(macos.profile, "xy.default-release");
+    }
+
+    /// Every channel shares one `Profiles` directory on Windows and macOS, so
+    /// the profile suffix is the only thing that distinguishes them.
+    #[test]
+    fn firefox_nightly_and_beta_are_read_from_the_profile_suffix() {
+        let base = "/Users/a/AppData/Roaming/Mozilla/Firefox/Profiles";
+        assert_eq!(
+            firefox(&format!("{base}/x1.default-nightly/places.sqlite")).channel,
+            "Nightly"
+        );
+        assert_eq!(
+            firefox(&format!("{base}/q9.default-beta/places.sqlite")).channel,
+            "Beta"
+        );
+    }
+
+    /// An Electron app's `Network/Cookies` has no product directory at all, so
+    /// it degrades — but it must not silently claim a browser profile.
+    #[test]
+    fn an_electron_app_is_not_mistaken_for_a_browser_profile() {
+        let got = id(
+            "/Users/a/AppData/Roaming/discord/Network/Cookies",
+            ArtifactKind::ChromiumCookies,
+        );
+        assert_eq!(got.browser, "Chromium (Unknown)");
+        assert!(
+            !got.note.is_empty(),
+            "a degraded identification must say so"
+        );
     }
 
     #[test]

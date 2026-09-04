@@ -47,19 +47,34 @@ no output filename is ever derived from a source artifact. Two browser profiles 
 
 ## Supported browsers
 
-| Family | Browsers | Anchor |
+| Family | Browsers | Container |
 |---|---|---|
-| Chromium | Chrome, Edge, Brave, Opera / Opera GX / Opera Crypto / Opera Neon, Vivaldi, Arc, Chromium, unrecognized forks | `User Data` (Opera uses its product directory) |
-| Firefox | Firefox, LibreWolf, Waterfox, SeaMonkey, Pale Moon | `Profiles` |
+| Chromium | Chrome, Edge, Brave, Opera / Opera GX / Opera Crypto / Opera Neon, Vivaldi, Arc, Chromium, unrecognized forks | `User Data` on Windows; none on macOS or Linux, and none for Opera |
+| Firefox | Firefox, LibreWolf, Waterfox, SeaMonkey, Pale Moon | `Profiles` on Windows and macOS; none under `~/.mozilla/firefox` |
 
-Channels (`Stable`, `Beta`, `Dev`, `Canary`, `Nightly`, `ESR`, `Snapshot`, `Testing`) are derived
-from the product directory, and for Firefox refined from the profile-name suffix.
+Identification is driven by a table of install layouts, each naming a product directory and the
+container that platform interposes between it and the profile. The container is consumed only when
+it is actually present, so one entry covers a browser on every platform: `Google/Chrome/User Data/Default`,
+`Library/Application Support/Google/Chrome/Default` and `.config/google-chrome/Default` all resolve
+to Chrome, profile `Default`. The deepest matching product directory wins, so a capture staged
+beneath a directory that happens to share a browser's name cannot shadow the real install.
 
-**Profile identification is the full relative path under the anchor**, not the containing
+Channels (`Stable`, `Beta`, `Dev`, `Canary`, `Nightly`, `ESR`, `Snapshot`, `Testing`) come from the
+product directory. Firefox refines them from the profile-name suffix (`.default-esr`,
+`.dev-edition-default`, `.default-nightly`, `.default-beta`), because on Windows and macOS every
+channel shares one `Profiles` directory and the product directory alone cannot tell them apart.
+
+**Profile identification is the full relative path below the product directory**, not the containing
 directory. `Snapshots/116.0.5845.97/Default` and `Default` are therefore distinct with no special
 case — this is the specific collision that cost the previous tool most of its output. Exactly one
-segment is ever stripped: a trailing `Network` (`<profile>/Network/Cookies`, Chrome 96+), so a
-profile does not split into two identities depending on which artifact was found.
+segment is ever stripped: a trailing `Network` (`<profile>/Network/Cookies`, Chrome 96+), and never
+the last remaining segment, so a profile literally named `Network` survives instead of collapsing
+onto the directory above it.
+
+A path with no recognizable product directory and no container — an artifact handed over with `-f`,
+or an Electron application that shares Chromium's filenames — is reported as `Chromium (Unknown)` or
+`Firefox (Unknown)` with the profile taken from the containing directory and a note on every row
+saying the attribution was degraded.
 
 Velociraptor's URL-encoded paths (`C%3A`) are handled by `winpath::segments`, the same
 normalization user attribution uses.

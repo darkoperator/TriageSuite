@@ -30,16 +30,20 @@ const TRANSITION_CORE: &[(i64, &str)] = &[
 
 /// Qualifier bits in the high bits of `visits.transition`. The redirect and
 /// address-bar bits are what let a chain be told apart from a click.
+///
+/// Values are transcribed verbatim from `ui/base/page_transition_types.h`; the
+/// test below pins each one, because an off-by-one-position table decodes every
+/// row to a plausible but wrong name rather than failing visibly.
 const TRANSITION_QUALIFIERS: &[(i64, &str)] = &[
-    (0x0100_0000, "Blocked"),
-    (0x0200_0000, "Forward Back"),
-    (0x0400_0000, "From Address Bar"),
-    (0x0800_0000, "Home Page"),
-    (0x1000_0000, "From API"),
-    (0x2000_0000, "Chain Start"),
-    (0x4000_0000, "Chain End"),
-    (0x8000_0000, "Client Redirect"),
-    (0x0080_0000, "Server Redirect"),
+    (0x0080_0000, "Blocked"),
+    (0x0100_0000, "Forward Back"),
+    (0x0200_0000, "From Address Bar"),
+    (0x0400_0000, "Home Page"),
+    (0x0800_0000, "From API"),
+    (0x1000_0000, "Chain Start"),
+    (0x2000_0000, "Chain End"),
+    (0x4000_0000, "Client Redirect"),
+    (0x8000_0000, "Server Redirect"),
 ];
 
 /// The decoded core type, or `Unknown (<n>)` so an unrecognized value is still
@@ -216,10 +220,43 @@ mod tests {
         assert_eq!(transition_core(200), "Unknown (200)");
     }
 
+    /// Pinned to `ui/base/page_transition_types.h`. Asserting the table against
+    /// itself would pass on any values it happened to contain, which is how an
+    /// earlier revision shipped every qualifier shifted one bit position.
+    #[test]
+    fn qualifier_bits_match_the_upstream_header() {
+        for (bit, name) in [
+            (0x0080_0000i64, "Blocked"),
+            (0x0100_0000, "Forward Back"),
+            (0x0200_0000, "From Address Bar"),
+            (0x0400_0000, "Home Page"),
+            (0x0800_0000, "From API"),
+            (0x1000_0000, "Chain Start"),
+            (0x2000_0000, "Chain End"),
+            (0x4000_0000, "Client Redirect"),
+            (0x8000_0000, "Server Redirect"),
+        ] {
+            assert_eq!(transition_qualifiers(bit), name, "bit {bit:#x}");
+        }
+    }
+
     #[test]
     fn qualifiers_decode_and_join() {
-        let value = 0x0400_0000 | 0x2000_0000;
+        let value = 0x0200_0000 | 0x1000_0000;
         assert_eq!(transition_qualifiers(value), "From Address Bar|Chain Start");
         assert_eq!(transition_qualifiers(0), "");
+    }
+
+    /// Chromium writes `transition` as a signed 32-bit int, so a visit carrying
+    /// SERVER_REDIRECT reaches SQLite negative. Sign extension into i64 keeps
+    /// bit 31 set, and the core type still reads out of the low byte.
+    #[test]
+    fn a_negative_transition_still_decodes() {
+        let typed_server_redirect = i64::from(-2_147_483_647i32); // 0x80000001
+        assert_eq!(transition_core(typed_server_redirect), "Typed");
+        assert_eq!(
+            transition_qualifiers(typed_server_redirect),
+            "Server Redirect"
+        );
     }
 }

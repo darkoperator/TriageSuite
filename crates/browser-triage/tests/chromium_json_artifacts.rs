@@ -55,7 +55,7 @@ const PREFERENCES: &str = r#"{
         "active_permissions": {"api": ["cookies"], "explicit_host": ["https://*/*"]}
       },
       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
-        "state": 0, "location": 1, "disable_reasons": 513,
+        "state": 0, "location": 1, "disable_reasons": 1025,
         "manifest": {"name": "Disabled Thing", "version": "0.1"}
       },
       "cccccccccccccccccccccccccccccccc": {

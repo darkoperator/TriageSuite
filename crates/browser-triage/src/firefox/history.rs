@@ -90,6 +90,7 @@ pub fn parse(
                     // Firefox has no transition qualifier bitmask.
                     transition_qualifiers: String::new(),
                     transition_raw: sql::int(sql::cell(row, 3)),
+                    visit_source: super::visit_source(sql::int(sql::cell(row, 4))),
                     visit_duration_secs: None,
                     visit_count: sql::int(sql::cell(row, 8)),
                     // `typed` is 0 or 1 in Firefox, not a count. Documented on
@@ -158,6 +159,7 @@ pub fn parse(
                 visit_type: String::new(),
                 transition_qualifiers: String::new(),
                 transition_raw: None,
+                visit_source: String::new(),
                 visit_duration_secs: None,
                 visit_count: sql::int(sql::cell(row, 3)),
                 typed_count: sql::int(sql::cell(row, 4)),

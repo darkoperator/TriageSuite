@@ -53,26 +53,46 @@ fn artifact_error(path: &Path, message: impl std::fmt::Display) -> TriageError {
     }
 }
 
-/// `download id -> urls in chain_index order`.
-fn load_url_chains(db: &Database) -> BTreeMap<i64, Vec<String>> {
+/// `download id -> urls in chain_index order`, plus why the chains are missing
+/// when they are.
+///
+/// A failure here used to return silently, so every download row showed a blank
+/// `Download URL` and `URL Chain` with nothing to say the table had not been
+/// read. Since the chain is often the only record of where a file came from, an
+/// unreadable chain table must not look like a download with no origin.
+fn load_url_chains(db: &Database) -> (BTreeMap<i64, Vec<String>>, Option<String>) {
     let mut chains: BTreeMap<i64, Vec<String>> = BTreeMap::new();
     if !db.table_exists("downloads_url_chains").unwrap_or(false) {
-        return chains;
+        return (
+            chains,
+            Some("downloads_url_chains table is absent".to_string()),
+        );
     }
-    let Ok(rows) =
-        db.query("SELECT id, chain_index, url FROM downloads_url_chains ORDER BY id, chain_index")
-    else {
-        return chains;
+    let rows = match db
+        .query("SELECT id, chain_index, url FROM downloads_url_chains ORDER BY id, chain_index")
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            return (
+                chains,
+                Some(format!("downloads_url_chains unreadable: {error}")),
+            )
+        }
     };
+    let mut skipped = 0u64;
     for row in &rows {
-        if let Some(id) = sql::int(sql::cell(row, 0)) {
-            chains
+        match sql::int(sql::cell(row, 0)) {
+            Some(id) => chains
                 .entry(id)
                 .or_default()
-                .push(sql::text(sql::cell(row, 2)));
+                .push(sql::text(sql::cell(row, 2))),
+            None => skipped += 1,
         }
     }
-    chains
+    let note = (skipped > 0).then(|| {
+        format!("{skipped} downloads_url_chains row(s) had an unusable id and were not attached")
+    });
+    (chains, note)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -89,7 +109,7 @@ pub fn parse(
 
     let source = path.display().to_string();
     let cols = sql::columns(db, "downloads");
-    let mut chains = load_url_chains(db);
+    let (mut chains, chain_note) = load_url_chains(db);
     let mut written = 0u64;
 
     let sql_text = format!(
@@ -111,6 +131,13 @@ pub fn parse(
         let chain = download_id
             .and_then(|d| chains.remove(&d))
             .unwrap_or_default();
+        // Say why the origin is blank, so it is never read as "this download
+        // had no recorded source".
+        if chain.is_empty() {
+            if let Some(why) = &chain_note {
+                notes.push(why.clone());
+            }
+        }
 
         let start_time =
             WinTimestamp::from_webkit_micros(sql::int(sql::cell(row, 4)).unwrap_or_default());

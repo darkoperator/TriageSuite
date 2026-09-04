@@ -117,9 +117,10 @@ pub fn parse(
                         json::int(&meta, "endTime").unwrap_or_default(),
                     );
                     total_bytes = json::int(&meta, "fileSize");
-                    if let Some(numeric) = json::int(&meta, "state") {
-                        state = crate::chromium::download_state(numeric);
-                    }
+                    // Firefox's own state enum, not Chromium's: the two agree
+                    // only on 1, and sharing a table swapped failed with
+                    // cancelled.
+                    state = super::download_metadata_state(json::int(&meta, "state"));
                     if json::bool_str(&meta, "deleted") == "True" {
                         notes.push("metaData records the file as deleted".to_string());
                     }

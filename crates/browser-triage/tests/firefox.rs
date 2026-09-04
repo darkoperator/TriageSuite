@@ -29,6 +29,22 @@ fn write_places(path: &Path) {
          CREATE TABLE moz_anno_attributes(id INTEGER PRIMARY KEY, name TEXT);
          CREATE TABLE moz_annos(id INTEGER PRIMARY KEY, place_id INTEGER,
              anno_attribute_id INTEGER, content TEXT, dateAdded INTEGER);
+         CREATE TABLE moz_places_metadata_search_queries(id INTEGER PRIMARY KEY,
+             terms TEXT);
+         CREATE TABLE moz_places_metadata(id INTEGER PRIMARY KEY, place_id INTEGER,
+             search_query_id INTEGER, created_at INTEGER, updated_at INTEGER,
+             total_view_time INTEGER);
+         CREATE TABLE moz_inputhistory(place_id INTEGER, input TEXT, use_count REAL);
+
+         -- Two search terms: one with its metadata row, one whose metadata row
+         -- was cleared and which must still be emitted.
+         INSERT INTO moz_places_metadata_search_queries VALUES
+           (1,'quarterly results'),
+           (2,'how to wipe usb history');
+         INSERT INTO moz_places_metadata VALUES
+           (1,1,1,1700000400000,1700000500000,42);
+
+         INSERT INTO moz_inputhistory VALUES (1,'mozilla.test',3.5);
 
          INSERT INTO moz_places VALUES
            (1,'https://mozilla.test/a','Page A',2,1,1700000000000000,0,100,'p1'),
@@ -122,6 +138,86 @@ fn setup() -> (TempDir, std::path::PathBuf) {
     let out = td.path().join("out");
     run(td.path(), &out);
     (td, out)
+}
+
+/// `moz_historyvisits.source` describes how a navigation was initiated. It was
+/// selected by the query and decoded, but never written to any column, and the
+/// decoder named its values after syncing and importing, which is not what the
+/// column records.
+#[test]
+fn the_visit_source_column_is_emitted_with_its_upstream_meaning() {
+    let (_td, out) = setup();
+    let csv_text = read_output(&out, "BrowserTriage_Output.csv");
+    let sources = column(&csv_text, "Visit Source");
+    assert!(sources.iter().any(|s| s == "Organic"), "{csv_text}");
+    assert!(sources.iter().any(|s| s == "Sponsored"), "{csv_text}");
+    assert!(
+        !sources
+            .iter()
+            .any(|s| s.contains("Imported") || s == "Synced"),
+        "the column does not record provenance: {csv_text}"
+    );
+}
+
+/// Both Firefox search sources reach the output, and the term whose
+/// `moz_places_metadata` row was cleared survives with an empty `Search Time`.
+/// Clearing history while the terms table lags is exactly how a search outlives
+/// the visit that produced it, so an inner join here would delete evidence.
+#[test]
+fn both_firefox_search_sources_are_emitted_including_the_orphaned_term() {
+    let (_td, out) = setup();
+    let csv_text = read_output(&out, "BrowserTriage_Output_KeywordSearches.csv");
+
+    let terms = column(&csv_text, "Search Term");
+    assert!(terms.iter().any(|t| t == "quarterly results"), "{csv_text}");
+    assert!(
+        terms.iter().any(|t| t == "how to wipe usb history"),
+        "a term whose metadata row was cleared must survive: {csv_text}"
+    );
+    assert!(
+        terms.iter().any(|t| t == "mozilla.test"),
+        "moz_inputhistory must be parsed even though it has no timestamp: {csv_text}"
+    );
+
+    let sources = column(&csv_text, "Search Source");
+    assert!(sources.iter().any(|s| s == "moz_places_metadata"));
+    assert!(sources.iter().any(|s| s == "moz_inputhistory"));
+
+    // created_at is unix milliseconds, unlike the microseconds elsewhere in
+    // places.sqlite.
+    let rows_of = |term: &str| -> (String, String) {
+        let index = terms.iter().position(|t| t == term).expect(term);
+        (
+            column(&csv_text, "Search Time")[index].clone(),
+            column(&csv_text, "Notes")[index].clone(),
+        )
+    };
+    let (time, _) = rows_of("quarterly results");
+    assert!(time.starts_with("2023-11-14T22:20:00"), "got {time}");
+
+    let (orphan_time, orphan_notes) = rows_of("how to wipe usb history");
+    assert!(orphan_time.is_empty(), "got {orphan_time}");
+    assert!(orphan_notes.contains("outlived"), "got {orphan_notes}");
+}
+
+/// The Firefox parsers push timeline rows too, and no test previously opened
+/// the timeline for a Firefox capture at all.
+#[test]
+fn firefox_artifacts_reach_the_timeline_with_the_right_epoch() {
+    let (_td, out) = setup();
+    let csv_text = read_output(&out, "BrowserTriage_Output_Timeline.csv");
+
+    let kinds = column(&csv_text, "Timestamp Type");
+    for expected in ["Visited", "Search", "Bookmark Added", "Extension Installed"] {
+        assert!(kinds.iter().any(|k| k == expected), "missing {expected}");
+    }
+    // PRTime microseconds decoded as WebKit microseconds would land in 1601.
+    assert!(
+        column(&csv_text, "Timestamp")
+            .iter()
+            .all(|t| t.starts_with("20")),
+        "every Firefox timeline instant must be a modern date: {csv_text}"
+    );
 }
 
 #[test]
@@ -242,7 +338,7 @@ fn a_download_is_assembled_from_its_two_annotations() {
         .iter()
         .any(|p| p.contains("tool.zip")));
     assert!(column(&csv_text, "Total Bytes").iter().any(|b| b == "2048"));
-    assert!(column(&csv_text, "State").iter().any(|s| s == "Complete"));
+    assert!(column(&csv_text, "State").iter().any(|s| s == "Finished"));
     // endTime is unix milliseconds inside the metaData JSON.
     assert!(column(&csv_text, "End Time")
         .iter()
