@@ -168,28 +168,30 @@ fn output_collision_without_overwrite_fails_with_overwrite_succeeds() {
     write(&f, "STUB\nk=v\n");
     let out = tmp.path().join("out");
 
-    cmd()
-        .arg("-f")
-        .arg(&f)
-        .arg("--csv")
-        .arg(&out)
-        .assert()
-        .code(0);
-    cmd()
-        .arg("-f")
-        .arg(&f)
-        .arg("--csv")
-        .arg(&out)
-        .assert()
-        .code(4);
-    cmd()
-        .arg("-f")
-        .arg(&f)
-        .arg("--csv")
-        .arg(&out)
-        .arg("--overwrite")
-        .assert()
-        .code(0);
+    // The output filename carries a `yyyyMMddHHmmss` run stamp, so the three
+    // runs below only collide if they start inside the same wall-clock second.
+    // Under a loaded `cargo test --workspace` they can straddle a second
+    // boundary, write two different filenames, and the collision this test
+    // exists to prove never happens. Pinning the stamp removes the race.
+    let pinned = |args: &[&std::ffi::OsStr]| {
+        let mut c = cmd();
+        c.env(triage_core::output::router::RUN_STAMP_ENV, "20260101000000");
+        c.args(args);
+        c
+    };
+    let base: Vec<&std::ffi::OsStr> = vec![
+        "-f".as_ref(),
+        f.as_os_str(),
+        "--csv".as_ref(),
+        out.as_os_str(),
+    ];
+
+    pinned(&base).assert().code(0);
+    pinned(&base).assert().code(4);
+
+    let mut with_overwrite = base.clone();
+    with_overwrite.push("--overwrite".as_ref());
+    pinned(&with_overwrite).assert().code(0);
 }
 
 #[test]

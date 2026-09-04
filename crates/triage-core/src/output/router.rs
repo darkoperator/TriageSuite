@@ -23,10 +23,65 @@ pub struct RouterOptions {
     pub layout_mode: OutputLayoutMode,
 }
 
-/// The current-time run stamp (`yyyyMMddHHmmss`, UTC) prepended to default
-/// output filenames so successive runs don't overwrite each other.
+/// Environment variable that pins [`run_stamp`] to a fixed value.
+///
+/// Intended for tests and for reproducible output filenames, not for ordinary
+/// runs: every run sharing a stamp is exactly the overwrite hazard the stamp
+/// exists to prevent.
+pub const RUN_STAMP_ENV: &str = "TRIAGE_RUN_STAMP";
+
+/// Is this a value we are willing to put in a filename?
+///
+/// The stamp becomes part of an output path, so an unconstrained environment
+/// variable would be a path-traversal primitive. Only a short alphanumeric
+/// token is accepted; anything else falls back to the clock.
+fn valid_stamp(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The run stamp (`yyyyMMddHHmmss`, UTC) prepended to default output filenames
+/// so successive runs don't overwrite each other.
+///
+/// `TRIAGE_RUN_STAMP` overrides it. Without that, two runs that need to land on
+/// the same filename — a test asserting the overwrite guard, say — have to
+/// start inside the same wall-clock second, which is a race that fails under
+/// load.
 pub fn run_stamp() -> String {
-    chrono::Utc::now().format("%Y%m%d%H%M%S").to_string()
+    match std::env::var(RUN_STAMP_ENV) {
+        Ok(pinned) if valid_stamp(&pinned) => pinned,
+        _ => chrono::Utc::now().format("%Y%m%d%H%M%S").to_string(),
+    }
+}
+
+#[cfg(test)]
+mod run_stamp_tests {
+    use super::*;
+
+    /// The stamp lands in a filename, so an unconstrained value would let an
+    /// environment variable steer where output is written.
+    #[test]
+    fn only_a_filename_safe_token_is_accepted() {
+        assert!(valid_stamp("20260101000000"));
+        assert!(valid_stamp("case-1_run2"));
+        assert!(!valid_stamp(""));
+        assert!(!valid_stamp("../../etc/passwd"));
+        assert!(!valid_stamp("a/b"));
+        assert!(!valid_stamp("a\\b"));
+        assert!(!valid_stamp("with space"));
+        assert!(!valid_stamp(&"x".repeat(33)));
+    }
+
+    /// The default is still the clock, in the documented shape.
+    #[test]
+    fn the_unpinned_stamp_is_a_utc_timestamp() {
+        let stamp = run_stamp();
+        assert_eq!(stamp.len(), 14, "got {stamp}");
+        assert!(stamp.chars().all(|c| c.is_ascii_digit()), "got {stamp}");
+    }
 }
 
 struct DatasetFiles {
