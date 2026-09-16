@@ -51,6 +51,32 @@ The single dataset is named `events`, with default basename `EvtxTriage_Output` 
 - `--split` is additive: it adds one file per source `.evtx`, named `<source-stem>_system.csv` / `.json` (flat mode folds the `system` identity into the name), alongside — not instead of — the aggregate `..._EvtxTriage_Output.*` file, which is still produced.
 - `--csvf`/`--jsonf` override the basename portion of the aggregate filename.
 
+### Velo layout
+
+Under the default `--layout velo`, EvtxTriage's output lands in
+`Processed-<HOST>-<stamp>/EventLogs/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_EvtxTriage_results.csv` | the aggregate dataset, every source `.evtx` merged |
+| `Individual/<Channel>.csv` | one file per distinct `Channel` value seen across every source `.evtx`, written by default; skip with `--no-individual` |
+
+There is no `PerUser/` directory and no `TriageUser` column: EvtxTriage is `Scope::SystemWide`.
+`Individual/<Channel>.csv` filenames keep the channel name verbatim (e.g.
+`Microsoft-Windows-PowerShell_Operational.csv`) -- no run stamp, no `_results` mangling --
+since they are written through the dynamic-basename path, not `velo_basename()`. The basename is
+derived from each record's own `Channel` field, not the source filename, so this is one file per
+distinct channel, not strictly one per `.evtx` file: two channels whose names differ only by
+case (real on the same physical `.evtx` file, since Windows itself can log inconsistent `Channel`
+casing across records in one log) fold into a single file rather than colliding or losing
+events -- `resolve_individual_stem` in `crates/evtx-triage/src/lib.rs` keeps the
+lexicographically-smaller spelling as the canonical filename regardless of write order, while
+every row's own `Channel` column still carries its exact original casing.
+
+Only `EvtxTriage` (and, via the orchestrator's `--start`/`--end` passthrough, the external
+Hayabusa/Takajo stage) honors a run-wide time range; see "Time-range filtering" in
+`docs/tools/TriageSuite.md`.
+
 ## Output fields
 
 The base `EventRecord` struct (`crates/triage-evtx/src/record.rs`) has 27 fields, in this exact order (also the CSV column order, verified by a unit test against EvtxECmd's header):

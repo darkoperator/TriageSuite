@@ -13,3 +13,6 @@ triage-lnk = { path = "../triage-lnk" }
 triage-shellitems = { path = "../triage-shellitems" }
 
 [dev-dependencies]
+
+[lints]
+workspace = true

@@ -81,6 +81,30 @@ Diagnostics:
 LNKs whose path contains a recognisable user-profile segment are routed to
 `LETriage/users/<username>/`; all others go to `LETriage/system/`.
 
+### Velo layout
+
+Under the default `--layout velo`, LETriage's output lands in
+`Processed-<HOST>-<stamp>/FileSystem/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_LETriage_results.csv` | every user (and any system-scope `.lnk`s) merged, plus a trailing `TriageUser` column |
+| `PerUser/<stamp>_LETriage_results_<user>.csv` | one user, columns exactly as documented above |
+
+LETriage is `Scope::UserElseSystem`: a `.lnk` can be system-scoped (written straight to the
+category-root filename above, no `TriageUser`) or per-user (`PerUser/`). When a run produces
+both, the merge post-pass needs `--overwrite` to replace the system-scope file with the
+merged, `TriageUser`-tagged one -- **verified on a real capture**: without `--overwrite`, the
+category-root file was the system-scope rows only (same header as `PerUser/`, no `TriageUser`
+column, and a different row count); with `--overwrite`, the merge post-pass first *reclaims*
+the system-scope file into `PerUser/` under a reserved, never-a-real-account label (see
+"PerUser reclaim" in `docs/tools/TriageSuite.md`) rather than dropping it, then writes the
+merged file with every user's rows *and* the system-scope rows included, the latter tagged
+`TriageUser=system`. Confirmed on this same real capture: 9 `localadmin` rows + 5 system rows
+= 14 rows in the merged file, matching the header's own reported record count, and the reclaimed
+5-row file sitting in `PerUser/` under that reserved label. See "The `TriageUser` rule, stated
+precisely" and "PerUser reclaim" in `docs/tools/TriageSuite.md`.
+
 ## Output fields
 
 The 27-column record (`LnkRecord` in `crates/le-triage/src/lib.rs`), column names and

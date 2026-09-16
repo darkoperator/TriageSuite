@@ -21,4 +21,8 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
 tempfile.workspace = true
+
+[lints]
+workspace = true

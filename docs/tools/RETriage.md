@@ -41,6 +41,7 @@ Output (at least one required):
   --jsonf <NAME>                Override the default JSON basename
   --pretty                      Pretty-print JSON (no effect on NDJSON-framed output)
   --overwrite                   Replace existing output files
+  --nested-output               Legacy nested layout under <root>/RETriage/<identity>/
 
 Diagnostics:
   --debug                       Emit debug-level diagnostics to stderr
@@ -52,25 +53,92 @@ RETriage supports key-path and value-name search (mirrors RECmd's `--sk`/`--sv`/
 flags):
 
 ```
-  --sk <PATTERN>                Search for keys matching the given pattern (case-insensitive
-                                substring or glob)
-  --sv <PATTERN>                Search for values matching the given pattern
-  --sd                          Include deleted/orphaned keys and values in search results
+  --sk <TERM>                   Search for <term> in key names
+  --sv <TERM>                   Search for <term> in value names
+  --sd <TERM>                   Search for <term> in value data
+  --regex                       Treat search terms as regular expressions
+  --literal                     Force literal (substring) matching even if --regex is set
+  --minSize <BYTES>             Minimum value data size in bytes (for --sd) [default: 0]
 ```
 
+All three take a term; `--sd` is a search over value *data*, not a deleted-records toggle.
+Search mode is mutually exclusive with batch mode: passing any of the three switches RETriage
+to the `search` dataset described under [Velo layout](#velo-layout).
+
 ## Output layout
+
+Standalone RETriage's **default is flat**: every file lands directly under the `--csv`/`--json`
+root with the identity folded into the name. The batch CSV carries a 14-digit
+`<yyyyMMddHHmmss>_` run stamp; the per-plugin detail CSVs are dynamic side-cars and carry none.
+
+```
+<out>/
+  system_<yyyyMMddHHmmss>_RETriage_Batch_Output.csv   # one row per entry from SYSTEM/SOFTWARE/etc.
+  <username>_<yyyyMMddHHmmss>_RETriage_Batch_Output.csv  # one per user hive set
+  <PluginName>_<HiveBasename>_system.csv              # per-plugin detail CSV (one per active plugin)
+  <PluginName>_<HiveBasename>_<username>.csv
+```
+
+`--nested-output` selects the legacy per-identity tree instead:
 
 ```
 <out>/
   RETriage/
     system/
-      RETriage_Batch_Output.csv         # one row per registry entry (SYSTEM/SOFTWARE/etc.)
-      <PluginName>_<HiveBasename>.csv   # per-plugin detail CSV (one per active plugin)
+      <yyyyMMddHHmmss>_RETriage_Batch_Output.csv
+      <PluginName>_<HiveBasename>.csv   # no stamp: a dynamic side-car keeps its runtime name
     users/
       <username>/
-        RETriage_Batch_Output.csv       # one row per entry from that user's NTUSER.DAT / UsrClass.dat
+        <yyyyMMddHHmmss>_RETriage_Batch_Output.csv
         <PluginName>_<HiveBasename>.csv
 ```
+
+Under `TriageSuite run` neither of these applies -- see [Velo layout](#velo-layout) below.
+
+### Velo layout
+
+Under the default `--layout velo`, RETriage's output lands in
+`Processed-<HOST>-<stamp>/Registry/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_RETriage_results_Batch.csv` | every hive (system and user) merged, plus a trailing `TriageUser` column |
+| `<PluginName>_<HiveBasename>.csv` | per-plugin detail CSV, system-scope hives only (dynamic runtime basename, no run stamp) |
+| `PerUser/Batch/<stamp>_RETriage_results_Batch_<user>.csv` | one user's batch rows, columns exactly as documented above |
+| `PerUser/<PluginName>_<HiveBasename>_<user>.csv` | that user's per-plugin detail CSV |
+
+Where the same plugin runs over two hives whose filenames alone would collide in that one
+directory, the stem is qualified with the hive's parent directory --
+`AppCompatCache_SYSTEM.csv` for `System32/config/SYSTEM` but `AppCompatCache_SYSTEM_RegBack.csv`
+for `System32/config/RegBack/SYSTEM`, and `TypedURLs_NTUSER.DAT_Default.csv` /
+`_LocalService.csv` / `_NetworkService.csv` for the three service and default profile hives.
+See "`--layout velo` (default)" in `docs/tools/TriageSuite.md`, which explains why a dynamic
+side-car needs that qualifier and a stamped dataset file does not.
+
+**`RETriage_Search_Output` is not in this table on purpose.** RETriage declares a second dataset,
+`search` (Velo discriminator `Search`, so `<stamp>_RETriage_results_Search.csv` with per-user
+slices in `PerUser/Search/`), but it is produced only in search mode -- `--sk` / `--sv` / `--sd`
+on the standalone `RETriage` CLI. `TriageSuite run` never sets those, so no orchestrator run of
+any layout emits it, and the standalone CLI that does has no `--layout velo` of its own: its
+flat layout names the files `<identity>_<stamp>_RETriage_Search_Output.csv` (verified on a real
+capture: one per identity, e.g. `system_`, `Administrator_`, `cperez_`). The Velo names above
+are what the dataset *would* be routed to; nothing ships that routes it there today.
+
+RETriage is `Scope::UserElseSystem`: the batch CSV can be system-scoped (SYSTEM/SOFTWARE/etc.,
+written straight to the category-root filename, no `TriageUser`) or per-user (`PerUser/`).
+When a run produces both, the merge post-pass needs `--overwrite` to replace the system-scope
+batch file with the merged, `TriageUser`-tagged one -- without it, the merge is skipped
+(recorded as a non-fatal failure) and `<stamp>_RETriage_results_Batch.csv` is the system-scope
+rows only. The per-plugin detail CSVs are a separate, dynamic-basename mechanism
+(`OutputRouter::write_dynamic_*`): they are **never merged** regardless of `--overwrite`, since
+the merge post-pass only walks a tool's static `DatasetSpec` list and RETriage's per-plugin
+output isn't one of those -- a user-scope `<PluginName>_<HiveBasename>_<user>.csv` in
+`PerUser/` has no merged, `TriageUser`-tagged counterpart at the category root, ever. See "The
+`TriageUser` rule, stated precisely" in `docs/tools/TriageSuite.md`.
+
+`CaseInfo/<stamp>_SysInfo.txt` (see `docs/tools/TriageSuite.md`, "New outputs") is a second
+pass over this batch CSV -- it reads `<stamp>_RETriage_results_Batch*.csv` back out rather than
+re-parsing the hives, so it reflects whatever RETriage actually wrote for this run.
 
 ## Plugins (34)
 
@@ -132,7 +200,30 @@ and content:
 | `Recursive` | Whether the entry was produced by recursive key traversal |
 | `Deleted` | Whether the entry is a deleted/orphaned record |
 | `LastWriteTimestamp` | Key's last-write timestamp |
-| `PluginDetailFile` | Basename of the corresponding per-plugin detail CSV, if any |
+| `PluginDetailFile` | The corresponding per-plugin detail CSV, if any, as a `/`-separated path relative to this tool's output root (see "Following `PluginDetailFile`" below) |
+
+### Following `PluginDetailFile`
+
+`PluginDetailFile` is a cross-reference from a batch row to the per-plugin detail CSV that
+row's plugin wrote. It holds that file's routed destination as a `/`-separated path relative
+to **this tool's output root**, so it names the file that is actually on disk -- including
+the profile name the output layout folds into a per-user side-car's filename
+(`TypedURLs_NTUSER.DAT_alice.csv`) and, in the default Velo layout, the `PerUser/`
+directory that side-car lives in.
+
+The output root is:
+
+| Layout | Root the reference is relative to |
+|---|---|
+| Velo (orchestrator default) | the category directory, e.g. `Processed-<HOST>-<stamp>/Registry/` |
+| Flat (standalone CLI default) | the `--csv`/`--json` output directory |
+| Nested | the tool's per-identity directory, e.g. `<out>/RETriage/users/alice/` |
+
+Under Velo the reference resolves relative to the merged batch CSV's own directory, because
+the merged file sits at that root. It does **not** resolve relative to a `PerUser/Batch/`
+per-user slice: the same row text is published to both files, they sit at different depths,
+and no single relative path can resolve against both. From a slice, resolve against the
+category root two levels up.
 
 ## Accepted deltas
 
@@ -141,7 +232,10 @@ covered by a named `AcceptedDelta` in the compat test suite:
 
 - **HivePath**: RETriage emits the path as provided on the command line; RECmd uses its own
   temp-directory copy. Compared by basename only.
-- **PluginDetailFile**: RECmd names detail CSVs using its internal class name (e.g.
+- **PluginDetailFile**: RECmd emits an absolute path into its own per-run temp directory;
+  RETriage emits a path relative to its output root, and appends qualifiers RECmd has no
+  need for (see below). Compared by basename, allowing an appended qualifier.
+- **PluginDetailFile naming**: RECmd names detail CSVs using its internal class name (e.g.
   `AppCompat`, `OfficeMRU`, `RecentDocs`, `FileExts`, `FirstFolder`); RETriage uses
   `plugin_name()` (e.g. `AppCompatCache`, `Office MRU`, `Recent documents`,
   `File Extensions`, `First folder`). Compared by stripping the known prefix differences.

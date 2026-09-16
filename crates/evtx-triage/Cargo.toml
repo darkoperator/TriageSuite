@@ -26,3 +26,6 @@ time = { version = "0.3", features = ["parsing", "macros"] }
 triage-testkit = { path = "../triage-testkit" }
 assert_cmd.workspace = true
 tempfile.workspace = true
+
+[lints]
+workspace = true

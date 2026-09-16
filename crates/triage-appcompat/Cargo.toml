@@ -8,3 +8,9 @@ description = "Windows AppCompatCache/ShimCache (Win10 '10ts') binary parser, sh
 
 [dependencies]
 chrono.workspace = true
+
+[dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
+
+[lints]
+workspace = true

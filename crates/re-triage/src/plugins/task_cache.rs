@@ -9,10 +9,9 @@
 //!   LastStop, TaskState, LastActionResult, Source, Description, Command,
 //!   Arguments, SecurityDescriptor, Author
 
-use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
 use notatin::cell_value::CellValue;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -22,20 +21,13 @@ pub struct TaskCache;
 /// Used for standalone timestamp detail-CSV columns (testkit normalizes
 /// the reference from RECmd format; we emit ISO-8601 to match after normalization).
 fn filetime_to_iso8601(ft: u64) -> Option<String> {
-    let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    let dt: DateTime<chrono::Utc> = DateTime::from_timestamp(secs, nanos)?;
-    Some(WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string())
+    filetime_to_datetime(ft as i128).map(dt_to_iso8601)
 }
 
 /// FILETIME → RECmd literal `yyyy-MM-dd HH:mm:ss.fffffff` (UTC).
 /// Used in BatchValueData free-text fields (testkit does NOT normalize embedded timestamps).
 fn filetime_to_recmd_literal(ft: u64) -> Option<String> {
-    let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    let dt: DateTime<chrono::Utc> = DateTime::from_timestamp(secs, nanos)?;
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    Some(format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks))
+    triage_core::timestamp::filetime_to_recmd_literal(ft as i128)
 }
 
 fn get_str_value(key: &CellKeyNode, name: &str) -> String {

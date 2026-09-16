@@ -46,6 +46,10 @@ fn read_string_value(key: &CellKeyNode, name: &str) -> Option<String> {
 
 impl FileExts {
     /// Unit-testable row builder: takes pre-collected extension data.
+    // The parameters are the row's own columns, already extracted from the
+    // registry key by the caller. Grouping them into a struct would just be
+    // the PluginRow this function returns.
+    #[allow(clippy::too_many_arguments)]
     pub fn row_from_parts(
         &self,
         ext_name: &str,

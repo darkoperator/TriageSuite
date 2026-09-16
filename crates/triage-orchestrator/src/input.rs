@@ -42,6 +42,34 @@ impl Default for PrepareOptions {
     }
 }
 
+/// Why `prepare` produced no host at all, together with the records it had
+/// already accumulated when it gave up.
+///
+/// The records travel with the error on purpose: a rejected input still has
+/// to leave an audit manifest, and `archives[]` is where that manifest says
+/// which inputs were refused and why. Returning a bare message would leave
+/// the caller with nothing to write, and a reused `--out` would then keep the
+/// *previous* run's successful `run_manifest.json` on disk.
+#[derive(Debug)]
+pub struct PrepareRejection {
+    /// The one-line reason, printed to stderr exactly as before.
+    pub reason: String,
+    pub extractions: Vec<ExtractReport>,
+    pub skipped: Vec<SkippedArchive>,
+}
+
+impl PrepareRejection {
+    /// A rejection with no per-archive records: the input was refused before
+    /// any archive was looked at.
+    fn bare(reason: String) -> Self {
+        PrepareRejection {
+            reason,
+            extractions: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PreparedInput {
     pub capture_type: CaptureType,
@@ -111,20 +139,25 @@ fn marker_matches(marker: &SourceMarker, archive: &Path) -> bool {
 ///
 /// Returns `Err` only when there is nothing to work on at all — a missing path,
 /// or archives that all turned out to be unusable with no other collection
-/// present. Individual bad archives are skipped, never fatal.
+/// present. Individual bad archives are skipped, never fatal. The error
+/// carries the archive records gathered so far, so the caller can still write
+/// the run's audit manifest before exiting.
 pub fn prepare(
     capture: &Path,
     out: &Path,
     opts: &PrepareOptions,
     ui: &ProgressUi,
-) -> Result<PreparedInput, String> {
+) -> Result<PreparedInput, PrepareRejection> {
     let extracted_root = out.join(EXTRACTED_DIR);
 
     // Which archives are we dealing with, if any?
     let (archives, scan_root): (Vec<PathBuf>, Option<PathBuf>) = if capture.is_file() {
         if !archive::is_zip_path(capture) {
             // Preserve the historical message for a plain non-directory input.
-            return Err(format!("not a directory: {}", capture.display()));
+            return Err(PrepareRejection::bare(format!(
+                "not a directory: {}",
+                capture.display()
+            )));
         }
         (vec![capture.to_path_buf()], None)
     } else if capture.is_dir() {
@@ -133,14 +166,17 @@ pub fn prepare(
             Some(capture.to_path_buf()),
         )
     } else {
-        return Err(format!("not found: {}", capture.display()));
+        return Err(PrepareRejection::bare(format!(
+            "not found: {}",
+            capture.display()
+        )));
     };
 
     // Fast path: an ordinary directory with no archives behaves exactly as it
     // always has, and `<out>/_extracted` is never even created.
     if archives.is_empty() {
         if let Some(root) = &scan_root {
-            let (ty, hosts) = capture::enumerate(root)?;
+            let (ty, hosts) = capture::enumerate(root).map_err(PrepareRejection::bare)?;
             return Ok(PreparedInput {
                 capture_type: ty,
                 hosts,
@@ -236,14 +272,28 @@ pub fn prepare(
     // No Raw fallback once archives are in play: a folder holding only ZIPs
     // must never be mistaken for a raw capture named after the folder. (The
     // archive-free directory case already returned above.)
-    let (capture_type, mut hosts) = capture::enumerate_multi(&roots, None).map_err(|_| {
+    let enumerated = capture::enumerate_multi(&roots, None).map_err(|_| {
         let detail = if skipped.is_empty() {
             String::new()
         } else {
             format!(" ({} archive(s) skipped)", skipped.len())
         };
         format!("no usable capture found in {}{detail}", capture.display())
-    })?;
+    });
+    let (capture_type, mut hosts) = match enumerated {
+        Ok(found) => found,
+        // Hand the caller everything this call learned about the input --
+        // which archives were skipped and why, and what did extract -- so the
+        // rejection reaches `run_manifest.json` instead of dying with the
+        // error message.
+        Err(reason) => {
+            return Err(PrepareRejection {
+                reason,
+                extractions,
+                skipped,
+            })
+        }
+    };
 
     // Stamp provenance so the manifest can record which archive a host came from.
     for host in hosts.iter_mut() {
@@ -348,9 +398,13 @@ mod tests {
         fs::write(dir.join("a.zip"), b"nope").unwrap();
         fs::write(dir.join("b.zip"), b"also nope").unwrap();
         let out = td.path().join("out");
-        let err = prepare(&dir, &out, &PrepareOptions::default(), &ui()).unwrap_err();
+        let rejection = prepare(&dir, &out, &PrepareOptions::default(), &ui()).unwrap_err();
+        let err = &rejection.reason;
         assert!(err.contains("no usable capture"), "got: {err}");
         assert!(err.contains("2 archive(s) skipped"), "got: {err}");
+        // The skips travel with the rejection: they are what the run's
+        // manifest records about an input that produced no host.
+        assert_eq!(rejection.skipped.len(), 2);
     }
 
     #[test]
@@ -401,7 +455,9 @@ mod tests {
         // The archive changed, so the existing extraction is refused rather
         // than silently reused. It was the only archive, so there is nothing
         // left to run — an error, not an empty "success".
-        let err = prepare(&z, &out, &PrepareOptions::default(), &ui()).unwrap_err();
+        let err = prepare(&z, &out, &PrepareOptions::default(), &ui())
+            .unwrap_err()
+            .reason;
         assert!(err.contains("no usable capture"), "got: {err}");
 
         // Crucially, the stale tree was NOT parsed as if it were the new one.
@@ -442,7 +498,8 @@ mod tests {
             &PrepareOptions::default(),
             &ui(),
         )
-        .unwrap_err();
+        .unwrap_err()
+        .reason;
         assert!(err.starts_with("not a directory:"), "got: {err}");
     }
 }

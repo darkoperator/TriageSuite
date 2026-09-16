@@ -63,6 +63,10 @@ Diagnostics:
 
 ## Output layout
 
+PETriage is `Scope::SystemWide` (`crates/pe-triage/src/lib.rs`): Prefetch has no per-user
+identity to attribute (a `.pf` file belongs to the machine, not to whichever user last ran the
+program), so every record lands under `system/` and PETriage has never produced a `users/` tree.
+
 ```
 <out>/
   PETriage/
@@ -71,9 +75,20 @@ Diagnostics:
       PETriage_Output_Timeline.csv # one row per loaded resource
 ```
 
-User-attributed artifacts are placed under `PETriage/users/<username>/` instead of
-`PETriage/system/`. The output directory is excluded from discovery when it falls inside
-the input directory.
+The output directory is excluded from discovery when it falls inside the input directory.
+
+### Velo layout
+
+Under the default `--layout velo`, PETriage's output lands in
+`Processed-<HOST>-<stamp>/FileSystem/`:
+
+| File | Contents |
+|---|---|
+| `<stamp>_PETriage_results.csv` | one row per prefetch file |
+| `<stamp>_PETriage_results_Timeline.csv` | one row per loaded resource |
+
+There is no `PerUser/` directory and no `TriageUser` column for PETriage: it is
+`Scope::SystemWide`, so every row is already system-scoped.
 
 ## Output fields
 

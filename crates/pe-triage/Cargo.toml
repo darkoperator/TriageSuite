@@ -24,3 +24,6 @@ predicates.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
 triage-testkit = { path = "../triage-testkit" }
+
+[lints]
+workspace = true

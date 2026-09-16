@@ -111,6 +111,18 @@ still apply in flat mode. All rows from every present `ControlSet000`..`ControlS
 one SYSTEM hive are written to a single output file for that hive, ordered by control set
 then by cache position within the control set.
 
+### Velo layout
+
+Under the default `--layout velo`, AppCompatTriage's output lands in
+`Processed-<HOST>-<stamp>/Registry/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_AppCompatTriage_results_AppCompatCache.csv` | one row per ShimCache entry |
+
+There is no `PerUser/` directory and no `TriageUser` column: AppCompatTriage is
+`Scope::SystemWide`, so every row is already system-scoped.
+
 ## Output fields
 
 Confirmed against the `AppCompatRecord` struct in `crates/acc-triage/src/record.rs`. Field

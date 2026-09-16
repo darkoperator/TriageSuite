@@ -17,7 +17,7 @@
 //! quirk of the original plugin; we replicate it exactly.
 
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -31,19 +31,6 @@ fn get_str_value(key: &CellKeyNode, name: &str) -> String {
         }
     }
     String::new()
-}
-
-/// Convert a chrono::DateTime<Utc> to RECmd literal "yyyy-MM-dd HH:mm:ss.fffffff"
-/// (for embedded text fields in ValueData3 — the testkit does NOT normalize these).
-fn dt_to_recmd_literal(dt: chrono::DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
-
-/// Convert chrono::DateTime<Utc> to ISO-8601 UTC (for standalone Timestamp detail column).
-fn dt_to_iso8601(dt: chrono::DateTime<chrono::Utc>) -> String {
-    let ts = WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos());
-    ts.to_string()
 }
 
 /// Returns true if the key name matches ^00\d\d$ (C# `Regex(@"^00\d\d$")`).

@@ -1,20 +1,13 @@
-//! RECmd AppCompatCache plugin support. The Win10 ShimCache parser now lives in
-//! the shared `triage-appcompat` crate; this module re-exports it and keeps the
-//! RECmd-specific literal timestamp formatter used by the plugin.
+//! RECmd AppCompatCache plugin support. The Win10 ShimCache parser lives in the
+//! shared `triage-appcompat` crate and the RECmd literal timestamp format in
+//! `triage_core::timestamp`; this module re-exports the parser for the plugin.
 
 pub use triage_appcompat::{filetime_to_utc, parse_win10, ShimEntry};
-
-use chrono::DateTime;
-
-/// Format a DateTime<Utc> as RECmd's literal "yyyy-MM-dd HH:mm:ss.fffffff" (7 digits).
-pub fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{ticks:07}", dt.format("%Y-%m-%d %H:%M:%S"))
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use triage_core::timestamp::dt_to_recmd_literal;
 
     #[test]
     fn recmd_literal_7_digits() {

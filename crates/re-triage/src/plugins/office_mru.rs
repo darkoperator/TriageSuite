@@ -50,33 +50,11 @@
 
 use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
 pub struct OfficeMru;
-
-/// Convert a Windows FILETIME (100-ns intervals since 1601-01-01 UTC) to a
-/// chrono::DateTime<Utc>.
-fn filetime_to_datetime(ft: i64) -> Option<DateTime<chrono::Utc>> {
-    const FILETIME_TO_UNIX_SECS: i64 = 11_644_473_600;
-    let secs = (ft / 10_000_000) - FILETIME_TO_UNIX_SECS;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    DateTime::from_timestamp(secs, nanos)
-}
-
-/// Format DateTime<Utc> as ISO-8601 UTC with 7 fractional digits.
-/// Used for standalone timestamp columns (testkit normalizes from RECmd format).
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
-
-/// Format DateTime<Utc> as RECmd literal "yyyy-MM-dd HH:mm:ss.fffffff".
-/// Used for embedded free-text ValueData fields.
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
 
 /// Parse the OfficeMRU value format: `[F00000000][T<hex_filetime>][O00000000]*<path>`
 /// Returns (filename, filetime_as_i64) or None if the format doesn't match.
@@ -151,7 +129,7 @@ pub fn build_row(
         }
     };
 
-    let first_open = filetime_to_datetime(ft);
+    let first_open = filetime_to_datetime(ft as i128);
 
     // last_closed = lastWriteTime of the Reading Locations subkey for this file.
     let last_closed = reading_loc_last_write;
@@ -282,7 +260,7 @@ mod tests {
         // ft should be a positive filetime
         assert!(ft > 0);
         // Convert to datetime and check it's in a reasonable range (2000-2030)
-        let dt = filetime_to_datetime(ft).unwrap();
+        let dt = filetime_to_datetime(ft as i128).unwrap();
         assert!(dt.format("%Y").to_string().parse::<i32>().unwrap() > 2000);
     }
 

@@ -14,7 +14,7 @@ pub use value::{
 };
 
 pub mod search;
-pub use search::{search_subtree, HitType, Matcher, SearchHit};
+pub use search::{search_subtree, HitType, Matcher, SearchHit, SearchTargets};
 
 pub mod plugin;
 pub use plugin::{PluginRow, PluginValue, RegistryPlugin};

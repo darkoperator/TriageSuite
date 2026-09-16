@@ -158,6 +158,27 @@ static datasets (`DATASETS` is empty in `crates/sqle-triage/src/lib.rs`) —
 every output file is created dynamically at runtime based on which maps
 matched.
 
+### Velo layout
+
+Under the default `--layout velo` (with `--only sqle`, since SQLETriage is opt-in),
+SQLETriage's output lands in `Processed-<HOST>-<stamp>/SQLiteArtifacts/`:
+
+| File | Contents |
+|---|---|
+| `<MapCSVPrefix>_<QueryBaseFileName>.csv` | system-scope rows for that map/query |
+| `PerUser/<MapCSVPrefix>_<QueryBaseFileName>_<user>.csv` | that user's rows for that map/query |
+
+SQLETriage is `Scope::UserElseSystem`, but its output is **never merged**, regardless of
+`--overwrite`: the merge post-pass (`crates/triage-orchestrator/src/execute.rs`) walks a
+tool's static `DatasetSpec` list to know which stems to look for, and SQLETriage has none.
+So there is no `TriageUser` column anywhere for this tool -- `PerUser/` files are the only
+place per-user rows ever appear, permanently, and a `<MapCSVPrefix>_<QueryBaseFileName>.csv`
+at the category root (when SQLETriage found system-scope databases) never gains a `TriageUser`
+column the way `LETriage`'s or `RETriage`'s equivalent file can. Basenames keep their runtime
+`CSVPrefix_BaseFileName` shape verbatim -- no run stamp, no `velo_basename()` mangling --
+since they go through `OutputRouter::write_dynamic_*`, the same mechanism RETriage's
+per-plugin detail CSVs use.
+
 ## Output fields
 
 Unlike TriageSuite's other tools, SQLETriage has no fixed record struct.

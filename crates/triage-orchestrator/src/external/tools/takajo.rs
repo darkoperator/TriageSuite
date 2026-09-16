@@ -5,10 +5,32 @@ use crate::external::tool::{
     Artifacts, ExternalTool, HostContext, Invocation, OutputDirPolicy, OutputSpec, Requirement,
 };
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Output subdirectory under each host's output root.
+/// Output subdirectory under each host's output root, `--layout native` only.
 const DIR: &str = "Takajo";
+
+/// Forensic category Takajo's automagic tree belongs in under `--layout
+/// velo` (see `hayabusa::VELO_CATEGORY`'s doc comment for why this is named
+/// directly here rather than looked up in `crate::velo::category_for_key`).
+const VELO_CATEGORY: &str = "ThreatHunting";
+
+/// The directory `automagic -o` is pointed at under `--layout velo`, and so
+/// the directory its CSVs and TXTs land *directly* in -- Takajo creates this
+/// leaf itself and writes its report files straight into it, not into a
+/// subdirectory of its own choosing. (It does create one subdirectory,
+/// `scriptblock-logs/`, for the PowerShell script blocks it extracts as
+/// individual files. Observed on a real run; no session pattern names
+/// anything in it, and `tests/data/external_tools_observed_output.txt`
+/// transcribes depth-1 files only.)
+///
+/// Public because it is the only statement of where Takajo's output lives:
+/// the bundled Timeline Explorer session patterns have to agree with it, and
+/// `velo_sessions_patterns.rs` derives that half of its corpus from here
+/// rather than restating the category name.
+pub fn velo_output_dir(collection_dir: &Path) -> PathBuf {
+    collection_dir.join(VELO_CATEGORY)
+}
 
 pub struct Takajo;
 
@@ -64,7 +86,10 @@ impl ExternalTool for Takajo {
         let jsonl = prior
             .get(JSONL_SLOT)
             .expect("the requires() gate runs before plan() and guarantees this slot");
-        let dir = ctx.host_dir.join(DIR);
+        let dir = match &ctx.velo_dir {
+            Some(collection_dir) => velo_output_dir(collection_dir),
+            None => ctx.host_dir.join(DIR),
+        };
         vec![Invocation {
             report_name: "takajo-automagic",
             args: takajo_automagic_args(&cfg.takajo, jsonl, &dir),

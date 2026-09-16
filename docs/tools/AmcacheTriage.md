@@ -104,6 +104,27 @@ is inferred from the shared `OutputRouter`/`OutputLayout` machinery
 `<root>/<BinaryName>/system/` rather than a per-user path. Pass `--nested-output` to keep
 the legacy `<root>/<ToolName>/<identity>/` nesting instead of the current layout.
 
+### Velo layout
+
+Under the default `--layout velo`, AmcacheTriage's output lands in
+`Processed-<HOST>-<stamp>/Registry/` (basenames from `velo_basename()` in
+`crates/triage-core/src/output/router.rs`, verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_AmcacheTriage_results_UnassociatedFileEntries.csv` | primary dataset |
+| `<stamp>_AmcacheTriage_results_AssociatedFileEntries.csv` | derived dataset |
+| `<stamp>_AmcacheTriage_results_ProgramEntries.csv` | derived dataset |
+| `<stamp>_AmcacheTriage_results_ShortCuts.csv` | derived dataset |
+| `<stamp>_AmcacheTriage_results_DriveBinaries.csv` | derived dataset |
+| `<stamp>_AmcacheTriage_results_DeviceContainers.csv` | derived dataset |
+| `<stamp>_AmcacheTriage_results_DriverPackages.csv` | derived dataset |
+| `<stamp>_AmcacheTriage_results_DevicePnps.csv` | derived dataset |
+
+There is no `PerUser/` directory and no `TriageUser` column for any of these: AmcacheTriage
+is `Scope::SystemWide` (`crates/amc-triage/src/lib.rs`), so every row is already
+system-scoped.
+
 ## Output datasets and fields
 
 AmcacheTriage emits eight datasets, one per `Root\Inventory*` key it walks. All eight are

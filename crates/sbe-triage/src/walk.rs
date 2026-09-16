@@ -219,6 +219,10 @@ pub fn walk(
     walk_inner(hive, key, bag_path, parent_abs, explored, out, true)
 }
 
+// The public `walk` wrapper above exists so callers never pass this list; the
+// seventh parameter is the root flag that distinguishes the first level, which
+// SBECmd treats specially (NodeSlot is hardcoded to 0 there).
+#[allow(clippy::too_many_arguments)]
 fn walk_inner(
     hive: &mut Hive,
     mut key: CellKeyNode,

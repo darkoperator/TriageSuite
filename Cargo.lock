@@ -302,6 +302,7 @@ dependencies = [
  "triage-cli",
  "triage-core",
  "triage-sqlite",
+ "triage-testkit",
 ]
 
 [[package]]
@@ -3083,6 +3084,7 @@ name = "triage-appcompat"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "triage-testkit",
 ]
 
 [[package]]
@@ -3113,6 +3115,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tracing",
+ "triage-testkit",
  "walkdir",
 ]
 
@@ -3182,16 +3185,20 @@ version = "0.2.0"
 dependencies = [
  "acc-triage",
  "amc-triage",
+ "anydesk-triage",
  "assert_cmd",
  "browser-triage",
+ "cfb",
  "chrono",
  "clap",
  "console 0.15.11",
+ "csv",
  "evtx-triage",
  "flate2",
  "globset",
  "jle-triage",
  "le-triage",
+ "lol-triage",
  "mft-triage",
  "pe-triage",
  "predicates",
@@ -3200,10 +3207,13 @@ dependencies = [
  "sbe-triage",
  "serde",
  "serde_json",
+ "sha2",
  "sqle-triage",
+ "srum-net-triage",
  "srume-triage",
  "sum-triage",
  "tempfile",
+ "time",
  "toml",
  "triage-cli",
  "triage-core",
@@ -3250,6 +3260,7 @@ dependencies = [
  "chrono",
  "encoding_rs",
  "thiserror 2.0.18",
+ "triage-testkit",
 ]
 
 [[package]]

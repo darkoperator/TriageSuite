@@ -26,23 +26,11 @@
 //! Output ordering: sorted by MruPosition ascending across all subkeys.
 
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
 pub struct OpenSavePidlMru;
-
-/// Format DateTime<Utc> as ISO-8601 UTC with 7 fractional digits.
-fn dt_to_iso8601(dt: chrono::DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
-
-/// Format DateTime<Utc> as RECmd literal "yyyy-MM-dd HH:mm:ss.fffffff".
-/// Used for embedded free-text ValueData fields.
-fn dt_to_recmd_literal(dt: chrono::DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
 
 /// Parse MRUListEx binary: build ordered list of entry indices (position → entry_idx).
 /// Returns Vec where index = mru_position, value = entry_idx.

@@ -9,7 +9,6 @@
 //!   ValueData2 = "Execution time: <yyyy-MM-dd HH:mm:ss.fffffff>"   (UTC)
 //!   ValueData3 = ""
 
-use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -26,18 +25,7 @@ pub struct BamDam;
 /// RECmd's BamDam uses `ExecutionTime.ToUniversalTime()` in ValuesOut.cs,
 /// so the timestamp is UTC (confirmed by fixture cross-check).
 fn filetime_to_recmd_literal(ft: u64) -> Option<String> {
-    // FILETIME epoch is 1601-01-01; Unix epoch is 1970-01-01.
-    // Difference = 11644473600 seconds.
-    let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    let dt: DateTime<chrono::Utc> = DateTime::from_timestamp(secs, nanos)?;
-    // C# "yyyy-MM-dd HH:mm:ss.fffffff": 7 fractional-second digits at 100ns
-    // resolution (.fffffff in C# = 100-nanosecond ticks).
-    // chrono's %.7f specifier panics (unsupported in chrono 0.4); instead we
-    // extract subsecond nanoseconds, convert to 100ns ticks, and zero-pad to
-    // 7 digits. This exactly matches C#'s fffffff output.
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    Some(format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks))
+    triage_core::timestamp::filetime_to_recmd_literal(ft as i128)
 }
 
 impl BamDam {

@@ -1,8 +1,6 @@
 use clap::Parser;
 use evtx_triage::cli::EvtxArgs;
 use evtx_triage::{maps_embed, sync, EvtxTool};
-use std::collections::HashSet;
-use std::sync::Mutex;
 use triage_cli::args::CommonArgs;
 use triage_evtx::{MapIndex, ParseOptions};
 
@@ -79,12 +77,10 @@ fn main() {
         Some(dir) => MapIndex::load(dir),
         None => maps_embed::load_bundled(),
     };
-    let tool = EvtxTool {
-        maps,
-        opts,
-        split: cli.evtx.split,
-        used_stems: Mutex::new(HashSet::new()),
-    };
+    let mut tool = EvtxTool::new(!cli.evtx.no_individual);
+    tool.maps = maps;
+    tool.opts = opts;
+    tool.split = cli.evtx.split;
     let code = triage_cli::runner::run(&tool, &cli.common, env!("CARGO_PKG_VERSION"));
     std::process::exit(code);
 }

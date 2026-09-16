@@ -45,7 +45,7 @@
 
 use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -214,28 +214,6 @@ fn try_parse_guid_word_boundary(chars: &[char], start: usize) -> Option<(String,
 
 // ─── Timestamp helpers ────────────────────────────────────────────────────────
 
-/// Convert a Windows FILETIME (100-ns ticks since 1601-01-01 UTC) to UTC DateTime.
-fn filetime_to_datetime(ft: i64) -> Option<DateTime<chrono::Utc>> {
-    const FILETIME_TO_UNIX_SECS: i64 = 11_644_473_600;
-    let secs = (ft / 10_000_000) - FILETIME_TO_UNIX_SECS;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    DateTime::from_timestamp(secs, nanos)
-}
-
-/// Format a `DateTime<Utc>` as RECmd's literal "yyyy-MM-dd HH:mm:ss.fffffff"
-/// (7 fractional digits = 100-nanosecond ticks). Used in the embedded
-/// "Last executed: ..." ValueData2 field (not normalized by testkit).
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{ticks:07}", dt.format("%Y-%m-%d %H:%M:%S"))
-}
-
-/// Format a `DateTime<Utc>` as ISO-8601 UTC with 7 fractional digits.
-/// Used for the standalone `LastExecuted` detail column (auto-normalized).
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
-
 // ─── FocusTime formatting ─────────────────────────────────────────────────────
 
 /// Format focus-time milliseconds as C# TimeSpan's `@"d'd, 'h'h, 'mm'm, 'ss's'"`.
@@ -272,7 +250,7 @@ fn parse_user_assist_blob(raw: &[u8]) -> (i32, Option<DateTime<chrono::Utc>>, Op
 
     // Legacy: extract lastRun from offset 8 (an i64 filetime).
     let legacy_ft = i64::from_le_bytes(raw[8..16].try_into().unwrap_or([0; 8]));
-    let mut last_run = filetime_to_datetime(legacy_ft);
+    let mut last_run = filetime_to_datetime(legacy_ft as i128);
     let mut focus_count: Option<i32> = None;
     let mut focus_time_ms: i32 = 0;
 
@@ -281,7 +259,7 @@ fn parse_user_assist_blob(raw: &[u8]) -> (i32, Option<DateTime<chrono::Utc>>, Op
         focus_count = Some(i32::from_le_bytes(raw[8..12].try_into().unwrap_or([0; 4])));
         focus_time_ms = i32::from_le_bytes(raw[12..16].try_into().unwrap_or([0; 4]));
         let win7_ft = i64::from_le_bytes(raw[60..68].try_into().unwrap_or([0; 8]));
-        last_run = filetime_to_datetime(win7_ft);
+        last_run = filetime_to_datetime(win7_ft as i128);
     }
 
     // C#: if lastRun?.Year < 1970 → lastRun = null

@@ -29,34 +29,12 @@
 
 use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 use triage_registry::value::plugin_raw_bytes;
 
 pub struct TypedURLs;
-
-/// Format a `DateTime<Utc>` in RECmd's `yyyy-MM-dd HH:mm:ss.fffffff` literal.
-/// Used for the embedded free-text `Timestamp:` field in ValueData2.
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
-
-/// Format a `DateTime<Utc>` as ISO-8601 UTC with 7 fractional digits.
-/// Used for the standalone `Timestamp` detail column (testkit-normalized).
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
-
-/// Convert a Windows FILETIME (100-ns intervals since 1601-01-01 UTC) to UTC DateTime.
-fn filetime_to_datetime(ft: i64) -> Option<DateTime<chrono::Utc>> {
-    // Difference between FILETIME epoch (1601-01-01) and Unix epoch (1970-01-01)
-    const FILETIME_TO_UNIX_SECS: i64 = 11_644_473_600;
-    let secs = (ft / 10_000_000) - FILETIME_TO_UNIX_SECS;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    DateTime::from_timestamp(secs, nanos)
-}
 
 impl TypedURLs {
     /// Build rows from the matched key's values, with an optional map of
@@ -82,7 +60,7 @@ impl TypedURLs {
                     return None;
                 }
                 let ft = i64::from_le_bytes(raw[..8].try_into().ok()?);
-                let dt = filetime_to_datetime(ft)?;
+                let dt = filetime_to_datetime(ft as i128)?;
                 // RECmd skips 1601-01-01 (year == 1601) timestamps (they mean "null").
                 if dt.format("%Y").to_string() == "1601" {
                     return None;

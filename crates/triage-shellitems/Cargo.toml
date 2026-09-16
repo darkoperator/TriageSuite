@@ -10,3 +10,9 @@ description = "Windows shell item (IDList) parsing engine"
 thiserror.workspace = true
 encoding_rs.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
+
+[lints]
+workspace = true

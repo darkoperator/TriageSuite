@@ -113,8 +113,19 @@ fn decode_utf16le(bytes: &[u8]) -> String {
 }
 
 /// Windows FILETIME (100ns since 1601-01-01 UTC) → UTC DateTime. None if 0.
+///
+/// Mirrors `triage_core::timestamp::filetime_to_datetime`, which this crate
+/// cannot call: it is deliberately a leaf with one dependency. The copy is
+/// swept by `tests/boundary.rs`.
+///
+/// A tick count past 9999-12-31 is not a time — the cache entry was misread,
+/// or the blob was crafted. chrono itself would happily return a year-58000
+/// instant, which then renders as a 5-digit year that no consumer of the
+/// suite's ISO 8601 contract can parse, so it is rejected as unset instead.
 pub fn filetime_to_utc(ft: u64) -> Option<DateTime<Utc>> {
-    if ft == 0 {
+    /// FILETIME for 9999-12-31T23:59:59.9999999Z (.NET DateTime.MaxValue).
+    const FILETIME_MAX: u64 = 2_650_467_743_999_999_999;
+    if ft == 0 || ft > FILETIME_MAX {
         return None;
     }
     const FILETIME_TO_UNIX_SECS: i64 = 11_644_473_600;

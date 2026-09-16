@@ -35,7 +35,8 @@ use notatin::cell_key_node::CellKeyNode;
 use triage_core::timestamp::WinTimestamp;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
-use super::shimcache::{dt_to_recmd_literal, parse_win10};
+use super::shimcache::parse_win10;
+use triage_core::timestamp::dt_to_recmd_literal;
 
 pub struct AppCompatCache;
 

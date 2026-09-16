@@ -7,3 +7,6 @@ license.workspace = true
 description = "Shared EZ GuidMapping GUID-to-description table and lookup"
 
 [dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,126 @@
+# Every file Hayabusa and Takajo actually wrote on a real run, as
+# collection-relative paths under a `--layout velo` collection directory.
+#
+# This is EVIDENCE, not convention. It is transcribed from a run of the real
+# binaries, never derived from what their documentation or their filenames
+# look like they ought to be -- the defect this fixture exists to prevent was
+# exactly that inference (`EventLogs/*_Hayabusa_timeline.csv` and
+# `ThreatHunting/*_Takajo_automagic/*.csv`, neither of which any run has ever
+# produced).
+#
+# Where the line between this tree and the binaries actually falls:
+#
+#   * `EventLogs/timeline.csv` and `EventLogs/timeline.jsonl` are named in
+#     full by this tree -- `external/tools/hayabusa.rs` does
+#     `dir.join("timeline.csv")` / `dir.join("timeline.jsonl")` and passes the
+#     result as `--output`, so Hayabusa decides nothing below the directory.
+#     They are recorded here as corroboration, and the guard cross-checks them
+#     against what `Hayabusa::plan()` really builds.
+#   * Everything else below is named by the external binary, and nothing in
+#     this tree could derive it. `logon-summary --output` is handed a *prefix*
+#     and invents the suffixes; `automagic -o` is handed a *directory* and
+#     invents every filename inside it. For those, observation is the only
+#     source there is.
+#
+# Observed:
+#   Hayabusa 4.0.0 (mac-aarch64), Takajo 2.16.1 (mac-aarch64), 2026-09-13,
+#   over two real captures -- `Collection-DESKTOP-OA8SHHC-2026-03-12T22_54_56Z`
+#   and `Collection-STDC1_umbralabs_dev-2026-03-11T20_27_13Z`. The list below
+#   is their union: Takajo emits a file only when it has something to put in
+#   it, so which of its outputs appear is evidence-dependent (the second
+#   capture added StackCmdlines.csv and StackTargetIP-Addresses.csv, the two
+#   the first did not produce).
+#
+#   OUT=/tmp/observe                  # empty; one capture per run
+#   CAPTURE=/absolute/path/to/Collection-...   # MUST be absolute: the driver
+#                                     # runs each binary with its cwd set to
+#                                     # the binary's own directory, so a
+#                                     # relative capture path silently finds
+#                                     # no evidence
+#   CONFIG=/absolute/path/to/external.toml     # [hayabusa]/[takajo] bin =
+#                                     # the real binaries, enabled = true
+#
+#   TRIAGE_RUN_STAMP=2026-01-01T000000Z TriageSuite run "$CAPTURE" \
+#       --out "$OUT" --csv --no-progress --config "$CONFIG"
+#
+#   then expand the external-tool output the run recorded (Takajo's single
+#   recorded path is its output *directory*) and strip the collection prefix:
+#
+#   cd "$OUT"
+#   COLLECTION_DIR=$(echo "$OUT"/Processed-*)
+#   jq -r '.. | .external_tools? // empty | .[].output_paths[]' run_manifest.json \
+#     | while read -r p; do
+#         if [ -d "$p" ]; then find "$p" -maxdepth 1 -type f; else echo "$p"; fi
+#       done | sed "s|^$COLLECTION_DIR/||" | sort
+#
+#   Reading the category directories directly instead would be wrong: both
+#   EventLogs and ThreatHunting also hold in-process tool output (EvtxTriage,
+#   LolTriage), which is named by this tree and belongs in the derived half of
+#   the corpus, not here.
+#
+#   The `-maxdepth 1` above is deliberate, and this listing is therefore of
+#   the report files Takajo writes directly into `ThreatHunting/`. Takajo also
+#   creates one subdirectory, `ThreatHunting/scriptblock-logs/`, which this
+#   listing does NOT describe. It was created on both captures above, and on
+#   `Collection-STDC1_umbralabs_dev-2026-03-11T20_27_13Z` held 164 files:
+#
+#     * 163 per-event `.txt` files, one per extracted PowerShell script block,
+#       named `<hostname>-<event timestamp>-<GUID>.txt`. Excluded on purpose:
+#       the leaf names are per-event, so transcribing them would pin this
+#       capture's evidence rather than the binary's naming, and no session
+#       pattern names one. DO NOT add these when re-observing --
+#       `observed_external_output_agrees_with_the_paths_this_crate_hands_the_binaries`
+#       asserts this listing is depth-1 and will read them as the binary
+#       having changed.
+#     * `scriptblock-logs/Summary.csv`, which is a different thing entirely: a
+#       stable name with an analyst-facing schema (`Creation Time, Computer
+#       Name, Script ID, Script Name, Records, Level, Alerts`). It is absent
+#       here only because no session pattern references it yet. If one is ever
+#       added, transcribe this file -- and then the depth-1 assertion above has
+#       to be relaxed with it, because that assertion is about the shape of
+#       *this listing*, not about what Takajo writes.
+#
+#   The DESKTOP-OA8SHHC capture produced the `scriptblock-logs/` directory
+#   empty -- neither the .txt files nor Summary.csv -- so the presence of any
+#   of it is evidence-dependent, like Takajo's other outputs.
+#
+# Re-observe (do not hand-edit) after upgrading either binary. `#` comments
+# and blank lines are ignored; every other line is one relative path.
+
+# --- Hayabusa: `dfir-timeline --output <path>` writes exactly that path.
+EventLogs/timeline.csv
+EventLogs/timeline.jsonl
+# `logon-summary --output <prefix>` writes `<prefix>-successful.csv` and
+# `<prefix>-failed.csv`, and writes neither when it finds no logon events.
+EventLogs/logon-summary-failed.csv
+EventLogs/logon-summary-successful.csv
+
+# --- Takajo: `automagic -o <dir>` writes its report files straight into
+# <dir>. (See the header on `scriptblock-logs/`, its one subdirectory, and on
+# which of its contents are deliberately not listed here.)
+ThreatHunting/ListDomains.txt
+ThreatHunting/ListDomainsDetailed.txt
+ThreatHunting/ListHashes-ImportHashes.txt
+ThreatHunting/ListHashes-MD5.txt
+ThreatHunting/ListHashes-SHA1.txt
+ThreatHunting/ListHashes-SHA256.txt
+ThreatHunting/ListIP-Addresses.txt
+ThreatHunting/MetricsComputers.csv
+ThreatHunting/MetricsUsers.csv
+ThreatHunting/StackCmdlines.csv
+ThreatHunting/StackFailedLogons.csv
+ThreatHunting/StackProcesses.csv
+ThreatHunting/StackServices.csv
+ThreatHunting/StackSourceComputers.csv
+ThreatHunting/StackSourceIP-Addresses.csv
+ThreatHunting/StackSourceUsers-NoFiltering.csv
+ThreatHunting/StackSourceUsers.csv
+ThreatHunting/StackSuccessfulLogons.csv
+ThreatHunting/StackTargetComputers.csv
+ThreatHunting/StackTargetIP-Addresses.csv
+ThreatHunting/StackTargetUsers-NoFiltering.csv
+ThreatHunting/StackTargetUsers.csv
+ThreatHunting/TTPSummary.csv
+ThreatHunting/TimelineLogon.csv
+ThreatHunting/TimelinePartitionDiagnostic.csv
+ThreatHunting/TimelineSuspiciousProcesses.csv

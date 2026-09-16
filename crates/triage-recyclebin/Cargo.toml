@@ -8,3 +8,6 @@ description = "Windows Recycle Bin $I and INFO2 metadata parser"
 
 [dependencies]
 thiserror.workspace = true
+
+[lints]
+workspace = true

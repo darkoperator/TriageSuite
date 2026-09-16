@@ -116,6 +116,30 @@ belonging to that user, and it is unreadable without them on the left.
 History is the primary dataset, so `--csvf case.csv` produces `case.csv`, `case_Downloads.csv`,
 `case_Cookies.csv` and so on.
 
+### Velo layout
+
+Under the default `--layout velo`, BrowserTriage's output lands in
+`Processed-<HOST>-<stamp>/BrowserActivity/` (only created if BrowserTriage found at least one
+supported artifact -- an all-zero run, as seen on a workstation with no populated browser
+profiles, produces no `BrowserActivity/` directory at all):
+
+| File | Contents |
+|---|---|
+| `<stamp>_BrowserTriage_results.csv` | History (primary), every user merged, plus a trailing `TriageUser` column |
+| `<stamp>_BrowserTriage_results_Downloads.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_Cookies.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_Autofill.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_Bookmarks.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_Logins.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_KeywordSearches.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_Extensions.csv` | merged, plus `TriageUser` |
+| `<stamp>_BrowserTriage_results_Timeline.csv` | merged, plus `TriageUser` (unless `--no-timeline`) |
+| `PerUser/[<Dataset>/]<stamp>_BrowserTriage_results[_<Dataset>]_<user>.csv` | one user, columns exactly as documented above |
+
+BrowserTriage is `Scope::UserSpecific` (`crates/browser-triage/src/lib.rs`): every row starts
+in `PerUser/`, so the category-root file above is always the merge (no competing system-scope
+write can exist for this tool, unlike a `Scope::UserElseSystem` tool).
+
 ### The timeline
 
 A cross-artifact index over every non-null instant, with columns `Timestamp`, `Timestamp Type`,

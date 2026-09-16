@@ -7,22 +7,12 @@
 //! Detail-CSV column order (fixture-authoritative):
 //!   Timestamp, BatchKeyPath, DriveName, BatchValueName, VolumeLabel, DriveType
 
-use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
 pub struct VolumeInfoCache;
-
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
-
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
 
 fn get_str_value(key: &CellKeyNode, name: &str) -> String {
     for v in key.value_iter() {

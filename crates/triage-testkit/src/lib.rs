@@ -9,6 +9,8 @@
 //! either match exactly or be covered by a named [`AcceptedDelta`]; the
 //! harness fails on any undocumented divergence.
 
+pub mod boundary;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -660,6 +662,9 @@ pub fn compare_ndjson_grouped(
     )
 }
 
+// Private inner function behind the two public wrappers above, which exist
+// precisely so callers never pass this argument list themselves; the extra
+// parameter is the occurrence-index flag that distinguishes them.
 #[allow(clippy::too_many_arguments)]
 fn compare_ndjson_inner(
     reference_path: &Path,

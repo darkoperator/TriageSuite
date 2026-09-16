@@ -12,6 +12,12 @@ pub struct EvtxArgs {
     #[arg(long)]
     pub split: bool,
 
+    /// Skip the per-source-log (channel) individual CSV exports under
+    /// `Individual/` that are written by default, matching VeloProcessor
+    /// (which disables the equivalent output via its own `-SkipEvtx` flag)
+    #[arg(long)]
+    pub no_individual: bool,
+
     /// Refresh the bundled maps corpus from GitHub, then exit
     #[arg(long)]
     pub sync: bool,

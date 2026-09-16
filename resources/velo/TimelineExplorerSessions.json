@@ -1,0 +1,53 @@
+{
+  "Sessions": [
+    {
+      "Name": "Execution_Analysis",
+      "Description": "What ran on this system",
+      "FilePatterns": [
+        "FileSystem/*_PETriage_results.csv",
+        "Registry/*_AppCompatTriage_results*.csv",
+        "Registry/*_AmcacheTriage_results_UnassociatedFileEntries.csv",
+        "ThreatHunting/*_LolTriage_results.csv"
+      ]
+    },
+    {
+      "Name": "Lateral_Movement_Logons",
+      "Description": "Who connected and from where",
+      "FilePatterns": [
+        "EventLogs/timeline.csv",
+        "EventLogs/Individual/Security.csv",
+        "ThreatHunting/TimelineLogon.csv",
+        "ThreatHunting/StackSuccessfulLogons.csv",
+        "ThreatHunting/StackFailedLogons.csv"
+      ]
+    },
+    {
+      "Name": "Persistence",
+      "Description": "What survives reboot",
+      "FilePatterns": [
+        "Registry/Services_*.csv",
+        "Registry/TaskCache_*.csv",
+        "Registry/*_RETriage_results*.csv"
+      ]
+    },
+    {
+      "Name": "File_And_Folder_Access",
+      "Description": "What was opened, and by whom",
+      "FilePatterns": [
+        "FileSystem/*_LETriage_results.csv",
+        "FileSystem/*_JLETriage_results*.csv",
+        "Registry/*_SBETriage_results*.csv",
+        "FileSystem/*_RBTriage_results.csv"
+      ]
+    },
+    {
+      "Name": "Network_And_Browser",
+      "Description": "Where this host went",
+      "FilePatterns": [
+        "BrowserActivity/*_BrowserTriage_results*.csv",
+        "SystemActivity/*_SrumETriage_results_NetworkUsages.csv",
+        "SystemActivity/*_SrumNetTriage_results*.csv"
+      ]
+    }
+  ]
+}

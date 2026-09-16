@@ -7,6 +7,11 @@ bin = "hayabusa"
 enabled = true
 csv = true
 json = true
+# A relative rules/rules_config is resolved against Hayabusa's OWN install
+# directory (where its bundled rules/ and rules/config/ actually live), not
+# against the directory you run `triagesuite` from -- Hayabusa's process is
+# always started with its cwd set there. Use an absolute path for either
+# field if you keep your Sigma rules somewhere else.
 rules = "./rules"
 rules_config = "./rules/config"
 min_level = "informational"

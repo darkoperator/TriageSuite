@@ -58,6 +58,19 @@ RBTriage has no tool-specific flags beyond the common set above.
 Identity is the Recycle Bin SID found in the `$I` file path. Resolving the SID to a
 username via a captured SOFTWARE hive's ProfileList is planned for a later milestone.
 
+### Velo layout
+
+Under the default `--layout velo`, RBTriage's output lands in
+`Processed-<HOST>-<stamp>/FileSystem/`:
+
+| File | Contents |
+|---|---|
+| `<stamp>_RBTriage_results.csv` | every SID merged, plus a trailing `TriageUser` column |
+| `PerUser/<stamp>_RBTriage_results_<SID>.csv` | one SID, columns exactly as documented above |
+
+RBTriage is `Scope::UserSpecific` (`crates/rb-triage/src/lib.rs`): every deleted-file record
+is per-identity, so the category-root file above is always the merge.
+
 ## Output fields
 
 Confirmed against the `RecycleRecord` struct in `crates/rb-triage/src/lib.rs`. All

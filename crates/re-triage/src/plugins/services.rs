@@ -16,23 +16,11 @@
 
 use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
 pub struct Services;
-
-/// Convert a chrono::DateTime<Utc> to ISO-8601 UTC string (for standalone detail columns).
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
-
-/// Convert a chrono::DateTime<Utc> to RECmd literal "yyyy-MM-dd HH:mm:ss.fffffff"
-/// (for embedded free-text fields like ValueData2 which the testkit does NOT normalize).
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
 
 /// Read a string value from a CellKeyNode by value name (case-insensitive).
 fn get_str_value(key: &CellKeyNode, name: &str) -> String {

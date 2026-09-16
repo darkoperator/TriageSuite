@@ -82,10 +82,20 @@ pub struct Invocation {
 /// `host_dir` is computed once, by the driver, as `out_root.join(&host.output_id)`
 /// — the single place the output_id-not-hostname invariant is enforced. A repeated
 /// hostname gets a stable per-collection directory, so no tool module may build
-/// this path from `host.host` itself.
+/// this path from `host.host` itself. It is the `--layout native` output root; a
+/// tool whose Velo placement differs from its native one (Hayabusa, Takajo) must
+/// branch on `velo_dir` rather than joining a subdirectory onto `host_dir`.
+///
+/// `velo_dir` is `Some(<Processed-HOST-stamp>)` under `--layout velo`, `None`
+/// under `--layout native` — the same collection directory
+/// `crate::velo::collection_dir_for` gates everything else on (process logs,
+/// the source hash log, SysInfo). A tool that belongs in a Velo forensic
+/// category (`crate::velo::category_for_key`'s external-tool counterparts)
+/// joins its category name onto this instead of using `host_dir`.
 pub struct HostContext<'a> {
     pub host: &'a HostCapture,
     pub host_dir: PathBuf,
+    pub velo_dir: Option<PathBuf>,
 }
 
 /// Artifacts published by tools earlier in registry order.

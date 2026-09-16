@@ -13,13 +13,14 @@ pub(crate) mod testsupport;
 
 use std::path::{Path, PathBuf};
 
+use triage_core::attribution::{sanitize_component, Identity};
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_registry::hive::Hive;
 
-use batch::process_entry;
+use batch::{process_entry, HiveSource};
 use plugins::registry;
 use reb::{parse_reb, DFIR_BATCH};
 
@@ -205,22 +206,40 @@ impl Tool for RegistryTool {
         // reuses the same directory layout as the router, and doesn't touch the
         // router's public API beyond the two new accessor methods added to it.
         //
-        // The detail-CSV basename is `<PluginName>_<HiveStem>.csv`, e.g.
-        // `BamDam_SYSTEM.csv` — exactly what RECmd writes (fixture-confirmed).
-        // The `PluginDetailFile` column in the (plugin) batch rows is set to
-        // this basename so consumers can locate the side-car file.
-        // Hive stem (e.g. "SYSTEM" from "SYSTEM.LOG1"-stripped path).
-        let hive_stem = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("UNKNOWN")
-            .to_string();
+        // The detail-CSV basename is `<PluginName>_<stem>.csv`, e.g.
+        // `BamDam_SYSTEM.csv` — for a hive in its canonical location that is
+        // exactly what RECmd writes (fixture-confirmed). `detail_stem` below
+        // qualifies the stem when the hive's file name alone would not tell
+        // two hives apart in one output directory (`BamDam_SYSTEM_RegBack.csv`),
+        // which is a deliberate divergence from RECmd -- RECmd relies on a
+        // per-run output directory we do not have. See `detail_stem`.
+        //
+        // The `PluginDetailFile` column in the `(plugin)` batch rows names
+        // this same file, and it is computed from this same value: the stem
+        // travels into the batch engine as `HiveSource::detail_stem` rather
+        // than being re-derived there, because the two were computed
+        // independently once and the column ended up pointing at a file that
+        // held another hive's rows.
+        let hive_stem = detail_stem(path, out.current_identity());
+
+        // The column names the file the router *routes* that basename to, not
+        // the basename: the router folds the identity into a per-user
+        // side-car's filename and the Velo layout writes per-user output into
+        // a directory of its own, and a reference that ignored either named
+        // nothing at all. Snapshotted here, before the write loop borrows the
+        // router, and fixed to the identity this hive is attributed to -- the
+        // identity does not change within one `parse`.
+        let detail_reference = out.side_car_reference();
 
         for entry in &entries {
             let mut details = Vec::new();
             process_entry(
                 &mut hive,
-                &hive_path,
+                &HiveSource {
+                    path: &hive_path,
+                    detail_stem: &hive_stem,
+                    detail_reference: &detail_reference,
+                },
                 entry,
                 &plugin_registry,
                 &mut |record| {
@@ -249,6 +268,55 @@ impl Tool for RegistryTool {
     }
 }
 
+/// The source-unique stem a plugin detail CSV's basename is built from
+/// (`<PluginName>_<stem>.csv`).
+///
+/// RECmd names that file `<PluginName>_<HiveFileName>.csv` and keeps two
+/// hives with the same file name apart by writing each run into its own
+/// output directory. Neither of our layouts reproduces that for a
+/// **system-scope** hive: `Nested` puts every system hive's side-cars in one
+/// `system/` directory and `Velo` puts them all at the category root, so
+/// `.../config/SYSTEM` and `.../config/RegBack/SYSTEM` claim the same file
+/// and append into it with nothing recording which rows came from where.
+/// Observed on `Collection-STDC1`: one `Registry/AppCompatCache_SYSTEM.csv`
+/// holding the live hive's rows and the RegBack copy's, and one
+/// `Registry/TypedURLs_NTUSER.DAT.csv` conflating the `Default`,
+/// `LocalService` and `NetworkService` profile hives into three
+/// indistinguishable rows.
+///
+/// The qualifier is the hive's parent directory name, **appended** rather
+/// than prefixed so the name still begins with what RECmd would call it
+/// (`AppCompatCache_SYSTEM_RegBack.csv`, `TypedURLs_NTUSER.DAT_Default.csv`)
+/// -- the same shape the layouts already use to fold an identity into a
+/// filename. It is omitted for a hive sitting directly in `config`, the
+/// canonical location where the file name is unique by Windows' own
+/// convention, so the primary system hives keep RECmd's name exactly.
+///
+/// A per-user hive needs no qualifier: both layouts already carry the user
+/// in the path (`Velo`'s `PerUser/<name>_<user>.csv`, `Nested`'s
+/// `users/<user>/`), and two hives attributed to the same user are that one
+/// profile's hives.
+fn detail_stem(hive_path: &Path, identity: &Identity) -> String {
+    let name = hive_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("UNKNOWN");
+    if !matches!(identity, Identity::System) {
+        return name.to_string();
+    }
+    let parent = hive_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if parent.is_empty() || parent.eq_ignore_ascii_case("config") {
+        return name.to_string();
+    }
+    // The qualifier becomes part of a filename component, so it goes through
+    // the same sanitizer every other path-derived label does.
+    format!("{name}_{}", sanitize_component(parent))
+}
+
 impl RegistryTool {
     /// Run registry search mode. Called when any of --sk/--sv/--sd is set.
     ///
@@ -263,7 +331,7 @@ impl RegistryTool {
     ) -> Result<u64, TriageError> {
         use crate::search_record::SearchRecord;
         use triage_core::timestamp::WinTimestamp;
-        use triage_registry::search::{search_subtree, HitType, Matcher};
+        use triage_registry::search::{search_subtree, HitType, Matcher, SearchTargets};
 
         let Some(root) = hive.root() else {
             return Ok(0);
@@ -273,13 +341,13 @@ impl RegistryTool {
 
         // Run a separate subtree pass per search flag so each flag uses its own
         // needle. Flags are additive: all matching hits are emitted.
-        let passes: &[(&Option<String>, bool, bool, bool)] = &[
-            (&self.search_key, true, false, false),
-            (&self.search_value, false, true, false),
-            (&self.search_data, false, false, true),
+        let passes: &[(&Option<String>, SearchTargets)] = &[
+            (&self.search_key, SearchTargets::keys()),
+            (&self.search_value, SearchTargets::value_names()),
+            (&self.search_data, SearchTargets::value_data()),
         ];
 
-        for (term_opt, sk, sv, sd) in passes {
+        for (term_opt, targets) in passes {
             let Some(needle) = term_opt.as_deref() else {
                 continue;
             };
@@ -289,7 +357,7 @@ impl RegistryTool {
             let Some(root_node) = hive.root() else {
                 continue;
             };
-            let hits = search_subtree(hive, root_node, &matcher, *sk, *sv, *sd, self.min_size);
+            let hits = search_subtree(hive, root_node, &matcher, *targets, self.min_size);
 
             for hit in hits {
                 let lw = hit
@@ -366,4 +434,77 @@ fn find_log_siblings(primary: &Path) -> Vec<PathBuf> {
         }
     }
     logs
+}
+
+#[cfg(test)]
+mod detail_stem_tests {
+    use super::*;
+
+    /// The three real collisions observed on `Collection-STDC1`, plus the
+    /// cases that must keep RECmd's name unchanged.
+    #[test]
+    fn a_system_scope_hive_is_qualified_only_when_its_file_name_is_not_unique() {
+        let system = Identity::System;
+        // Canonical location: RECmd's name, unchanged.
+        assert_eq!(
+            detail_stem(Path::new("/c/Windows/System32/config/SYSTEM"), &system),
+            "SYSTEM"
+        );
+        assert_eq!(
+            detail_stem(Path::new("/c/Windows/System32/config/SOFTWARE"), &system),
+            "SOFTWARE"
+        );
+        // The RegBack copy, which used to append into the live hive's file.
+        assert_eq!(
+            detail_stem(
+                Path::new("/c/Windows/System32/config/RegBack/SYSTEM"),
+                &system
+            ),
+            "SYSTEM_RegBack"
+        );
+        // The three system-scope profile hives, which used to conflate.
+        for (path, expected) in [
+            ("/c/Users/Default/NTUSER.DAT", "NTUSER.DAT_Default"),
+            (
+                "/c/Windows/ServiceProfiles/LocalService/NTUSER.DAT",
+                "NTUSER.DAT_LocalService",
+            ),
+            (
+                "/c/Windows/ServiceProfiles/NetworkService/NTUSER.DAT",
+                "NTUSER.DAT_NetworkService",
+            ),
+        ] {
+            assert_eq!(detail_stem(Path::new(path), &system), expected);
+        }
+    }
+
+    /// A per-user hive keeps the bare name: the layout already carries the
+    /// user, so qualifying here would only duplicate it.
+    #[test]
+    fn a_per_user_hive_keeps_the_bare_recmd_name() {
+        assert_eq!(
+            detail_stem(
+                Path::new("/c/Users/alice/NTUSER.DAT"),
+                &Identity::User("alice".into())
+            ),
+            "NTUSER.DAT"
+        );
+        assert_eq!(
+            detail_stem(
+                Path::new("/c/Users/alice/AppData/Local/Microsoft/Windows/UsrClass.dat"),
+                &Identity::User("alice".into())
+            ),
+            "UsrClass.dat"
+        );
+    }
+
+    /// Total over the paths a capture can hand it: a path with no file name
+    /// and no parent must produce a value, not a panic.
+    #[test]
+    fn it_is_total_over_degenerate_paths() {
+        for path in ["", "/", "..", "SYSTEM"] {
+            let stem = detail_stem(Path::new(path), &Identity::System);
+            assert!(!stem.is_empty(), "empty stem for {path:?}");
+        }
+    }
 }

@@ -58,10 +58,45 @@ use crate::reb::KeyEntry;
 use notatin::cell_key_node::CellKeyNode;
 use notatin::cell_key_value::CellKeyValueDataTypes;
 use triage_core::error::TriageError;
+use triage_core::output::layout::SideCarReference;
 use triage_core::timestamp::WinTimestamp;
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 use triage_registry::value::{apply_binary_convert, render, BinaryConvert};
+
+/// One hive as the batch engine sees it: the path that goes into the
+/// `HivePath` column, the stem this hive's per-plugin detail side-cars are
+/// named from (`<PluginName>_<detail_stem>.csv`), and the router's own rule
+/// for turning such a filename into the reference that names it.
+///
+/// All three travel together on purpose. `PluginDetailFile` is an *index
+/// into* those side-car files, and every part of it the engine worked out for
+/// itself is a part that went wrong:
+///
+/// * The engine derived its own stem from the hive's file name while
+///   `RegistryTool::parse` derived the real one from `crate::detail_stem`.
+///   The moment that stem gained a qualifier the two disagreed silently: on
+///   one capture, 3,089 `(plugin)` batch rows cited a side-car holding a
+///   different hive's rows, or one that did not exist at all.
+/// * The filename alone was then written as the reference, which ignored
+///   what `OutputRouter` does to it -- the identity it folds into a per-user
+///   side-car's name, and the directory the Velo layout puts per-user output
+///   in. On a two-profile capture 1,646 rows named a file that was not
+///   there.
+///
+/// `crate::detail_stem` is the single producer of the stem and
+/// `OutputLayout::side_car_reference` of the reference, so the index and the
+/// file it names cannot be computed apart.
+pub struct HiveSource<'a> {
+    /// Written verbatim into the `HivePath` column.
+    pub path: &'a str,
+    /// `crate::detail_stem`'s result for this hive.
+    pub detail_stem: &'a str,
+    /// The router's naming rule for the detail side-cars, snapshotted for the
+    /// identity this hive is attributed to
+    /// (`OutputRouter::side_car_reference`).
+    pub detail_reference: &'a SideCarReference,
+}
 
 /// Emit batch rows for one hive under one batch entry, mirroring RECmd's
 /// ProcessBatchKey/BatchDumpKey/BuildBatchCsvOut.
@@ -71,10 +106,10 @@ use triage_registry::value::{apply_binary_convert, render, BinaryConvert};
 /// `detail_sink`  — receives `(plugin_name, PluginRow)` for per-plugin detail
 ///                  CSVs. Wired to a per-plugin CSV writer in `RegistryTool::parse`
 ///                  (implemented in Task 9). Each unique `plugin_name` gets its
-///                  own `<PluginName>_<HiveStem>.csv` side-car file.
+///                  own `<PluginName>_<source.detail_stem>.csv` side-car file.
 pub fn process_entry(
     hive: &mut Hive,
-    hive_path: &str,
+    source: &HiveSource<'_>,
     entry: &KeyEntry,
     plugins: &[Box<dyn RegistryPlugin>],
     sink: &mut dyn FnMut(BatchRecord) -> Result<(), TriageError>,
@@ -86,7 +121,7 @@ pub fn process_entry(
     }
     if entry.key_path == "*" {
         if let Some(root) = hive.root() {
-            process_key(hive, hive_path, entry, root, plugins, sink, detail_sink)?;
+            process_key(hive, source, entry, root, plugins, sink, detail_sink)?;
         }
         return Ok(());
     }
@@ -107,7 +142,7 @@ pub fn process_entry(
                     continue;
                 }
             }
-            process_key(hive, hive_path, entry, start, plugins, sink, detail_sink)?;
+            process_key(hive, source, entry, start, plugins, sink, detail_sink)?;
         }
     } else {
         // Non-wildcard path (RECmd Program.cs lines 2070-2081):
@@ -115,26 +150,31 @@ pub fn process_entry(
         // without a prior value-existence check. ProcessBatchKey internally
         // decides whether to emit (based on value_name) and recurses regardless.
         if let Some(start) = hive.get_key(&entry.key_path) {
-            process_key(hive, hive_path, entry, start, plugins, sink, detail_sink)?;
+            process_key(hive, source, entry, start, plugins, sink, detail_sink)?;
         }
     }
     Ok(())
 }
 
 /// ProcessBatchKey: emit this key (or one value), then recurse if Recursive.
+// Six of the seven parameters are the batch context threaded unchanged through
+// the recursion; bundling them would add a struct that exists only to be
+// destructured again at every call, and this pair mirrors RECmd's
+// ProcessBatchKey/BatchDumpKey signatures line for line.
+#[allow(clippy::too_many_arguments)]
 fn process_key(
     hive: &mut Hive,
-    hive_path: &str,
+    source: &HiveSource<'_>,
     entry: &KeyEntry,
     mut key: CellKeyNode,
     plugins: &[Box<dyn RegistryPlugin>],
     sink: &mut dyn FnMut(BatchRecord) -> Result<(), TriageError>,
     detail_sink: &mut dyn FnMut(&str, PluginRow) -> Result<(), TriageError>,
 ) -> Result<(), TriageError> {
-    dump_key(hive, hive_path, entry, &mut key, plugins, sink, detail_sink)?;
+    dump_key(hive, source, entry, &mut key, plugins, sink, detail_sink)?;
     if entry.recursive {
         for sub in hive.sub_keys(&mut key) {
-            process_key(hive, hive_path, entry, sub, plugins, sink, detail_sink)?;
+            process_key(hive, source, entry, sub, plugins, sink, detail_sink)?;
         }
     }
     Ok(())
@@ -144,9 +184,11 @@ fn process_key(
 /// the plugin path (RECmd: `if (plugins.Count > 0) {...} else {...}`). When
 /// any plugin activates, emit `(plugin)` batch rows and collect detail rows,
 /// then skip the default dump. Otherwise fall through to the default path.
+// Same batch context as process_key above, which is its only caller.
+#[allow(clippy::too_many_arguments)]
 fn dump_key(
     hive: &mut Hive,
-    hive_path: &str,
+    source: &HiveSource<'_>,
     entry: &KeyEntry,
     key: &mut CellKeyNode,
     plugins: &[Box<dyn RegistryPlugin>],
@@ -189,15 +231,18 @@ fn dump_key(
                 .collect();
 
             for plugin in &matched {
-                // The detail-CSV basename: "<PluginName>_<HiveStem>.csv".
-                // The HiveStem is not available here (only hive_path is), so we
-                // compute it from the hive_path basename. This matches the basename
-                // written by RegistryTool::parse()'s detail_sink.
-                let hive_stem = std::path::Path::new(hive_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("UNKNOWN");
-                let detail_basename = format!("{}_{}.csv", plugin.plugin_name(), hive_stem);
+                // The detail-CSV basename: `<PluginName>_<detail_stem>.csv`.
+                // The stem is handed in rather than recomputed from
+                // `source.path` here -- see `HiveSource` -- so this value and
+                // the file `RegistryTool::parse`'s detail sink actually
+                // writes are the same string from the same producer.
+                let detail_basename =
+                    format!("{}_{}.csv", plugin.plugin_name(), source.detail_stem);
+                // ...and the reference an analyst follows is that filename put
+                // through the router's own routing rules, because the router
+                // is what decides the directory and the identity suffix the
+                // file ends up with. See `HiveSource::detail_reference`.
+                let detail_reference = source.detail_reference.for_file(&detail_basename);
 
                 // Use process_with_hive so plugins that need subkey iteration
                 // (AppPaths, UnInstall, ProfileList, Products) can access them.
@@ -211,7 +256,7 @@ fn dump_key(
                         WinTimestamp::from_unix_nanos(kw.timestamp(), kw.timestamp_subsec_nanos())
                             .to_string();
                     let rec = BatchRecord {
-                        hive_path: hive_path.to_string(),
+                        hive_path: source.path.to_string(),
                         hive_type: format!("{:?}", entry.hive_type),
                         description: entry.description.clone(),
                         category: entry.category.clone(),
@@ -229,7 +274,7 @@ fn dump_key(
                         recursive: dotnet_bool(entry.recursive),
                         deleted: dotnet_bool(key.cell_state.is_deleted()),
                         last_write_timestamp: last_write,
-                        plugin_detail_file: detail_basename.clone(),
+                        plugin_detail_file: detail_reference.clone(),
                     };
                     sink(rec)?;
                     // Forward the detail row to the detail sink.
@@ -257,15 +302,15 @@ fn dump_key(
             .iter()
             .find(|v| v.get_pretty_name().eq_ignore_ascii_case(vn))
         {
-            sink(build_record(hive_path, entry, key, Some(v)))?;
+            sink(build_record(source.path, entry, key, Some(v)))?;
         }
         return Ok(());
     }
     if values.is_empty() {
-        sink(build_record(hive_path, entry, key, None))?;
+        sink(build_record(source.path, entry, key, None))?;
     }
     for v in &values {
-        sink(build_record(hive_path, entry, key, Some(v)))?;
+        sink(build_record(source.path, entry, key, Some(v)))?;
     }
     Ok(())
 }
@@ -441,10 +486,18 @@ mod engine_tests {
         let entries = parse_reb(DFIR_BATCH).unwrap();
         let plugins = crate::plugins::registry();
         let mut rows = Vec::new();
+        // No layout: this test drives the engine directly, with no router, so
+        // a side-car reference is just the filename (`SideCarReference::new`).
+        let detail_reference =
+            SideCarReference::new(None, triage_core::attribution::Identity::System);
         for e in &entries {
             process_entry(
                 &mut hive,
-                "C:\\Windows\\System32\\config\\SOFTWARE",
+                &HiveSource {
+                    path: "C:\\Windows\\System32\\config\\SOFTWARE",
+                    detail_stem: "SOFTWARE",
+                    detail_reference: &detail_reference,
+                },
                 e,
                 &plugins,
                 &mut |r| {

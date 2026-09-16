@@ -35,6 +35,12 @@ pub enum ArchiveSkip {
     Encrypted,
     /// A valid zip that simply isn't a capture.
     NotACollection,
+    /// A capture that was zipped twice: the archive's only entry is another
+    /// `.zip`. A distinct variant from [`ArchiveSkip::NotACollection`]
+    /// because the two call for different actions -- unwrap one layer, or
+    /// go and find the right file -- and `validate` has always named this
+    /// one precisely while `run` reported only the generic miss.
+    DoubleZipped,
     /// Entries share byte ranges — ambiguous, and a known attack shape.
     Overlapping,
     /// An existing extraction blocks reuse and `--overwrite` was not given.
@@ -49,6 +55,7 @@ impl std::fmt::Display for ArchiveSkip {
             ArchiveSkip::NotACollection => f.write_str(
                 "no Velociraptor collection inside (uploads.json + client_info.json not found)",
             ),
+            ArchiveSkip::DoubleZipped => f.write_str(crate::validate::DOUBLE_ZIPPED),
             ArchiveSkip::Overlapping => f.write_str("archive has overlapping entries"),
             ArchiveSkip::Stale(why) => write!(f, "{why}; rerun with --overwrite"),
         }
@@ -206,7 +213,17 @@ pub fn probe(path: &Path) -> Probe {
         return Probe::Skip(ArchiveSkip::Overlapping);
     }
     if !holds_collection(&archive) {
-        return Probe::Skip(ArchiveSkip::NotACollection);
+        // Same criterion `validate_capture` applies to an archive's entry
+        // list, so `run` and `validate` agree on which archives are
+        // double-zipped as well as on how they are described.
+        let mut names = archive.file_names();
+        let double_zipped =
+            matches!((names.next(), names.next()), (Some(only), None) if only.ends_with(".zip"));
+        return Probe::Skip(if double_zipped {
+            ArchiveSkip::DoubleZipped
+        } else {
+            ArchiveSkip::NotACollection
+        });
     }
     // Encryption is rejected up front rather than mid-extraction. The crate
     // checks the encrypted bit before locating content, so this stays cheap.
@@ -538,6 +555,39 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec!["a.zip", "b.zip"]);
+    }
+
+    /// A collection zipped twice is diagnosed as such, in the same words
+    /// `validate` uses, rather than as the generic "not a collection" --
+    /// the two mistakes call for different actions.
+    #[test]
+    fn a_double_zipped_archive_is_named_precisely() {
+        let td = tempfile::tempdir().unwrap();
+        let inner = td.path().join("Collection-H1.zip");
+        write_collection_zip(&inner, "", "H1");
+        let outer = td.path().join("double.zip");
+        make_zip(
+            &outer,
+            &[("Collection-H1.zip", &std::fs::read(&inner).unwrap())],
+        );
+        let Probe::Skip(reason) = probe(&outer) else {
+            panic!("a double-zipped archive must not probe as usable");
+        };
+        assert!(matches!(reason, ArchiveSkip::DoubleZipped));
+        assert_eq!(reason.to_string(), crate::validate::DOUBLE_ZIPPED);
+    }
+
+    /// The narrower diagnosis must not swallow the ordinary case: a zip with
+    /// several entries and no collection is still just not a collection.
+    #[test]
+    fn a_zip_of_unrelated_files_is_not_called_double_zipped() {
+        let td = tempfile::tempdir().unwrap();
+        let z = td.path().join("notes.zip");
+        make_zip(&z, &[("notes.txt", b"x"), ("other.zip", b"y")]);
+        let Probe::Skip(reason) = probe(&z) else {
+            panic!("this is not a collection");
+        };
+        assert!(matches!(reason, ArchiveSkip::NotACollection), "{reason}");
     }
 
     #[test]

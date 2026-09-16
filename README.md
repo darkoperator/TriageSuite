@@ -291,10 +291,47 @@ TriageSuite run /mnt/triage --out ./results --config triage.toml --profile quick
 # Collector .zip archives are taken directly — one, or a whole folder of them
 TriageSuite run ./Collection-HOST1.zip --out ./results
 TriageSuite run ./engagement-zips      --out ./results
+
+# Check a capture without processing it (exit 0 valid, 3 invalid)
+TriageSuite validate ./Collection-HOST1.zip
 ```
 
 Archives are extracted to `<out>/_extracted/` and kept, so re-runs skip extraction; anything
 that isn't a usable capture is reported and skipped rather than failing the run.
+
+### Output layout
+
+By default (`--layout velo`), output lands under one `Processed-<HOST>-<stamp>/` directory
+per host, grouped by forensic category (`FileSystem`, `Registry`, `EventLogs`,
+`SystemActivity`, `BrowserActivity`, `SQLiteArtifacts`) rather than by tool — matching
+VeloProcessor's own shape:
+
+```
+<out>/
+  Processed-<HOST>-<stamp>/
+    CaseInfo/          # SysInfo report, source hash log, per-file SHA256 output hashes
+    FileSystem/        # mft, pe, le, jle, rb
+    Registry/          # re, sbe, amc, acc
+    EventLogs/         # evtx, plus Individual/ per-channel exports, plus Hayabusa if enabled
+    SystemActivity/    # srum, sum, wxt
+    BrowserActivity/   # browser
+    ThreatHunting/     # Takajo's automagic tree, if enabled -- no in-process tool writes here
+    process_logs/      # one log per tool that processed something
+    Sessions/          # Timeline Explorer .tle_sess session files
+    VeloResults/       # passthrough of the capture's own Velociraptor results/ directory
+  run_manifest.json
+```
+
+A per-user tool's category-root CSV merges every identity and carries a trailing
+`TriageUser` column; its `PerUser/[<Dataset>/]<file>_<user>.csv` siblings are Zimmerman-exact
+(a dataset with a discriminator gets a directory level of its own under `PerUser/`). `--layout
+native` instead writes the legacy `<out>/<HOST>/<Tool>/<identity>/` tree. Additional flags:
+`--skip-hashes` (skip the SHA256 hashing above), `--no-individual` (skip EvtxTriage's
+per-channel exports), `--start`/`--end` (ISO 8601 UTC time-range bounds, reaching only
+EvtxTriage and Hayabusa/Takajo — every other tool emits its full output regardless), and
+`--no-validate` (skip the pre-flight capture-validation gate). Full detail, including the
+exact `TriageUser` rule and every category's contents, is in
+[docs/tools/TriageSuite.md](docs/tools/TriageSuite.md#output-layout).
 
 Collecting the input: see [Collecting a capture](docs/tools/TriageSuite.md#collecting-a-capture-velociraptor-offline-collector)
 for the minimum set of artifacts a Velociraptor offline collector should be configured with,

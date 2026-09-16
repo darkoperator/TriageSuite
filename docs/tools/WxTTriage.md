@@ -102,6 +102,25 @@ or, with `--nested-output` (legacy layout, mirroring the per-user attribution):
 JSON output is NDJSON (one record per line) for all three datasets, per the suite convention
 noted in `crates/wxt-triage/src/lib.rs`.
 
+### Velo layout
+
+Under the default `--layout velo`, WxTTriage's output lands in
+`Processed-<HOST>-<stamp>/SystemActivity/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_WxTTriage_results_Activity.csv` | every user merged, plus a trailing `TriageUser` column |
+| `<stamp>_WxTTriage_results_ActivityOperation.csv` | merged, plus `TriageUser` |
+| `<stamp>_WxTTriage_results_Activity_PackageId.csv` | merged, plus `TriageUser` |
+| `PerUser/Activity/<stamp>_WxTTriage_results_Activity_<user>.csv` | one user, columns exactly as documented above |
+| `PerUser/ActivityOperation/<stamp>_WxTTriage_results_ActivityOperation_<user>.csv` | one user |
+| `PerUser/Activity_PackageId/<stamp>_WxTTriage_results_Activity_PackageId_<user>.csv` | one user |
+
+A dataset with zero rows this run produces no file at all, merged or `PerUser/` (confirmed:
+a real run with no `ActivityOperation` rows wrote only the `Activity` and
+`Activity_PackageId` files). WxTTriage is `Scope::UserSpecific`: every row is per-user, so the
+category-root file above is always the merge.
+
 ## Output datasets and fields
 
 ### Activity (22 columns)

@@ -39,25 +39,12 @@
 
 use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 use triage_registry::value::plugin_raw_bytes;
 
 pub struct TrustedDocuments;
-
-/// Convert a Windows FILETIME (100-ns intervals since 1601-01-01 UTC) to UTC DateTime.
-fn filetime_to_datetime(ft: i64) -> Option<DateTime<chrono::Utc>> {
-    const FILETIME_TO_UNIX_SECS: i64 = 11_644_473_600;
-    let secs = (ft / 10_000_000) - FILETIME_TO_UNIX_SECS;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    DateTime::from_timestamp(secs, nanos)
-}
-
-/// Format DateTime<Utc> as ISO-8601 UTC with 7 fractional digits.
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
 
 /// Format DateTime as C# DateTimeOffset.ToString() for the free-text ValueData2 field.
 /// C# default ToString() for DateTimeOffset on .NET 6+ en-US:
@@ -104,7 +91,7 @@ fn parse_timestamp(raw: &[u8]) -> Option<DateTime<chrono::Utc>> {
         return None;
     }
     let ft = i64::from_le_bytes(raw[..8].try_into().ok()?);
-    filetime_to_datetime(ft)
+    filetime_to_datetime(ft as i128)
 }
 
 /// Navigate from the TrustRecords key path to find the username via the

@@ -12,7 +12,6 @@
 //!
 //! Detail-CSV columns: JumpListName, BatchKeyPath, ExecutedOn, BatchValueName
 
-use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -22,13 +21,7 @@ pub struct JumplistData;
 /// Matches C# `DateTimeOffset.FromFileTime(...).ToUniversalTime()` formatted
 /// with `ToString("yyyy-MM-dd HH:mm:ss.fffffff")`.
 fn filetime_to_recmd_literal(ft: u64) -> Option<String> {
-    // FILETIME epoch is 1601-01-01; Unix epoch is 1970-01-01.
-    const FILETIME_TO_UNIX_OFFSET: i64 = 11_644_473_600;
-    let secs = (ft / 10_000_000) as i64 - FILETIME_TO_UNIX_OFFSET;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    let dt: DateTime<chrono::Utc> = DateTime::from_timestamp(secs, nanos)?;
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    Some(format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks))
+    triage_core::timestamp::filetime_to_recmd_literal(ft as i128)
 }
 
 impl RegistryPlugin for JumplistData {

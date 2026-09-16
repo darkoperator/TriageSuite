@@ -91,6 +91,25 @@ Jump Lists whose path contains a recognisable user-profile segment are routed to
 resolved to descriptions via a bundled table; the `--appIds` flag extends that table with
 site-specific or updated mappings.
 
+### Velo layout
+
+Under the default `--layout velo`, JLETriage's output lands in
+`Processed-<HOST>-<stamp>/FileSystem/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_JLETriage_results_AutomaticDestinations.csv` | every user (and any system-scope Jump Lists) merged, plus a trailing `TriageUser` column |
+| `<stamp>_JLETriage_results_CustomDestinations.csv` | same, merged |
+| `PerUser/AutomaticDestinations/<stamp>_JLETriage_results_AutomaticDestinations_<user>.csv` | one user, columns exactly as documented above |
+| `PerUser/CustomDestinations/<stamp>_JLETriage_results_CustomDestinations_<user>.csv` | one user |
+
+JLETriage is `Scope::UserElseSystem`: a Jump List can be system-scoped (written straight to
+the category-root filename above, no `TriageUser`) or per-user (`PerUser/`). When a run
+produces both for the same dataset, the merge post-pass needs `--overwrite` to replace the
+system-scope file with the merged, `TriageUser`-tagged one -- without it, the merge is skipped
+(recorded as a non-fatal failure) and the category-root file is left as the system-scope slice
+only. See "The `TriageUser` rule, stated precisely" in `docs/tools/TriageSuite.md`.
+
 ## Output fields
 
 ### AutomaticDestinations (44 columns)

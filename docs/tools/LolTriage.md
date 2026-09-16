@@ -82,6 +82,34 @@ Pass `--nested-output` to instead get the legacy tree layout:
 still apply in flat mode. All findings from every input CSV file are written to a single
 output file (in flat mode) or dataset directory (in nested mode).
 
+### No Velo layout
+
+LolTriage is a standalone second-pass CLI, not wired into `TriageSuite run`'s tool registry
+(`ALL_KEYS` in `crates/triage-orchestrator/src/registry.rs` has no `lol` entry), and its own
+CLI only ever constructs `OutputLayoutMode::Flat` or `::Nested`
+(`crates/lol-triage/src/lib.rs`) -- there is no `--layout` flag on standalone LolTriage and no
+`velo` mode it can select. `--layout velo` therefore has no effect on LolTriage: run it as a
+second pass over a Velo-layout `TriageSuite run` output tree exactly as shown above, pointing
+`--csv`/`--json` (or whichever inputs it consumes) at the appropriate category directories.
+
+**The bundled Timeline Explorer sessions already expect this output.** The
+`Execution_Analysis` session in `resources/velo/TimelineExplorerSessions.json` names
+`ThreatHunting/*_LolTriage_results.csv`, which no `TriageSuite run` can produce -- the session
+is written without it, and an empty-looking result there means the second pass has not been
+run, not that the pattern is wrong. To land output the pattern matches, write into the
+`ThreatHunting/` category with a `--csvf` basename carrying a 14-digit run-stamp prefix:
+
+```bash
+C=<out>/Processed-<HOST>-<stamp>
+LolTriage -d "$C" --csv "$C/ThreatHunting" \
+    --csvf "<yyyyMMddHHmmss>_LolTriage_results.csv"   # -> system_<stamp>_LolTriage_results.csv
+```
+
+The stamp prefix is what makes the flat layout put the identity label in front rather than
+before the extension (`OutputLayout::flat_filename`); the default `--csvf` gives
+`system_<stamp>_LolTriage_Output.csv`, which that pattern does not match. See "Timeline
+Explorer sessions" in `docs/tools/TriageSuite.md`.
+
 ## What it reads
 
 A `.csv` file is accepted only if its header line matches one of six known exact

@@ -16,6 +16,33 @@ const ALL_KEYS: &[&str] = &[
 /// its discovery is broad enough to be noisy on a full capture.
 const OPT_IN_KEYS: &[&str] = &["sqle"];
 
+/// Tool keys whose own parser understands a time range. Everything else in
+/// `ALL_KEYS` has no shared notion of "the" record timestamp to filter on
+/// (an `$MFT` record has eight; a prefetch record up to eight), so a
+/// `--start`/`--end` run leaves them unfiltered on purpose and the manifest
+/// records that explicitly as `not_applicable` rather than staying silent.
+const TIME_FILTERED_KEYS: &[&str] = &["evtx"];
+
+/// Whether `key`'s parser accepts `--start`/`--end` at all. Used to fill in
+/// the manifest's `time_filter` field (`applied` vs `not_applicable`) once a
+/// range was given for the run.
+pub fn tool_applies_time_filter(key: &str) -> bool {
+    TIME_FILTERED_KEYS.contains(&key)
+}
+
+/// Convert a run's `--start`/`--end` (`chrono`, shared with the CLI and the
+/// manifest) into the `time` crate type `ParseOptions` uses. The two crates
+/// have no conversion trait between them, so this round-trips through
+/// RFC3339 text -- the same representation EvtxTriage's own CLI already
+/// parses for `--sd`/`--ed`.
+fn to_time_offset(dt: chrono::DateTime<chrono::Utc>) -> time::OffsetDateTime {
+    time::OffsetDateTime::parse(
+        &dt.to_rfc3339(),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .expect("chrono's RFC3339 output is always valid RFC3339")
+}
+
 /// Per-run switches that change how a specific tool is *constructed*, as
 /// opposed to which tools are selected.
 ///
@@ -30,6 +57,16 @@ pub struct ToolOptions {
     /// `--no-timeline`: BrowserTriage skips its derived `_Timeline` dataset,
     /// which is routinely larger than all its typed datasets combined.
     pub no_timeline: bool,
+    /// `--no-individual`: EvtxTriage skips its per-source-log (channel)
+    /// individual CSV exports, which are written by default.
+    pub no_individual: bool,
+    /// `--start`: run-wide time-range floor. Passthrough only -- it reaches
+    /// EvtxTriage here and Hayabusa via its config overlay in `main.rs`; no
+    /// other tool filters, and the manifest says so per tool
+    /// (`tool_applies_time_filter`).
+    pub start: Option<chrono::DateTime<chrono::Utc>>,
+    /// `--end`: paired with `start` above.
+    pub end: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// The one key -> tool mapping. Shared by `select_with` (which builds the
@@ -50,7 +87,16 @@ fn build(key: &str, opts: ToolOptions) -> Option<Box<dyn Tool>> {
         "srum" => Box::new(srume_triage::SrumeTool::default()),
         "sum" => Box::new(sum_triage::SumTool),
         "wxt" => Box::new(wxt_triage::WxtTool),
-        "evtx" => Box::new(evtx_triage::EvtxTool::default()),
+        "evtx" => {
+            let mut tool = evtx_triage::EvtxTool::new(!opts.no_individual);
+            if let Some(start) = opts.start {
+                tool.opts.start_date = Some(to_time_offset(start));
+            }
+            if let Some(end) = opts.end {
+                tool.opts.end_date = Some(to_time_offset(end));
+            }
+            Box::new(tool)
+        }
         "mft" => Box::new(mft_triage::MftTool::default()),
         "amc" => Box::new(amc_triage::AmcacheTool::default()),
         "acc" => Box::new(acc_triage::AppCompatTool::default()),
@@ -68,6 +114,20 @@ pub fn tool_for_key_with(key: &str, opts: ToolOptions) -> Option<ToolEntry> {
         key,
         tool: build(key, opts)?,
     })
+}
+
+/// Every registered `--only`/`--skip` key, in registry order. Exposed so
+/// cross-cutting checks (e.g. the Velo basename guard test) can walk every
+/// production tool without duplicating `ALL_KEYS`.
+pub fn all_keys() -> &'static [&'static str] {
+    ALL_KEYS
+}
+
+/// Build a single tool by key with default `ToolOptions`, for callers that
+/// only need the tool's static metadata (`binary_name`, `datasets`) rather
+/// than a runnable `ToolEntry`.
+pub fn tool_for_key(key: &str) -> Option<Box<dyn Tool>> {
+    build(key, ToolOptions::default())
 }
 
 /// Every production parser with a stable short key for --only/--skip.
@@ -193,7 +253,10 @@ mod tests {
             ToolOptions::default(),
             ToolOptions {
                 hunt: false,
-                no_timeline: false
+                no_timeline: false,
+                no_individual: false,
+                start: None,
+                end: None,
             }
         );
         assert_eq!(

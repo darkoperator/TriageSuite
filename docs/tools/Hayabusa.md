@@ -97,6 +97,12 @@ against `crates/triage-orchestrator/src/external_config.rs::HayabusaConfig`.
 passed to it, regardless of whether they're set — confirmed against the real Hayabusa 4.0.0
 binary's `logon-summary --help`, which doesn't list them (and errors on unrecognized flags).
 
+The orchestrator's own `--start`/`--end` (see `docs/tools/TriageSuite.md`) unconditionally
+overwrite `timeline_start`/`timeline_end` for the run when given -- an overwrite, not a merge,
+same as `--skip` already wins over the config file for `enabled` (`main.rs`'s `run` function).
+Hayabusa and EvtxTriage are the only two tools `--start`/`--end` reach; Takajo inherits the
+effect transitively, since it only ever consumes Hayabusa's already-filtered JSONL.
+
 All 21 fields above were checked field-by-field against the current
 `HayabusaConfig` struct and its `Default` impl and match the design spec exactly — no
 discrepancies found between the spec doc and the code.
@@ -149,15 +155,18 @@ Hayabusa up to three times (`crates/triage-orchestrator/src/external.rs::run_ext
 1. If `hayabusa.enabled` and the binary resolves, and `csv = true`: run
    `hayabusa dfir-timeline --directory <host artifact root> --output-type csv --no-wizard
    --quiet --no-color --iso-8601 [shared rule/filter flags] --output
-   <out>/<host>/Hayabusa/timeline.csv`.
+   <Hayabusa output dir>/timeline.csv`.
 2. If `hayabusa.enabled` and the binary resolves, and `json = true`: run
    `hayabusa dfir-timeline --directory <host artifact root> --output-type jsonl --no-wizard
    --quiet --no-color --iso-8601 [shared rule/filter flags] --output
-   <out>/<host>/Hayabusa/timeline.jsonl`.
+   <Hayabusa output dir>/timeline.jsonl`.
 3. If `hayabusa.enabled` and the binary resolves, and `logon_summary = true`: run
    `hayabusa logon-summary --directory <host artifact root> --quiet --no-color --iso-8601
    [--threads/--clobber/--time-offset/--timeline-start/--timeline-end if set] --output
-   <out>/<host>/Hayabusa/logon-summary`.
+   <Hayabusa output dir>/logon-summary`.
+
+`<Hayabusa output dir>` is `<out>/Processed-<HOST>-<stamp>/EventLogs` under the default
+`--layout velo`, or `<out>/<output_id>/Hayabusa` under `--layout native` — see "Output paths" below.
 
 The two `dfir-timeline` invocations share every rule-selection/filter flag (`rules`,
 `rules_config`, `min_level`, `profile`, `threads`, `clobber`, `sort`, `scan_all_evtx_files`,
@@ -181,22 +190,31 @@ current working directory and refuses to run otherwise, regardless of the absolu
 via its own flags. Applying the same cwd convention to every external tool (Hayabusa included)
 is a safe general default even though Hayabusa itself was not observed to require it.
 
-**Output paths:** `<out>/<host>/Hayabusa/timeline.csv` (csv), `<out>/<host>/Hayabusa/timeline.jsonl`
-(json), and `<out>/<host>/Hayabusa/logon-summary-successful.csv` /
-`<out>/<host>/Hayabusa/logon-summary-failed.csv` (logon-summary — confirmed exact suffixes
+**Output paths depend on `--layout`.** Under the default `--layout velo`, Hayabusa's own
+Velo category (`VELO_CATEGORY = "EventLogs"` in
+`crates/triage-orchestrator/src/external/tools/hayabusa.rs`) puts its output directly in
+`<out>/Processed-<HOST>-<stamp>/EventLogs/`, alongside `EvtxTriage`'s own output — confirmed on
+a real capture with the real 4.0.0 binary: `timeline.csv`, `timeline.jsonl`,
+`logon-summary-successful.csv`, `logon-summary-failed.csv` all land there. Under
+`--layout native`, the legacy per-host layout applies instead:
+`<out>/<output_id>/Hayabusa/timeline.csv` (csv), `<out>/<output_id>/Hayabusa/timeline.jsonl` (json), and
+`<out>/<output_id>/Hayabusa/logon-summary-successful.csv` /
+`<out>/<output_id>/Hayabusa/logon-summary-failed.csv` (logon-summary — confirmed exact suffixes
 against the real 4.0.0 binary; neither file is written at all if no logon events are found in
-the scanned logs), under the same per-host output root as every other TriageSuite tool's nested
-layout. The orchestrator creates the `Hayabusa/` directory itself before each invocation, and for
-`logon-summary` discovers the actual file(s) written by listing that directory for names starting
-with the given prefix rather than assuming the exact suffixes (`files_with_prefix()` in
-`external.rs`) — a deliberate hedge against Hayabusa changing them in a future release, the same
-class of drift that broke `csv-timeline`/`json-timeline` in 4.0.
+the scanned logs). The orchestrator creates the output directory itself before each invocation,
+and for `logon-summary` discovers the actual file(s) written by listing that directory for names
+starting with the given prefix rather than assuming the exact suffixes
+(`files_with_prefix()` in `crates/triage-orchestrator/src/external/invoke.rs`) — a deliberate
+hedge against Hayabusa changing them in a future release, the same class of drift that broke
+`csv-timeline`/`json-timeline` in 4.0.
 
 **Chaining to Takajo:** if `takajo.enabled` and Hayabusa's `json`-triggered `dfir-timeline`
 invocation actually
 produced a `.jsonl` file on disk (checked with a real filesystem existence check, not merely a
 zero exit code), the orchestrator runs `takajo automagic -t <that .jsonl file> -o
-<out>/<host>/Takajo/ [--level] [--displayTable]` immediately after. If `takajo.enabled` but
+<Takajo output dir> [--level] [--displayTable]` immediately after -- `<out>/Processed-<HOST>-<stamp>/ThreatHunting`
+under `--layout velo`, `<out>/<output_id>/Takajo` under `--layout native` (see `docs/tools/Takajo.md`).
+If `takajo.enabled` but
 Hayabusa produced no JSONL for that host (disabled, not found, or failed), a report is still
 recorded explaining the skip rather than silently omitting Takajo from the manifest. Config-time
 validation additionally rejects `takajo.enabled = true` combined with an explicit
@@ -205,7 +223,8 @@ validation additionally rejects `takajo.enabled = true` combined with an explici
 ## Manifest reporting
 
 Each Hayabusa invocation attempted contributes one `ExternalToolReport` entry
-(`crates/triage-orchestrator/src/external.rs`) to the run manifest, shaped as:
+(`crates/triage-orchestrator/src/external/report.rs`) to the run manifest, shaped as (real values
+from a run under the default `--layout velo`):
 
 ```json
 {
@@ -213,10 +232,16 @@ Each Hayabusa invocation attempted contributes one `ExternalToolReport` entry
   "found": true,
   "invoked": true,
   "exit_code": 0,
-  "output_paths": ["<out>/<host>/Hayabusa/timeline.csv"],
-  "error": null
+  "output_paths": ["<abs-out>/Processed-HOST-<stamp>/EventLogs/timeline.csv"]
 }
 ```
+
+`error` is omitted from a successful entry rather than serialized as `null`, and the paths are
+absolute whatever `--out` was given -- `<abs-out>` above stands in for the absolute output
+root. Under `--layout native`, `output_paths` is
+`["<abs-out>/<output_id>/Hayabusa/timeline.csv"]` instead -- `output_id`, the filesystem-safe
+per-collection directory name the manifest records, never the raw hostname, so a machine
+collected twice keeps a stable directory per collection (`external::driver`).
 
 - `tool` — `"hayabusa-csv"`, `"hayabusa-json"`, and `"hayabusa-logon-summary"` for the three
   invocation modes (a bare `"hayabusa"` entry is used only for the not-found case, before any
@@ -242,6 +267,18 @@ error case when Hayabusa didn't hand it usable input.
 Every external-tool invocation also prints a line to stderr as it finishes
 (`ProgressUi::external_tool_finished`, always shown regardless of `--no-progress` — this is not
 a decoration) instead of only landing silently in `run_manifest.json`:
+
+Under the default `--layout velo` (real output from a run with real Hayabusa 4.0.0 / Takajo
+2.16.1 binaries):
+
+```
+✔ hayabusa-csv -> /out/Processed-HOSTX-<stamp>/EventLogs/timeline.csv
+✔ hayabusa-json -> /out/Processed-HOSTX-<stamp>/EventLogs/timeline.jsonl
+✔ hayabusa-logon-summary -> /out/Processed-HOSTX-<stamp>/EventLogs/logon-summary-failed.csv, /out/Processed-HOSTX-<stamp>/EventLogs/logon-summary-successful.csv
+✔ takajo-automagic -> /out/Processed-HOSTX-<stamp>/ThreatHunting
+```
+
+Under `--layout native`:
 
 ```
 ✔ hayabusa-csv -> /out/HOSTX/Hayabusa/timeline.csv

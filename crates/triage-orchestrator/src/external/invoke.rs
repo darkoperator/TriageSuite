@@ -17,18 +17,33 @@ pub fn resolve_bin(configured: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// The raw stdout/stderr an invocation produced, kept separate from
+/// `ExternalToolReport` (which is serialized straight into the run manifest)
+/// so a chatty tool's full output never inflates that file — this is only
+/// for the process log. Empty for an invocation that never started (`invoke`'s
+/// `Err(e)` arm below): there is no process output to have captured.
+#[derive(Debug, Default, Clone)]
+pub(super) struct CapturedOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
 /// Run `bin` with `args` to completion and fold the outcome into a report.
 ///
 /// `find_outputs` is called only when the process exits successfully, and decides what
 /// counts as "this tool's output" — a single file/dir existence check for most tools, or
 /// a directory glob for logon-summary (which writes a variable number of `<prefix>-*.csv`
 /// files, none at all if it found nothing to summarize).
+///
+/// Also returns the process's raw stdout/stderr as `CapturedOutput`, so the
+/// caller can write it into `process_logs/<tool>.log` — the process log's
+/// value for an external tool is its real captured output, not a summary.
 pub(super) fn invoke(
     bin: &Path,
     args: &[OsString],
     tool: &str,
     find_outputs: impl FnOnce() -> Vec<PathBuf>,
-) -> ExternalToolReport {
+) -> (ExternalToolReport, CapturedOutput) {
     let mut cmd = Command::new(bin);
     cmd.args(args);
     // No external tool is ever attached to a terminal here, and one that decides
@@ -49,35 +64,49 @@ pub(super) fn invoke(
         Ok(out) => {
             let ok = out.status.success();
             // Only claim output paths in the manifest if they actually exist on disk —
-            // a zero exit code alone doesn't guarantee the tool wrote anything (see
-            // execute.rs's `result.output_paths.retain(|path| path.exists());` for the
-            // same convention).
+            // a zero exit code alone doesn't guarantee the tool wrote anything. An
+            // external tool's files are all this side can check: unlike the in-process
+            // router, which reports the destinations it published
+            // (`OutputRouter::finish`), a child process tells us nothing but its exit
+            // code.
             let output_paths = if ok { find_outputs() } else { Vec::new() };
+            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+            let stderr_text = String::from_utf8_lossy(&out.stderr).into_owned();
             let error = (!ok).then(|| {
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                if stderr.is_empty() {
+                let trimmed = stderr_text.trim();
+                if trimmed.is_empty() {
                     format!("exited with status {:?}", out.status.code())
                 } else {
-                    stderr
+                    trimmed.to_string()
                 }
             });
-            ExternalToolReport {
+            let report = ExternalToolReport {
                 tool: tool.to_string(),
                 found: true,
                 invoked: true,
                 exit_code: out.status.code(),
                 output_paths,
                 error,
-            }
+            };
+            (
+                report,
+                CapturedOutput {
+                    stdout,
+                    stderr: stderr_text,
+                },
+            )
         }
-        Err(e) => ExternalToolReport {
-            tool: tool.to_string(),
-            found: true,
-            invoked: false,
-            exit_code: None,
-            output_paths: Vec::new(),
-            error: Some(e.to_string()),
-        },
+        Err(e) => (
+            ExternalToolReport {
+                tool: tool.to_string(),
+                found: true,
+                invoked: false,
+                exit_code: None,
+                output_paths: Vec::new(),
+                error: Some(e.to_string()),
+            },
+            CapturedOutput::default(),
+        ),
     }
 }
 

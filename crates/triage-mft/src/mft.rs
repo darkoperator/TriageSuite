@@ -724,6 +724,10 @@ fn parse_record_rows(
     rows
 }
 
+// Each parameter is a distinct MFT attribute stream or lookup table read from
+// a different part of the record; they have no shared owner to bundle into
+// short of MftRecord itself, which is what this function builds.
+#[allow(clippy::too_many_arguments)]
 fn build_mft_record(
     header: &FileRecordHeader,
     standard_information: &StandardInformation,

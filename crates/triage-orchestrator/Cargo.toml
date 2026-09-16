@@ -35,9 +35,16 @@ browser-triage = { path = "../browser-triage" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+csv = { workspace = true }
 globset = { workspace = true }
 chrono = { workspace = true }
 toml = { workspace = true }
+# Only for converting a run's --start/--end (chrono, matching the manifest
+# and CLI) into EvtxTriage's `ParseOptions` (the `time` crate, matching
+# EvtxTriage's own CLI) -- there is no direct conversion between the two
+# crates' datetime types, so the round trip goes through RFC3339 text.
+time = { version = "0.3", features = ["parsing"] }
+sha2 = { workspace = true }
 console = "0.15"
 zip = { workspace = true }
 # Not used directly: supplies zip's deflate backend. See the note in the
@@ -49,3 +56,17 @@ tempfile = { workspace = true }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 triage-testkit = { path = "../triage-testkit" }
+# Standalone binaries never registered in registry::ALL_KEYS (they run
+# outside the capture-triage flow: LolTriage/SrumNetTriage post-process other
+# tools' CSV output, AnyDeskTriage has no discovery integration yet). The
+# Velo basename guard test constructs them directly so their datasets are
+# still checked.
+lol-triage = { path = "../lol-triage" }
+anydesk-triage = { path = "../anydesk-triage" }
+srum-net-triage = { path = "../srum-net-triage" }
+# Test-only: `velo_layout.rs` builds a synthetic `*.automaticDestinations-ms`
+# (an OLE compound file) so a run can reach JLETriage's *second* dataset.
+cfb = { workspace = true }
+
+[lints]
+workspace = true

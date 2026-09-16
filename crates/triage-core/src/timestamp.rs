@@ -123,6 +123,60 @@ impl WinTimestamp {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared FILETIME decoding for the `chrono`-based callers
+//
+// Every RECmd plugin used to carry its own copy of these three functions,
+// byte-identical across ~25 files. A decode rule that is copy-pasted is a
+// decode rule that gets corrected in one place and left wrong in twenty-four,
+// so they live here and the plugins import them.
+// ---------------------------------------------------------------------------
+
+/// A Windows FILETIME expressed in 100ns ticks since 1601-01-01 UTC.
+///
+/// Takes `i128` so both representations pass unchanged: registry values read
+/// as `i64` and `$MFT`/artifact fields read as `u64`. A negative tick count is
+/// not a time — it is a misread field — and maps to `None` rather than to a
+/// plausible-looking pre-1601 instant. Anything past 9999-12-31 maps to `None`
+/// for the same reason and because it cannot be rendered with a 4-digit year.
+///
+/// Tick 0 is *not* treated as unset here: callers differ (Chromium's 0 means
+/// "never", a registry LastWrite of 0 means the 1601 epoch), so each applies
+/// its own sentinel policy before calling. `WinTimestamp::from_filetime` is the
+/// variant that maps 0 to absent.
+pub fn filetime_to_datetime(ticks: i128) -> Option<DateTime<Utc>> {
+    if ticks < 0 || ticks > FILETIME_MAX as i128 {
+        return None;
+    }
+    let secs = i64::try_from(ticks / 10_000_000).ok()? - FILETIME_UNIX_OFFSET_SECS;
+    // ticks >= 0, so the remainder is non-negative and the cast cannot wrap.
+    let nanos = u32::try_from((ticks % 10_000_000) * 100).ok()?;
+    DateTime::from_timestamp(secs, nanos)
+}
+
+/// The suite's standard rendering: ISO 8601 UTC, 7 fractional digits, `Z`.
+pub fn dt_to_iso8601(dt: DateTime<Utc>) -> String {
+    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
+}
+
+/// RECmd's literal `yyyy-MM-dd HH:mm:ss.fffffff` (UTC, no zone marker), which
+/// is C#'s `.ToString("yyyy-MM-dd HH:mm:ss.fffffff")`.
+///
+/// Required verbatim for timestamps embedded in free-text columns
+/// (`ValueData`/`ValueData2`/detail cells): the compat harness normalizes only
+/// standalone timestamp columns, so an embedded one must match byte for byte.
+/// chrono has no `%.7f`, hence the explicit 100ns tick formatting.
+pub fn dt_to_recmd_literal(dt: DateTime<Utc>) -> String {
+    let ticks = dt.timestamp_subsec_nanos() / 100;
+    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
+}
+
+/// FILETIME ticks straight to the RECmd literal form. `None` on any tick count
+/// [`filetime_to_datetime`] rejects.
+pub fn filetime_to_recmd_literal(ticks: i128) -> Option<String> {
+    filetime_to_datetime(ticks).map(dt_to_recmd_literal)
+}
+
 /// An unset timestamp. Spelled out rather than derived so it is unmistakable
 /// that the default is "absent", never the 1601 or 1970 epoch — the same rule
 /// the constructors follow for their zero sentinels.

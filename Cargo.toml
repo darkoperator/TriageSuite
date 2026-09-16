@@ -9,6 +9,35 @@ edition = "2021"
 authors = ["Carlos (DarkOperator) Perez <carlos_perez@darkoperator.com>"]
 license = "MIT"
 
+# Lints applied to every workspace member (each crate opts in with
+# `[lints] workspace = true`). Kept to rules the tree already satisfies, so a
+# violation always means new debt rather than a pre-existing backlog.
+#
+# Deliberately NOT enabled yet: unwrap_used, expect_used, indexing_slicing and
+# arithmetic_side_effects. They are the right lints for a parser reading
+# hostile evidence -- the i64::MIN.abs() panic in chromium/logins.rs is exactly
+# what arithmetic_side_effects flags -- but browser-triage alone has ~40 hits,
+# nearly all of them counter increments and length-checked slices. Turning them
+# on today would produce a wall of #[allow]s, which is the opposite of the
+# point. The boundary-value harness in triage-testkit covers that class in the
+# meantime; enable these per crate as each one is cleaned.
+[workspace.lints.rust]
+# The suite parses attacker-controlled evidence. There is no unsafe block in
+# the tree today and none is needed; forbid (not deny) so a crate cannot
+# re-enable it locally.
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Debugging leftovers must never reach a release binary.
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+# Decode tables are written as bit constants transcribed from an upstream
+# header; a mistyped suffix or an odd digit grouping is how a transcription
+# error hides in plain sight.
+mistyped_literal_suffixes = "deny"
+unusual_byte_groupings = "deny"
+
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

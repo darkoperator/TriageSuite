@@ -1,0 +1,5 @@
+# Seven parameters is where the orchestrator's build() sat when the default
+# threshold (7 = warn at 8) stayed quiet and the signature shipped. At 6 the
+# lint fires on that shape, and scripts/check-allow-justifications.sh makes
+# every remaining silence state its reason.
+too-many-arguments-threshold = 6

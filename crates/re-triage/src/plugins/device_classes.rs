@@ -27,7 +27,7 @@
 //!   ValueData3 = ""
 
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -45,20 +45,6 @@ const ALLOWED_GUIDS: &[&str] = &[
 fn is_allowed_guid(name: &str) -> bool {
     let lower = name.to_lowercase();
     ALLOWED_GUIDS.iter().any(|g| *g == lower)
-}
-
-/// Convert a chrono::DateTime<Utc> to RECmd literal "yyyy-MM-dd HH:mm:ss.fffffff"
-/// for embedded ValueData2 text (not normalized by testkit).
-fn dt_to_recmd_literal(dt: chrono::DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
-
-/// Convert chrono::DateTime<Utc> to ISO-8601 UTC (standalone Timestamp column,
-/// normalized by testkit from RECmd's space-separated format).
-fn dt_to_iso8601(dt: chrono::DateTime<chrono::Utc>) -> String {
-    let ts = WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos());
-    ts.to_string()
 }
 
 /// Parse device key name to (Type, Name, SerialNumber), replicating C# ParseData exactly.

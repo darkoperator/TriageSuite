@@ -272,6 +272,19 @@ mod tests {
         assert_eq!(decode(LOCATIONS, None), "");
     }
 
+    /// The bitmask decoder takes a value straight from `Preferences` JSON,
+    /// where nothing constrains it to the bits the header defines.
+    #[test]
+    fn the_bitmask_decoders_are_total() {
+        use triage_testkit::boundary::{assert_total, EXTREME_I64};
+        assert_total("decode_bitmask", EXTREME_I64, |v| decode_bitmask(Some(v)));
+        assert_total("decode(DISABLE_REASONS)", EXTREME_I64, |v| {
+            decode(DISABLE_REASONS, Some(v))
+        });
+        assert_eq!(decode_bitmask(None), "");
+        assert_eq!(decode_bitmask(Some(0)), "");
+    }
+
     /// Pinned to `extensions/browser/disable_reason.h`. The shift numbers skip
     /// retired reasons, so these are asserted individually rather than against
     /// the table, which is how a doubled-from-the-previous-entry table shipped

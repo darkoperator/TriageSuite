@@ -6,8 +6,14 @@ use crate::external::tool::{
 use std::ffi::OsString;
 use std::path::Path;
 
-/// Output subdirectory under each host's output root.
+/// Output subdirectory under each host's output root, `--layout native` only.
 const DIR: &str = "Hayabusa";
+
+/// Forensic category Hayabusa's timeline belongs in under `--layout velo`
+/// (`crate::velo::category_for_key`'s design, extended to external tools:
+/// there is no `"hayabusa"` registry key to look up there, so the category
+/// is named directly here instead).
+const VELO_CATEGORY: &str = "EventLogs";
 
 /// `logon-summary`'s `--output` is a filename prefix, not a file — Hayabusa
 /// derives a variable number of `<prefix>-*.csv` names from it.
@@ -47,7 +53,10 @@ impl ExternalTool for Hayabusa {
         _prior: &Artifacts,
     ) -> Vec<Invocation> {
         let hayabusa = &cfg.hayabusa;
-        let dir = ctx.host_dir.join(DIR);
+        let dir = match &ctx.velo_dir {
+            Some(collection_dir) => collection_dir.join(VELO_CATEGORY),
+            None => ctx.host_dir.join(DIR),
+        };
         let input = &ctx.host.artifact_root;
         let mut plan = Vec::new();
 

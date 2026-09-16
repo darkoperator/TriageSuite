@@ -92,6 +92,40 @@ datasets derive their name from it via a suffix (`_HourlyFingerprint`,
 `_SessionSummary`), the same convention `SrumETriage` uses for its own multi-dataset
 output.
 
+### No Velo layout
+
+SrumNetTriage is a standalone second-pass CLI, not wired into `TriageSuite run`'s tool
+registry (`ALL_KEYS` in `crates/triage-orchestrator/src/registry.rs` has no `srumnet` entry),
+and its own CLI only ever constructs `OutputLayoutMode::Flat` or `::Nested`
+(`crates/srum-net-triage/src/lib.rs`) -- there is no `--layout` flag on standalone
+SrumNetTriage and no `velo` mode it can select. Run it as a second pass over a Velo-layout
+`TriageSuite run` output tree's `SrumETriage_results_NetworkUsages*.csv` /
+`_NetworkConnections*.csv` files exactly as shown above.
+
+**The bundled Timeline Explorer sessions already expect this output.** The
+`Network_And_Browser` session in `resources/velo/TimelineExplorerSessions.json` names
+`SystemActivity/*_SrumNetTriage_results*.csv`, which no `TriageSuite run` can produce -- the
+session is written without it, and an empty-looking result there means the second pass has not
+been run, not that the pattern is wrong. To land output the pattern matches, write into the
+`SystemActivity/` category with a `--csvf` basename carrying a 14-digit run-stamp prefix:
+
+```bash
+C=<out>/Processed-<HOST>-<stamp>
+SrumNetTriage -d "$C" --csv "$C/SystemActivity" \
+    --csvf "<yyyyMMddHHmmss>_SrumNetTriage_results.csv"
+```
+
+Verified on a real tree: the names that produces are the ones the pattern's trailing `*`
+absorbs -- `system_<stamp>_SrumNetTriage_results.csv`, `..._results_HourlyFingerprint.csv` and
+`..._results_SessionSummary.csv`. *Which* of the three appear is evidence-dependent, as
+everywhere else in this tree: a run over a tree with `NetworkConnections` output but no
+`NetworkUsages` produces only the `SessionSummary` file. The stamp prefix is what makes the flat
+layout put the
+identity label in front rather than before the extension (`OutputLayout::flat_filename`); with
+no `--csvf` the same run writes `system_<stamp>_SrumNetTriage_DailySummary_Output.csv`,
+`..._HourlyFingerprint_Output.csv` and `..._SessionSummary_Output.csv`, none of which that
+pattern matches. See "Timeline Explorer sessions" in `docs/tools/TriageSuite.md`.
+
 ## What it reads
 
 A `.csv` file is accepted only if its header line matches one of two known exact

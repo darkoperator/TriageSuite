@@ -100,6 +100,20 @@ Each dataset is a single output file per run — when a directory scan (`-d`) di
 per-dataset file, distinguished by the `SourceFile` column (see
 [Multi-drive captures](#multi-drive-captures)).
 
+### Velo layout
+
+Under the default `--layout velo`, MFTriage's output lands in
+`Processed-<HOST>-<stamp>/FileSystem/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_MFTriage_results_$MFT.csv` | one row per `$MFT` record |
+| `<stamp>_MFTriage_results_$MFT_FileListing.csv` | only emitted with `--fl` |
+| `<stamp>_MFTriage_results_$J.csv` | one row per `$UsnJrnl:$J` record |
+| `<stamp>_MFTriage_results_$Boot.csv` | one row per `$Boot` record |
+
+There is no `PerUser/` directory and no `TriageUser` column: MFTriage is `Scope::SystemWide`.
+
 ## Output datasets and fields
 
 ### $MFT records (34 columns)

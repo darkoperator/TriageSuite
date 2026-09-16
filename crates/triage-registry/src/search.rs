@@ -65,8 +65,42 @@ impl Matcher {
     }
 }
 
+/// Which HitTypes a search pass tests. Named fields rather than three
+/// positional `bool`s: at a call site `(true, false, false)` and
+/// `(false, true, false)` look alike, and swapping two of them silently
+/// searches the wrong thing rather than failing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SearchTargets {
+    pub keys: bool,
+    pub value_names: bool,
+    pub value_data: bool,
+}
+
+impl SearchTargets {
+    pub fn keys() -> Self {
+        SearchTargets {
+            keys: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn value_names() -> Self {
+        SearchTargets {
+            value_names: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn value_data() -> Self {
+        SearchTargets {
+            value_data: true,
+            ..Default::default()
+        }
+    }
+}
+
 /// Search every key/value in `subtree_root` (preorder), collecting hits.
-/// `hive` provides subkey reads; selects which HitTypes to test.
+/// `hive` provides subkey reads; `targets` selects which HitTypes to test.
 ///
 /// NOTE: value slack (HitType::ValueSlack) is not collected here because
 /// notatin does not publicly expose value slack bytes. This is a documented
@@ -75,11 +109,14 @@ pub fn search_subtree(
     hive: &mut crate::hive::Hive,
     root: CellKeyNode,
     matcher: &Matcher,
-    search_keys: bool,
-    search_value_names: bool,
-    search_value_data: bool,
+    targets: SearchTargets,
     min_size: usize,
 ) -> Vec<SearchHit> {
+    let SearchTargets {
+        keys: search_keys,
+        value_names: search_value_names,
+        value_data: search_value_data,
+    } = targets;
     let mut hits = Vec::new();
     let mut stack = vec![root];
     while let Some(mut key) = stack.pop() {

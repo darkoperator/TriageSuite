@@ -22,9 +22,13 @@ chrono.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+triage-testkit = { path = "../triage-testkit" }
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
 # Synthetic fixtures only. rusqlite is already in the build graph via
 # triage-sqlite, so this costs no extra compilation.
 rusqlite.workspace = true
+
+[lints]
+workspace = true

@@ -27,7 +27,7 @@
 //! ISO-8601 UTC. We emit ISO-8601 UTC directly — no AcceptedDelta needed.
 
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::dt_to_iso8601;
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 use triage_registry::value::plugin_raw_bytes;
@@ -65,12 +65,6 @@ fn decode_utf16le(raw: &[u8]) -> String {
     String::from_utf16_lossy(&words)
         .trim_end_matches('\0')
         .to_string()
-}
-
-/// Format a `DateTime<Utc>` as ISO-8601 UTC with 7 fractional digits.
-/// Used for the standalone `LastWriteTimestamp` detail column.
-fn dt_to_iso8601(dt: chrono::DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
 }
 
 /// Extract raw bytes from a CellKeyValue — handles both Binary (MRUListEx)

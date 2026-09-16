@@ -8,9 +8,8 @@
 //! Detail-CSV column order (fixture-authoritative):
 //!   KeyName, BatchKeyPath, Filename, BatchValueName, LastDetectionTime
 
-use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -19,30 +18,23 @@ pub struct Radar;
 /// Parse a decimal file-time string (as stored in RADAR's LastDetectionTime value)
 /// to ISO-8601 UTC.
 fn filetime_str_to_iso8601(value_data: &str) -> Option<String> {
-    let ft = value_data.parse::<i64>().ok()?;
-    if ft <= 0 {
-        return None;
-    }
-    let ft = ft as u64;
-    let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    let dt: DateTime<chrono::Utc> = DateTime::from_timestamp(secs, nanos)?;
-    Some(WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string())
+    filetime_str(value_data).map(dt_to_iso8601)
 }
 
 /// Parse a decimal file-time string to RECmd literal `yyyy-MM-dd HH:mm:ss.fffffff`.
 /// Used in BatchValueData2 (embedded, not normalized by testkit).
 fn filetime_str_to_recmd_literal(value_data: &str) -> Option<String> {
+    filetime_str(value_data).map(dt_to_recmd_literal)
+}
+
+/// RADAR stores LastDetectionTime as a decimal FILETIME string. 0 is the
+/// unset sentinel here (not the 1601 epoch), so it is rejected before decoding.
+fn filetime_str(value_data: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     let ft = value_data.parse::<i64>().ok()?;
     if ft <= 0 {
         return None;
     }
-    let ft = ft as u64;
-    let secs = (ft / 10_000_000) as i64 - 11_644_473_600;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    let dt: DateTime<chrono::Utc> = DateTime::from_timestamp(secs, nanos)?;
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    Some(format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks))
+    filetime_to_datetime(ft as i128)
 }
 
 fn get_str_value(key: &CellKeyNode, name: &str) -> String {

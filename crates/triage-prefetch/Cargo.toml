@@ -9,3 +9,6 @@ description = "Windows Prefetch file format parser (versions 17-31, MAM decompre
 [dependencies]
 thiserror.workspace = true
 xpress-huffman.workspace = true
+
+[lints]
+workspace = true

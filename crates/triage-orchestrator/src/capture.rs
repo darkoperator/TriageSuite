@@ -14,6 +14,14 @@ const UNKNOWN_OS: &str = "unknown";
 pub enum CaptureType {
     Velociraptor,
     Raw,
+    /// No capture was identified at all: the input was rejected before any
+    /// collection was found in it. Recorded rather than guessed, because a
+    /// rejection manifest claiming `velociraptor` would assert an
+    /// identification that never happened — the same class of false claim
+    /// `size_bytes: null` and `sha256: null` exist to avoid elsewhere in
+    /// this manifest. Only ever appears alongside an empty `hosts[]` and
+    /// `final_exit_status: 3`.
+    Unidentified,
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +45,9 @@ struct ClientInfo {
     platform_version: Option<String>,
 }
 
-fn is_collection(dir: &Path) -> bool {
+/// Is this directory itself a Velociraptor collection, as opposed to a
+/// folder that merely holds some?
+pub fn is_collection(dir: &Path) -> bool {
     COLLECTION_MARKERS.iter().all(|m| dir.join(m).is_file())
 }
 

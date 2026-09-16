@@ -31,7 +31,7 @@
 
 use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal, filetime_to_datetime};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
@@ -39,33 +39,12 @@ pub struct WindowsApp;
 
 // ─── Timestamp helpers ────────────────────────────────────────────────────────
 
-/// Convert a Windows FILETIME (100-ns ticks since 1601-01-01 UTC) to UTC DateTime.
-fn filetime_to_datetime(ft: i64) -> Option<DateTime<chrono::Utc>> {
-    const FILETIME_TO_UNIX_SECS: i64 = 11_644_473_600;
-    let secs = (ft / 10_000_000) - FILETIME_TO_UNIX_SECS;
-    let nanos = ((ft % 10_000_000) * 100) as u32;
-    DateTime::from_timestamp(secs, nanos)
-}
-
 /// Parse the `InstallTime` string value (a decimal integer FILETIME) and convert
 /// to UTC DateTime. Mirrors C# `GetDateTimeOffset`:
 ///   `DateTime.FromFileTime(Convert.ToInt64(timestamp)).ToUniversalTime()`.
 fn parse_install_time(s: &str) -> Option<DateTime<chrono::Utc>> {
     let ft: i64 = s.trim().parse().ok()?;
-    filetime_to_datetime(ft)
-}
-
-/// Format `DateTime<Utc>` as RECmd's literal "yyyy-MM-dd HH:mm:ss.fffffff".
-/// Used in the embedded free-text "InstallTime: ..." ValueData2 field.
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{ticks:07}", dt.format("%Y-%m-%d %H:%M:%S"))
-}
-
-/// Format `DateTime<Utc>` as ISO-8601 UTC with 7 fractional digits.
-/// Used for the standalone `InstallTime` detail column (auto-normalized).
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
+    filetime_to_datetime(ft as i128)
 }
 
 // ─── RegistryPlugin impl ──────────────────────────────────────────────────────
@@ -232,7 +211,7 @@ mod tests {
     fn dt_to_recmd_literal_format() {
         // 2024-04-16 18:26:14.0416864
         let ft: i64 = 133_577_655_740_416_864;
-        let dt = filetime_to_datetime(ft).unwrap();
+        let dt = filetime_to_datetime(ft as i128).unwrap();
         let s = dt_to_recmd_literal(dt);
         assert_eq!(s, "2024-04-16 18:26:14.0416864");
     }

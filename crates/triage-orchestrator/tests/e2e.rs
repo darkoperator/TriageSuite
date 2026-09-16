@@ -5,6 +5,11 @@
 //! index -> per-tool execution -> manifest assembly/write) is wired
 //! end-to-end, even though every tool legitimately reports zero matches
 //! over this deliberately empty capture.
+//!
+//! Runs with `--no-validate`. "Every tool legitimately reports zero matches"
+//! above is the assertion, and it only holds while the capture is empty:
+//! the placeholder hives and EVTX that would satisfy the pre-flight gate
+//! (`synthetic::write_gate_passing_collection`) would be parsed and fail.
 
 use assert_cmd::Command;
 use std::fs;
@@ -22,6 +27,7 @@ fn run_over_a_synthetic_collection_produces_manifest_and_output() {
         .unwrap()
         .args([
             "run",
+            "--no-validate",
             coll.to_str().unwrap(),
             "--out",
             out.to_str().unwrap(),

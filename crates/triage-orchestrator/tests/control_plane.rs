@@ -1,7 +1,16 @@
+//! Control-plane contracts for `run`: how a tool's failures are accounted
+//! for in the manifest and its exit status, and how a hostile hostname is
+//! kept out of the output path.
+//!
+//! `manifest_preserves_host_and_uses_safe_output_id` uses the gate-passing
+//! collection (`synthetic::write_gate_passing_collection`) so it runs with
+//! the pre-flight gate active; `corrupt_only_run_exits_six_and_audits_failure`
+//! cannot, for the reason stated at its own `--no-validate`.
+
 use assert_cmd::Command;
 use serde_json::Value;
 use std::fs;
-use triage_testkit::synthetic::write_collection;
+use triage_testkit::synthetic::write_gate_passing_collection;
 
 #[test]
 fn corrupt_only_run_exits_six_and_audits_failure() {
@@ -18,6 +27,11 @@ fn corrupt_only_run_exits_six_and_audits_failure() {
             capture.to_str().unwrap(),
             "--out",
             out.to_str().unwrap(),
+            // A bare directory holding one corrupt Prefetch file: a raw
+            // capture with no hives and no event logs, deliberately, because
+            // the point is a tool's failure accounting and not a collection's
+            // completeness. The pre-flight gate would reject it first.
+            "--no-validate",
             "--only",
             "pe",
         ])
@@ -35,7 +49,7 @@ fn corrupt_only_run_exits_six_and_audits_failure() {
 fn manifest_preserves_host_and_uses_safe_output_id() {
     let temp = tempfile::tempdir().unwrap();
     let collection = temp.path().join("Collection-hostile");
-    write_collection(&collection, "../CON");
+    write_gate_passing_collection(&collection, "../CON");
     let out = temp.path().join("out");
 
     Command::cargo_bin("TriageSuite")

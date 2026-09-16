@@ -115,29 +115,45 @@ invoke Takajo by hand outside of TriageSuite.
 2. **`automagic -o` refuses to write into a directory that already exists**, failing with
    "Please specify a new folder name." Takajo creates its own leaf output directory and expects
    only the *parent* to exist beforehand. The orchestrator never pre-creates Takajo's own output
-   folder (`<out>/<host>/Takajo/`) — it only `create_dir_all`s the host directory
-   (`<out>/<host>/`) that folder will live under, and lets Takajo create the `Takajo/` leaf
+   folder (`<out>/<output_id>/Takajo/`) — it only `create_dir_all`s the host directory
+   (`<out>/<output_id>/`) that folder will live under, and lets Takajo create the `Takajo/` leaf
    itself. If you run `automagic -o` manually, make sure the target directory does not already
    exist.
 
 ## Output layout
 
+Under the default `--layout velo`, Takajo's own Velo category
+(`VELO_CATEGORY = "ThreatHunting"` in `crates/triage-orchestrator/src/external/tools/takajo.rs`)
+puts the automagic tree directly at:
+
 ```
-<out>/<host>/Takajo/
+<out>/Processed-<HOST>-<stamp>/ThreatHunting/
 ```
 
-This directory is created by Takajo itself (see above), not pre-created by the orchestrator.
-Its exact contents depend on what `automagic` finds relevant in the Hayabusa results for that
-host — typically some combination of `stack-*.csv` aggregation files, `Timeline*.csv` views,
-`TTPSummary.csv`, `Metrics*.csv`, and similar analysis outputs. The orchestrator does not
+— a category no in-process TriageSuite tool otherwise writes to. Under `--layout native`:
+
+```
+<out>/<output_id>/Takajo/
+```
+
+Either way, this directory is created by Takajo itself (see above), not pre-created by the
+orchestrator. Its exact contents depend on what `automagic` finds relevant in the Hayabusa
+results for that host — confirmed on a real capture with the real 2.16.1 binary: `ListDomains.txt`,
+`ListHashes-*.txt`, `Stack*.csv` aggregation files, `Timeline*.csv` views, `TTPSummary.csv`,
+`MetricsUsers.csv`, `scriptblock-logs/`, and similar analysis outputs. The orchestrator does not
 enumerate or validate individual files inside this directory; it treats the directory itself as
 the output artifact and records it in the manifest only if it exists on disk after the
 subprocess exits successfully.
 
+`ctx.velo_dir` (the run's Velo collection directory) drives the velo-layout path; `ctx.host_dir`
+(always `out_root.join(&host.output_id)`) drives the native-layout path — `Takajo::plan()`
+picks between them the same way `Hayabusa::plan()` does (see `docs/tools/Hayabusa.md`).
+
 ## Manifest reporting
 
 Each Takajo invocation attempt produces one `ExternalToolReport` entry
-(`crates/triage-orchestrator/src/external.rs`):
+(`crates/triage-orchestrator/src/external/report.rs`). Real values from a run under the default
+`--layout velo`:
 
 ```json
 {
@@ -145,10 +161,16 @@ Each Takajo invocation attempt produces one `ExternalToolReport` entry
   "found": true,
   "invoked": true,
   "exit_code": 0,
-  "output_paths": ["<out>/<host>/Takajo"],
-  "error": null
+  "output_paths": ["<abs-out>/Processed-HOST-<stamp>/ThreatHunting"]
 }
 ```
+
+`error` is omitted from a successful entry rather than serialized as `null`, and the paths are
+absolute whatever `--out` was given -- `<abs-out>` above stands in for the absolute output
+root. Under `--layout native`, `output_paths` is `["<abs-out>/<output_id>/Takajo"]` instead --
+`output_id`, the filesystem-safe per-collection directory name the manifest records, never the
+raw hostname, so a machine collected twice keeps a stable directory per collection
+(`external::driver`).
 
 Field semantics:
 
@@ -157,9 +179,9 @@ Field semantics:
 - `invoked` — whether the subprocess was actually spawned (`false` only if spawning itself
   failed, e.g. permission denied).
 - `exit_code` — the process exit code, if the subprocess ran.
-- `output_paths` — contains `<out>/<host>/Takajo` only if the subprocess exited successfully
-  *and* that path exists on disk afterward; a zero exit code alone is not sufficient to claim
-  the output.
+- `output_paths` — contains the automagic output directory only if the subprocess exited
+  successfully *and* that path exists on disk afterward; a zero exit code alone is not
+  sufficient to claim the output.
 - `error` — populated on failure with the subprocess's trimmed stderr (or a fallback
   `"exited with status ..."` message if stderr was empty), or with a spawn error message.
 

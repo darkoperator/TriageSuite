@@ -95,6 +95,10 @@ fn load_url_chains(db: &Database) -> (BTreeMap<i64, Vec<String>>, Option<String>
     (chains, note)
 }
 
+// One long function on purpose: the download row is assembled from the
+// downloads table, the url-chain map and the note accumulator together, and
+// splitting it would spread the per-column decode decisions across helpers
+// that only ever have one caller.
 #[allow(clippy::too_many_lines)]
 pub fn parse(
     db: &Database,

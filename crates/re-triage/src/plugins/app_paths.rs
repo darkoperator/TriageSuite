@@ -20,34 +20,12 @@
 //!   - "Path"          = Path2 (the search path)
 //!   - LastWriteTime   = Timestamp
 
-use chrono::DateTime;
 use notatin::cell_key_node::CellKeyNode;
-use triage_core::timestamp::WinTimestamp;
+use triage_core::timestamp::{dt_to_iso8601, dt_to_recmd_literal};
 use triage_registry::hive::Hive;
 use triage_registry::plugin::{PluginRow, PluginValue, RegistryPlugin};
 
 pub struct AppPaths;
-
-/// Format a `DateTime<Utc>` in RECmd's `yyyy-MM-dd HH:mm:ss.fffffff` literal.
-///
-/// Used for embedded timestamps inside ValueData2 strings (NOT normalized by
-/// the testkit — must match RECmd's output byte-for-byte). Also mirrors
-/// BamDam's `filetime_to_recmd_literal` convention for the `.fffffff` format
-/// (chrono's `%.7f` panics in 0.4; we compute 100-ns ticks manually).
-fn dt_to_recmd_literal(dt: DateTime<chrono::Utc>) -> String {
-    let ticks = dt.timestamp_subsec_nanos() / 100;
-    format!("{}.{:07}", dt.format("%Y-%m-%d %H:%M:%S"), ticks)
-}
-
-/// Format a `DateTime<Utc>` as ISO-8601 UTC with 7 fractional digits.
-///
-/// Used for standalone timestamp columns in detail CSVs (`Timestamp`). The
-/// testkit normalizes the reference fixture from RECmd's space-separated form
-/// to this ISO-8601 form, so emitting this form means both sides match without
-/// an AcceptedDelta.
-fn dt_to_iso8601(dt: DateTime<chrono::Utc>) -> String {
-    WinTimestamp::from_unix_nanos(dt.timestamp(), dt.timestamp_subsec_nanos()).to_string()
-}
 
 /// One subkey → one PluginRow.
 ///

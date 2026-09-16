@@ -92,6 +92,25 @@ used by the rest of TriageSuite; the exact basenames above are read directly fro
 used instead, appending an identity suffix (e.g. `SrumETriage_NetworkUsages_Output_system.csv`)
 directly under the chosen `--csv`/`--json` root rather than nesting per-tool folders.
 
+### Velo layout
+
+Under the default `--layout velo`, SrumETriage's output lands in
+`Processed-<HOST>-<stamp>/SystemActivity/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_SrumETriage_results_NetworkUsages.csv` | one row per network usage record |
+| `<stamp>_SrumETriage_results_NetworkConnections.csv` | derived dataset |
+| `<stamp>_SrumETriage_results_AppResourceUseInfo.csv` | derived dataset |
+| `<stamp>_SrumETriage_results_PushNotifications.csv` | derived dataset |
+| `<stamp>_SrumETriage_results_EnergyUsage.csv` | derived dataset |
+| `<stamp>_SrumETriage_results_AppTimelineProvider.csv` | derived dataset |
+| `<stamp>_SrumETriage_results_vfuprov.csv` | derived dataset |
+
+There is no `PerUser/` directory and no `TriageUser` column: SrumETriage is
+`Scope::SystemWide` -- per-record user attribution is carried in the `UserName`/`Sid` columns
+of each row instead of the output path.
+
 ## Output datasets and fields
 
 Every dataset shares a common identity/app prefix resolved from the SRUDB's

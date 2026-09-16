@@ -65,6 +65,23 @@ pub fn resolve_identity(
     }
 }
 
+/// One artifact that parsing rejected without aborting the run, kept so a
+/// caller can record *which* file failed and *why*. The standalone runner
+/// only prints these to stderr, which nothing persists; the orchestrator
+/// writes them into the tool's `process_logs/<Tool>.log`, the persistent
+/// per-file record.
+#[derive(Debug)]
+pub struct ParseFailure {
+    pub path: PathBuf,
+    /// The failure text on its own, for a caller that pairs it with `path`.
+    /// A `TriageError::Artifact` names its path in its own `Display`, so
+    /// only its `message` is kept and the caller's line does not repeat the
+    /// path; every other variant is kept whole, because its context (an
+    /// output path, say) is not this artifact's path and trimming would
+    /// lose it.
+    pub reason: String,
+}
+
 /// Outcome of parsing a validated file set (records are computed by the
 /// caller via `router.finish()`, since sinks close there).
 pub struct ParseOutcome {
@@ -72,6 +89,14 @@ pub struct ParseOutcome {
     pub failed: u64,
     pub emitted: u64,
     pub abort: Option<TriageError>,
+    /// The artifact in flight when `abort` was raised. `abort` carries the
+    /// *output* path that failed, not the artifact being read at the time,
+    /// so without this a caller cannot say where parsing stopped.
+    pub aborted_on: Option<PathBuf>,
+    /// Every recoverable failure, in the order encountered -- one per unit
+    /// of `failed`. Not capped: this is the per-file record, and it is
+    /// bounded by the validated file set the caller already holds in memory.
+    pub failures: Vec<ParseFailure>,
 }
 
 /// Parse an already-validated, already-deduped file set through `router`.
@@ -90,6 +115,8 @@ pub fn parse_validated(
         failed: 0,
         emitted: 0,
         abort: None,
+        aborted_on: None,
+        failures: Vec::new(),
     };
     for path in valid {
         let name = path
@@ -114,11 +141,23 @@ pub fn parse_validated(
             }
             Err(e @ TriageError::Output { .. }) => {
                 out.abort = Some(e);
+                out.aborted_on = Some(path.clone());
                 progress.file_done();
                 break;
             }
             Err(e) => {
                 out.failed += 1;
+                // Recorded as well as printed, not instead of: the stderr
+                // warning is the standalone tools' only channel, and this
+                // list is what lets the orchestrator name the file and the
+                // reason in its process log.
+                out.failures.push(ParseFailure {
+                    path: path.clone(),
+                    reason: match &e {
+                        TriageError::Artifact { message, .. } => message.clone(),
+                        other => other.to_string(),
+                    },
+                });
                 eprintln!("Warning: {e}");
             }
         }
@@ -247,7 +286,9 @@ fn run_inner(
     let mut abort = outcome.abort;
 
     // --- Epilogue: always close sinks, finish progress, print summary ---
-    match router.finish() {
+    // Only the record count matters here: this runner has no merge post-pass,
+    // so nothing downstream asks which destinations were published.
+    match router.finish().into_outcome() {
         Ok(records) => summary.records = records,
         Err(e) => {
             let _ = abort.get_or_insert(e);
@@ -351,6 +392,31 @@ mod tests {
         assert_eq!(outcome.failed, 1);
         assert_eq!(outcome.emitted, 1);
         assert!(outcome.abort.is_none());
+    }
+
+    /// A count alone cannot tell a caller which artifact failed, so every
+    /// recoverable failure is also returned with its path and the parser's
+    /// own message -- one entry per unit of `failed`. The message is the
+    /// `Artifact` variant's `message` rather than its whole `Display`,
+    /// because the caller pairs it with `path` itself.
+    #[test]
+    fn parse_validated_returns_the_path_and_reason_of_each_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ok_path = tmp.path().join("ok.txt");
+        let fail_path = tmp.path().join("fail.txt");
+        std::fs::write(&ok_path, b"x").unwrap();
+        std::fs::write(&fail_path, b"x").unwrap();
+        let valid = vec![ok_path, fail_path.clone()];
+
+        let mut router = empty_router();
+        let mut progress = NullProgress;
+        let outcome = parse_validated(&FakeTool, &valid, &mut router, true, &mut progress);
+
+        assert_eq!(outcome.failures.len(), outcome.failed as usize);
+        let failure = &outcome.failures[0];
+        assert_eq!(failure.path, fail_path);
+        assert_eq!(failure.reason, "boom");
+        assert!(outcome.aborted_on.is_none());
     }
 
     #[test]

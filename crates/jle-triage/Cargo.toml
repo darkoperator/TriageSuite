@@ -26,3 +26,6 @@ tempfile.workspace = true
 serde_json.workspace = true
 triage-testkit = { path = "../triage-testkit" }
 csv.workspace = true
+
+[lints]
+workspace = true

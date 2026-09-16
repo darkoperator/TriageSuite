@@ -92,6 +92,24 @@ Pass `--nested-output` to instead get the legacy tree layout
 (`<out>/SumETriage/system/SumETriage_<Dataset>_Output.csv`). `--csvf`/`--jsonf` override the
 basename portion only; the run-stamp and identity folding still apply.
 
+### Velo layout
+
+Under the default `--layout velo`, SumETriage's output lands in
+`Processed-<HOST>-<stamp>/SystemActivity/`:
+
+| File | Contents |
+|---|---|
+| `<stamp>_SumETriage_results_SystemIdentInfo.csv` | one row per system identity record |
+| `<stamp>_SumETriage_results_RoleInfos.csv` | derived dataset |
+| `<stamp>_SumETriage_results_ChainedDbInfo.csv` | derived dataset |
+| `<stamp>_SumETriage_results_Clients.csv` | derived dataset |
+| `<stamp>_SumETriage_results_ClientsDetailed.csv` | derived dataset |
+| `<stamp>_SumETriage_results_DnsInfo.csv` | derived dataset |
+| `<stamp>_SumETriage_results_RoleAccesses.csv` | derived dataset |
+| `<stamp>_SumETriage_results_VmInfo.csv` | derived dataset |
+
+There is no `PerUser/` directory and no `TriageUser` column: SumETriage is `Scope::SystemWide`.
+
 ## Output datasets and fields
 
 Eight datasets are emitted, three from `SystemIdentity.mdb` (the SUMMARY pass) and five

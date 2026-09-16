@@ -81,6 +81,20 @@ Hives whose path contains a recognisable user-profile segment are routed to
 `SBETriage/users/<username>/`; all others go to `SBETriage/system/`. One record set per
 hive is written to the user's directory.
 
+### Velo layout
+
+Under the default `--layout velo`, SBETriage's output lands in
+`Processed-<HOST>-<stamp>/Registry/` (verified against a real run):
+
+| File | Contents |
+|---|---|
+| `<stamp>_SBETriage_results_Shellbags.csv` | every user merged, plus a trailing `TriageUser` column |
+| `PerUser/Shellbags/<stamp>_SBETriage_results_Shellbags_<user>.csv` | one user, columns exactly as documented above |
+
+SBETriage is `Scope::UserSpecific` (`crates/sbe-triage/src/lib.rs`): every shellbag hive is
+per-user, so the category-root file above is always the merge -- unlike a `Scope::UserElseSystem`
+tool, there is no competing system-scope write to collide with it.
+
 ## Output columns (19)
 
 `BagPath`, `Slot`, `NodeSlot`, `MRUPosition`, `AbsolutePath`, `ShellType`, `Value`,

@@ -10,3 +10,6 @@ description = "Windows Shell Link (.lnk) format parser"
 thiserror.workspace = true
 triage-shellitems = { path = "../triage-shellitems" }
 encoding_rs = "0.8"
+
+[lints]
+workspace = true
