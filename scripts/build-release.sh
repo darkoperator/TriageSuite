@@ -67,6 +67,45 @@ else
   TARGETS=("${ALL_TARGETS[@]}")
 fi
 
+# --- File-descriptor headroom for the zig linker. ---
+# macOS ships a 256 soft NOFILE limit in a login shell, and linking the
+# orchestrator through `zig cc` needs more than that: it opens the whole
+# target/<triple>/release/deps directory, and TriageSuite links ~200 rlibs.
+# Under 256 the link dies with
+#   error: unable to open output directory '.../deps': ProcessFdQuotaExceeded
+# which reads like a build error and is not one. Measured on this tree the
+# link starts succeeding between 288 and 320, and that floor rises with every
+# dependency added -- so 512 is the threshold worth warning below, and 8192 is
+# what we ask for: room for cargo to link several binaries at once, and still
+# far below macOS's kern.maxfilesperproc. Raising the *soft* limit toward the
+# hard one needs no privilege. Note the -S: a bare `ulimit -n N` sets the hard
+# limit too, which would cap every child process at N for the rest of the
+# build and cannot be undone. `unlimited` is deliberately not requested:
+# RLIM_INFINITY is its own source of misbehaviour in this toolchain.
+WANT_NOFILE=8192
+cur_nofile="$(ulimit -n)"
+if [[ "$cur_nofile" != "unlimited" && "$cur_nofile" -lt "$WANT_NOFILE" ]]; then
+  hard_nofile="$(ulimit -Hn)"
+  if [[ "$hard_nofile" == "unlimited" || "$hard_nofile" -ge "$WANT_NOFILE" ]]; then
+    ulimit -S -n "$WANT_NOFILE"
+  else
+    ulimit -S -n "$hard_nofile"
+  fi
+  now_nofile="$(ulimit -n)"
+  # A plain `[[ ... ]] && echo` here would be the last command in the branch
+  # on the clamped path, leaving status 1 for `set -e` to abort on. An `if`
+  # has no such status to leak.
+  if [[ "$now_nofile" != "$cur_nofile" ]]; then
+    echo "==> raised open-file limit: $cur_nofile -> $now_nofile"
+  fi
+  if [[ "$now_nofile" -lt 512 ]]; then
+    echo "warning: the open-file limit is $now_nofile and the hard limit" >&2
+    echo "         ($hard_nofile) will not allow more. The zig link step" >&2
+    echo "         wants more headroom than that and may fail with" >&2
+    echo "         ProcessFdQuotaExceeded." >&2
+  fi
+fi
+
 # --- Preflight. ---
 command -v rustup >/dev/null 2>&1 || die "rustup not found"
 need_zig=0
