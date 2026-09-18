@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::Path;
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::timestamp::WinTimestamp;
 use triage_core::tool::{Scope, Tool};
@@ -29,6 +30,24 @@ pub const DATASETS: &[DatasetSpec] = &[DatasetSpec {
     framing: JsonFraming::Ndjson,
     csv_only: false,
     override_suffix: None,
+}];
+
+/// Declared SQL types for the DuckDB view layer. `SourceName`, `FileType`
+/// and `FileName` are free text and stay undeclared.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[DatasetColumnTypes {
+    dataset_id: "main",
+    columns: &[
+        ColumnType {
+            column: "FileSize",
+            sql_type: SqlType::BigInt,
+            time_semantics: None,
+        },
+        ColumnType {
+            column: "DeletedOn",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+    ],
 }];
 
 pub struct RbTool;
@@ -76,6 +95,10 @@ impl Tool for RbTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     /// User-specific: the Attributor already maps `$Recycle.Bin/<SID>/...` to

@@ -1,7 +1,9 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use triage_core::error::RunExit;
+use triage_core::output::duckdb::build::{ExternalOutputs, HostOutputs, ToolOutputs};
 use triage_orchestrator::capture::{CaptureType, HostCapture};
+use triage_orchestrator::duckdb;
 use triage_orchestrator::execute::{self, OutputOpts, ToolRunResult};
 use triage_orchestrator::external::{self, ExternalConfig, ResolvedConfig};
 use triage_orchestrator::file_name_lossy;
@@ -36,6 +38,22 @@ enum Command {
     Validate {
         /// Collector ZIP, folder of ZIPs, or mounted capture directory
         input: PathBuf,
+    },
+    /// Regenerate the DuckDB views for a collection whose output directory
+    /// has moved. Reads only `duckdb/datasets.json`; parses no evidence.
+    Duckdb {
+        #[command(subcommand)]
+        action: DuckdbAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DuckdbAction {
+    /// Re-render views.sql with absolute paths under the current root
+    Regenerate {
+        /// The collection's output root (the directory holding duckdb/)
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -144,6 +162,18 @@ fn main() {
     let exit = match Cli::parse().command {
         Command::Run(args) => run(*args),
         Command::Validate { input } => validate_subcommand(&input),
+        Command::Duckdb { action } => match action {
+            DuckdbAction::Regenerate { out } => match duckdb::regenerate(&out) {
+                Ok(()) => {
+                    println!("regenerated {}", out.join("duckdb/views.sql").display());
+                    RunExit::Success
+                }
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    RunExit::OutputFailure
+                }
+            },
+        },
     };
     std::process::exit(exit.code());
 }
@@ -387,10 +417,13 @@ fn run(args: RunArgs) -> RunExit {
     };
 
     let mut totals = Totals::default();
-    let hosts: Vec<HostEntry> = to_run
+    let (hosts, tool_outputs): (Vec<HostEntry>, Vec<HostOutputs>) = to_run
         .iter()
-        .map(|host| run_host(&ctx, host, &mut totals))
-        .collect();
+        .map(|host| {
+            let run = run_host(&ctx, host, &mut totals);
+            (run.entry, run.outputs)
+        })
+        .unzip();
 
     // `prepare` never returns an empty host list, so nothing to run means
     // the gate rejected every collection: the run's status is then the
@@ -422,7 +455,43 @@ fn run(args: RunArgs) -> RunExit {
             RunExit::OutputFailure,
         );
     }
+    // Best-effort and deliberately after the manifest: this is derived
+    // convenience data, not evidence, and a failure here must not change the
+    // run's exit status or touch run_manifest.json.
+    emit_duckdb_views(&args.out, &manifest.run_id, &manifest.hosts, &tool_outputs);
     exit
+}
+
+/// Build and write the DuckDB view layer. Never fails the run.
+///
+/// `hosts` decides only whether there is anything to describe: an empty host
+/// list is a run whose input was refused, and the pair still gets written so
+/// a reused `--out` cannot leave the previous run's views looking current.
+fn emit_duckdb_views(
+    out: &std::path::Path,
+    run_id: &str,
+    hosts: &[manifest::HostEntry],
+    tool_outputs: &[HostOutputs],
+) {
+    use triage_core::output::duckdb::build::{build, BuildRequest};
+    use triage_core::output::duckdb::inventory::{Inventory, Status};
+
+    let generation = triage_orchestrator::duckdb::generation_id(run_id);
+    let generated = manifest::now_iso();
+    let inventory = if hosts.is_empty() {
+        Inventory::empty(run_id, &generation, &generated, out, Status::RunRejected)
+    } else {
+        build(BuildRequest {
+            run_id,
+            generation: &generation,
+            generated_utc: &generated,
+            out_root: out,
+            hosts: tool_outputs,
+        })
+    };
+    if let Err(error) = triage_orchestrator::duckdb::write_pair(out, &inventory) {
+        eprintln!("warning: cannot write DuckDB views: {error}");
+    }
 }
 
 /// Record an input that `input::prepare` refused, then exit 3.
@@ -495,6 +564,10 @@ fn reject_input(
             RunExit::OutputFailure,
         );
     }
+    // Same reasoning as the success path, and the reason this call exists at
+    // all: a refused input over a reused `--out` must not leave the previous
+    // run's views standing as though they described this one.
+    emit_duckdb_views(&args.out, &manifest.run_id, &manifest.hosts, &[]);
     exit
 }
 
@@ -546,7 +619,19 @@ fn load_external_config(
 
 /// Discover, run every in-process tool, then every external tool, over one
 /// host, and fold the results into its manifest entry.
-fn run_host(ctx: &RunContext, host: &HostCapture, totals: &mut Totals) -> HostEntry {
+/// What one host contributed to the run: its manifest entry, and the same
+/// run recast as the DuckDB view layer's input.
+///
+/// Both are derived from one `run_host` call because the second is not
+/// recoverable from the first: `HostEntry` reports paths, while the view
+/// layer needs the dataset and identity the router recorded for each of
+/// them, plus the tool's column-type declarations.
+struct HostRun {
+    entry: HostEntry,
+    outputs: HostOutputs,
+}
+
+fn run_host(ctx: &RunContext, host: &HostCapture, totals: &mut Totals) -> HostRun {
     ctx.ui.host_header(&host.host, &host.os);
     // Failures in this collection's output-compat writes, collected for its
     // manifest entry by `output_failed` below.
@@ -701,22 +786,50 @@ fn run_host(ctx: &RunContext, host: &HostCapture, totals: &mut Totals) -> HostEn
         }
     }
 
-    HostEntry {
+    // Taken before `results` is consumed by the manifest entry below. Every
+    // tool is carried, including those that published nothing: `build` is
+    // what decides a tool contributes no dataset, and filtering here would
+    // put that decision in two places.
+    let outputs = HostOutputs {
         host: host.host.clone(),
-        output_id: host.output_id.clone(),
-        os: host.os.clone(),
-        collection: file_name_lossy(&host.collection_dir),
-        source_archive: host.source_archive.as_deref().map(file_name_lossy),
-        inaccessible_entries: index.inaccessible,
-        output_errors,
         tools: results
-            .into_iter()
-            .map(|r| {
-                let mut report: manifest::ToolEntryReport = r.into();
-                report.time_filter = manifest::time_filter_for(&report.key, &ctx.out_opts.tools);
-                report
+            .iter()
+            .map(|r| ToolOutputs {
+                binary_name: r.binary_name.clone(),
+                published: r.published.clone(),
+                merged: r.merged.clone(),
+                column_types: r.column_types,
             })
             .collect(),
-        external_tools,
+        external: external_tools
+            .iter()
+            .map(|r| ExternalOutputs {
+                tool: r.tool.clone(),
+                output_paths: r.output_paths.clone(),
+            })
+            .collect(),
+    };
+
+    HostRun {
+        entry: HostEntry {
+            host: host.host.clone(),
+            output_id: host.output_id.clone(),
+            os: host.os.clone(),
+            collection: file_name_lossy(&host.collection_dir),
+            source_archive: host.source_archive.as_deref().map(file_name_lossy),
+            inaccessible_entries: index.inaccessible,
+            output_errors,
+            tools: results
+                .into_iter()
+                .map(|r| {
+                    let mut report: manifest::ToolEntryReport = r.into();
+                    report.time_filter =
+                        manifest::time_filter_for(&report.key, &ctx.out_opts.tools);
+                    report
+                })
+                .collect(),
+            external_tools,
+        },
+        outputs,
     }
 }

@@ -340,6 +340,11 @@ the artifact-to-parser mapping, and the companion files (registry transaction lo
 
 Full reference: [docs/tools/TriageSuite.md](docs/tools/TriageSuite.md) (all flags, tool keys, progress/status behavior, output layout, the full `run_manifest.json` schema, exit codes, external-tool configuration, more examples).
 
+Every run also emits a DuckDB view layer under `<out>/duckdb/` — typed, queryable views
+over the CSV output, generated alongside `run_manifest.json`. See
+[docs/DuckDB.md](docs/DuckDB.md) for the one-liner that gets you querying, the raw/typed
+view pair, and the idiom for telling a missing value from a conversion failure.
+
 ---
 
 ## External tools: Hayabusa and Takajo

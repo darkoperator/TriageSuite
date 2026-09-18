@@ -17,6 +17,18 @@ use triage_core::output::layout::{OutputLayout, OutputLayoutMode};
 pub struct MergeReport {
     pub merged_path: PathBuf,
     pub sources: usize,
+    /// The per-user slices this merge actually consumed, in the order it
+    /// read them.
+    ///
+    /// `sources` alone cannot support the exclusion decision a view layer
+    /// has to make: knowing that three slices were folded in says nothing
+    /// about *which* three, and scanning a merged file alongside a slice it
+    /// already contains doubles every one of that slice's rows.
+    ///
+    /// Note that the reclaimed system-scope slice appears here under its
+    /// post-rename `_<RECLAIM_LABEL>` name, not the name the router
+    /// published it under.
+    pub source_paths: Vec<PathBuf>,
     pub rows: u64,
 }
 
@@ -414,6 +426,7 @@ pub fn merge_per_user(
     Ok(Some(MergeReport {
         merged_path,
         sources: sources.len(),
+        source_paths: sources.iter().map(|(_, path)| path.clone()).collect(),
         rows,
     }))
 }
@@ -632,6 +645,7 @@ pub fn merge_per_user_ndjson(
     Ok(Some(MergeReport {
         merged_path,
         sources: sources.len(),
+        source_paths: sources.iter().map(|(_, path)| path.clone()).collect(),
         rows,
     }))
 }
@@ -889,6 +903,51 @@ mod tests {
         assert!(merged.contains("C:\\a,a,jdoe\n"), "got {merged}");
         assert!(merged.contains("C:\\c,c,asmith\n"), "got {merged}");
         assert_eq!(merged.lines().count(), 4, "header plus three rows");
+    }
+
+    /// The merged file holds exactly its sources' rows, so anything building
+    /// a view over both would double-count every one of them. Naming the
+    /// sources is what lets a caller exclude them; a bare count cannot say
+    /// *which* slices were folded in.
+    #[test]
+    fn a_merge_report_names_every_source_it_consumed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let category = tmp.path();
+        let stem = "2026-03-13T192553Z_LETriage_results";
+        let router_wrote = vec![
+            write(
+                &category.join("PerUser"),
+                &format!("{stem}_jdoe.csv"),
+                "Path,Name\nC:\\a,a\nC:\\b,b\n",
+            ),
+            write(
+                &category.join("PerUser"),
+                &format!("{stem}_asmith.csv"),
+                "Path,Name\nC:\\c,c\n",
+            ),
+        ];
+
+        let report = merge_per_user(category, stem, false, &router_wrote, None)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(report.sources, report.source_paths.len());
+        assert_eq!(report.source_paths.len(), 2);
+        let mut named: Vec<String> = report
+            .source_paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        named.sort();
+        assert_eq!(
+            named,
+            vec![format!("{stem}_asmith.csv"), format!("{stem}_jdoe.csv"),]
+        );
+        // Every named source is one of the slices the router published, not
+        // something the merge discovered by listing the directory.
+        for path in &report.source_paths {
+            assert!(router_wrote.contains(path), "unpublished source: {path:?}");
+        }
     }
 
     /// Codex P1, the layer under C1: a profile whose sanitized name begins

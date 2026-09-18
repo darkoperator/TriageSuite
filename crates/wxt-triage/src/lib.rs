@@ -12,6 +12,7 @@ use std::path::Path;
 
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_sqlite::Database;
@@ -40,6 +41,127 @@ pub const DATASETS: &[DatasetSpec] = &[
         framing: JsonFraming::Ndjson,
         csv_only: false,
         override_suffix: Some("_Activity_PackageId"),
+    },
+];
+
+/// Declared SQL types for the DuckDB view layer. `Id` is a `String` in all
+/// three records (ActivitiesCache uses GUID-shaped keys, not an ESE
+/// auto-increment), `IsLocalOnly` is the `TitleCaseBool` wrapper type, and
+/// `Duration` is a computed/formatted `String` -- all three are OMIT cases,
+/// per the same rule as any other custom serialization.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[
+    DatasetColumnTypes {
+        dataset_id: "activity",
+        columns: &[
+            ColumnType {
+                column: "ActivityTypeOrg",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "StartTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "EndTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastModifiedTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastModifiedOnClient",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "OriginalLastModifiedOnClient",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExpirationTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "CreatedInCloud",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ETag",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "activity_operation",
+        columns: &[
+            ColumnType {
+                column: "ActivityTypeOrg",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "StartTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "EndTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastModifiedTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastModifiedTimeOnClient",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "CreatedTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExpirationTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "OperationExpirationTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "OperationOrder",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "OperationType",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "activity_packageid",
+        columns: &[ColumnType {
+            column: "Expires",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
     },
 ];
 
@@ -75,6 +197,10 @@ impl Tool for WxtTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {

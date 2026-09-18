@@ -13,12 +13,23 @@ jobs:
       # capture-gated tests skip instead of failing loudly (see
       # crates/triage-testkit for the gate this satisfies).
       TRIAGE_ALLOW_COMPAT_SKIP: "1"
+      # And the mirror image: the DuckDB assertions must fail, not skip, if
+      # the binary installed below never arrived.
+      TRIAGE_REQUIRE_DUCKDB: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # The DuckDB view assertions are the only proof the generated
+      # duckdb/views.sql actually loads. Unlike the capture-gated tests they
+      # need no evidence tree, so this job can -- and below, must -- run them
+      # for real rather than skipping them.
+      - name: Install DuckDB
+        uses: opt-nc/setup-duckdb-action@v1
+        with:
+          version: v1.5.4
       - run: cargo fmt --all -- --check
       # chunks_exact_to_as_chunks: this lint is newer than the clippy pinned
       # on contributors' machines, so it isn't addressed in source yet
@@ -30,4 +41,5 @@ jobs:
       - run: cargo test -p triage-orchestrator --test e2e
       - run: cargo test -p triage-orchestrator --test external_tools_e2e
       - run: cargo test -p triage-orchestrator --test zip_e2e
+      - run: cargo test -p triage-orchestrator --test duckdb_e2e
       - run: cargo test -p triage-core

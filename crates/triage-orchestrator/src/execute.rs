@@ -112,11 +112,25 @@ pub struct ToolRunResult {
     /// sit at those paths, which is precisely why the Velo merge post-pass
     /// is given this list rather than testing the filesystem.
     pub output_paths: Vec<PathBuf>,
+    /// The same publications as `output_paths`, with the dataset and
+    /// identity the router recorded. `output_paths` stays a bare path list
+    /// for the manifest, which reports paths and nothing else; the DuckDB
+    /// view layer needs to know which dataset a path belongs to and whose
+    /// rows are in it, and recovering either from the filename afterwards
+    /// means reimplementing the router's naming rules.
+    pub published: Vec<triage_core::output::published::PublishedFile>,
+    /// The tool's compile-time column-type declarations
+    /// (`Tool::column_types`), carried here because the run result outlives
+    /// the tool instance that produced it and the DuckDB view layer is built
+    /// from the results.
+    pub column_types: &'static [triage_core::output::duckdb::types::DatasetColumnTypes],
     /// Category-level files produced by the Velo per-user merge post-pass
-    /// (`crate::velo::merge`), kept separate from `output_paths` (the
-    /// router's own per-user files) so callers can tell merged output from
-    /// primary output; the manifest reports both together.
-    pub merged: Vec<PathBuf>,
+    /// (`crate::velo::merge`), each naming the per-user slices it consumed,
+    /// kept separate from `output_paths` (the router's own per-user files)
+    /// so callers can tell merged output from primary output. The manifest
+    /// reports the paths together; the DuckDB view layer needs them apart,
+    /// because a merged file and its sources hold the same rows.
+    pub merged: Vec<triage_core::output::duckdb::build::MergedFile>,
     pub error: Option<String>,
     pub exit: Option<RunExit>,
 }
@@ -138,6 +152,8 @@ impl ToolRunResult {
             failed: 0,
             records: 0,
             output_paths: Vec::new(),
+            published: Vec::new(),
+            column_types: &[],
             merged: Vec::new(),
             error: None,
             exit: None,
@@ -248,6 +264,11 @@ pub fn run_tool_on_host(
     let no_candidates_at_all = candidates.is_empty();
     let mut result = ToolRunResult::new(entry.key, tool.binary_name());
     result.files_matched = candidates.len() as u64;
+    // Recorded before any early return: it is a property of the tool, not of
+    // what this host happened to contain, and the DuckDB view layer reads it
+    // from the result rather than from the tool instance, which does not
+    // outlive this function.
+    result.column_types = tool.column_types();
 
     // Where this tool's process log would live under `--layout velo`, or
     // `None` under `--layout native` (`crate::velo::collection_dir_for`,
@@ -456,7 +477,8 @@ pub fn run_tool_on_host(
     // what the merge post-pass below has to know: a destination this run
     // never published can still hold a *previous* run's file.
     let finished = router.finish();
-    result.output_paths = finished.published;
+    result.output_paths = finished.published_paths();
+    result.published = finished.published.clone();
     match finished.outcome {
         Ok(records) => result.records = records,
         Err(e) => {
@@ -524,7 +546,15 @@ pub fn run_tool_on_host(
                     &result.output_paths,
                     dataset_dir.as_deref(),
                 ) {
-                    Ok(Some(report)) => result.merged.push(report.merged_path),
+                    Ok(Some(report)) => {
+                        result
+                            .merged
+                            .push(triage_core::output::duckdb::build::MergedFile {
+                                merged_path: report.merged_path,
+                                source_paths: report.source_paths,
+                                format: triage_core::output::published::OutputFormat::Csv,
+                            })
+                    }
                     Ok(None) => {}
                     Err(e) => {
                         // Same reasoning as the parse failures above: a
@@ -547,7 +577,15 @@ pub fn run_tool_on_host(
                     &result.output_paths,
                     dataset_dir.as_deref(),
                 ) {
-                    Ok(Some(report)) => result.merged.push(report.merged_path),
+                    Ok(Some(report)) => {
+                        result
+                            .merged
+                            .push(triage_core::output::duckdb::build::MergedFile {
+                                merged_path: report.merged_path,
+                                source_paths: report.source_paths,
+                                format: triage_core::output::published::OutputFormat::Json,
+                            })
+                    }
                     Ok(None) => {}
                     Err(e) => {
                         // Logged for the same reason as the CSV merge above.

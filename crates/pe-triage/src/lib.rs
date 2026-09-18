@@ -9,6 +9,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::timestamp::WinTimestamp;
 use triage_core::tool::{Scope, Tool};
@@ -129,6 +130,64 @@ pub const DATASETS: &[DatasetSpec] = &[
         framing: JsonFraming::Ndjson, // unused; csv_only
         csv_only: true,
         override_suffix: Some("_Timeline"),
+    },
+];
+
+/// Declared SQL types for the DuckDB view layer. Only the native
+/// `WinTimestamp` fields (`PreviousRun0..6`, `RunTime`) are declared; the
+/// PECmd-parity `String` fields (`SourceCreated`, `LastRun`,
+/// `Volume0Created`, ...) are pre-rendered by this crate for JSON
+/// null-vs-empty-string fidelity (see the doc comment on `PrefetchRecord`)
+/// and are not proven by their Rust type to hold a fixed shape, so they stay
+/// undeclared.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[
+    DatasetColumnTypes {
+        dataset_id: "main",
+        columns: &[
+            ColumnType {
+                column: "PreviousRun0",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "PreviousRun1",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "PreviousRun2",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "PreviousRun3",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "PreviousRun4",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "PreviousRun5",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "PreviousRun6",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "timeline",
+        columns: &[ColumnType {
+            column: "RunTime",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
     },
 ];
 
@@ -321,6 +380,10 @@ impl Tool for PeTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {

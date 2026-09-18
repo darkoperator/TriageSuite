@@ -90,6 +90,18 @@ pub trait Tool {
     /// The datasets this tool can emit.
     fn datasets(&self) -> &'static [DatasetSpec];
 
+    /// Declared SQL types for this tool's dataset columns, used to build the
+    /// DuckDB view layer.
+    ///
+    /// Defaulted to empty: a tool that declares nothing gets all-VARCHAR
+    /// views, which is still better than no views. An override naming a
+    /// column the tool does not actually emit is dropped at generation time
+    /// and recorded, so a stale declaration degrades the view rather than
+    /// breaking it.
+    fn column_types(&self) -> &'static [crate::output::duckdb::types::DatasetColumnTypes] {
+        &[]
+    }
+
     fn scope(&self) -> Scope;
 
     fn resource_class(&self) -> ResourceClass {

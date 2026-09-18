@@ -793,6 +793,31 @@ pub fn skip_if_missing(required: &std::path::Path, what: &str) -> bool {
     );
 }
 
+/// Path to a `duckdb` binary, or `None` when the test should skip.
+///
+/// Mirrors `skip_if_missing`: absent by default is a skip, but
+/// `TRIAGE_REQUIRE_DUCKDB=1` turns it into a panic, so the CI job that sets
+/// it proves these assertions really executed rather than quietly passing.
+pub fn duckdb_binary() -> Option<std::path::PathBuf> {
+    let found = std::process::Command::new("duckdb")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|_| std::path::PathBuf::from("duckdb"));
+    if found.is_some() {
+        return found;
+    }
+    if std::env::var("TRIAGE_REQUIRE_DUCKDB").as_deref() == Ok("1") {
+        panic!(
+            "duckdb not found on PATH and TRIAGE_REQUIRE_DUCKDB=1 -- the \
+             generated SQL cannot be proven to load without it."
+        );
+    }
+    eprintln!("SKIP (duckdb): binary not on PATH");
+    None
+}
+
 #[cfg(test)]
 mod skip_tests {
     use super::*;

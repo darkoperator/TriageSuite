@@ -22,6 +22,7 @@ use std::time::SystemTime;
 use serde::Serialize;
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::timestamp::WinTimestamp;
 use triage_core::tool::{Scope, Tool, Validation};
@@ -208,6 +209,114 @@ pub const DATASETS: &[DatasetSpec] = &[
         framing: JsonFraming::Ndjson,
         csv_only: false,
         override_suffix: None,
+    },
+];
+
+/// Declared SQL types for the DuckDB view layer: each dataset's native
+/// `WinTimestamp` columns plus `FileSize` (`u32`). `HasSps`/`PinStatus`
+/// render `.NET` bools via the local `dotnet_bool` helper into plain
+/// `String` fields (not a native `bool`), so per the OMIT rule they stay
+/// undeclared along with every other free-text/hex/GUID column.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[
+    DatasetColumnTypes {
+        dataset_id: "auto",
+        columns: &[
+            ColumnType {
+                column: "SourceCreated",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "SourceModified",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "SourceAccessed",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "CreationTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastModified",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "TargetCreated",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "TargetModified",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "TargetAccessed",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "FileSize",
+                sql_type: SqlType::UBigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "TrackerCreatedOn",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "custom",
+        columns: &[
+            ColumnType {
+                column: "SourceCreated",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "SourceModified",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "SourceAccessed",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "TargetCreated",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "TargetModified",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "TargetAccessed",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "FileSize",
+                sql_type: SqlType::UBigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "TrackerCreatedOn",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+        ],
     },
 ];
 
@@ -414,6 +523,10 @@ impl Tool for JleTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {

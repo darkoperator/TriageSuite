@@ -12,6 +12,7 @@
 # Usage:
 #   scripts/check.sh            # everything, including capture-gated tests
 #   scripts/check.sh --no-captures   # skip those (a checkout without evidence)
+#   scripts/check.sh --no-duckdb     # skip the DuckDB view assertions
 #   scripts/check.sh --fast     # fmt + clippy + allow check, no tests
 set -uo pipefail
 
@@ -19,11 +20,13 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 captures=1
 tests=1
+duckdb=1
 for arg in "$@"; do
   case "$arg" in
     --no-captures) captures=0 ;;
+    --no-duckdb) duckdb=0 ;;
     --fast) tests=0 ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -33,6 +36,12 @@ if [ "$captures" -eq 1 ] && [ ! -d "test captures" ]; then
   echo "      The capture-gated assertions will SKIP, so a green run here is"
   echo "      weaker than a green run in the development copy."
   captures=0
+fi
+
+if [ "$duckdb" -eq 1 ] && ! command -v duckdb >/dev/null 2>&1; then
+  echo "note: duckdb is not on PATH -- running as --no-duckdb."
+  echo "      The generated DuckDB views will NOT be proven to load."
+  duckdb=0
 fi
 
 failed=()
@@ -53,20 +62,40 @@ step "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
 step "allow justifications" scripts/check-allow-justifications.sh
 
 if [ "$tests" -eq 1 ]; then
+  test_env=()
+  test_label="cargo test --workspace"
   if [ "$captures" -eq 1 ]; then
-    step "cargo test --workspace (with captures)" cargo test --workspace
+    test_label="$test_label (with captures)"
   else
-    step "cargo test --workspace (captures skipped)" \
-      env TRIAGE_ALLOW_COMPAT_SKIP=1 cargo test --workspace
+    test_env+=(TRIAGE_ALLOW_COMPAT_SKIP=1)
+    test_label="$test_label (captures skipped)"
   fi
+  if [ "$duckdb" -eq 1 ]; then
+    test_env+=(TRIAGE_REQUIRE_DUCKDB=1)
+  fi
+  # `${test_env[@]+"${test_env[@]}"}` and not the obvious `"${test_env[@]}"`:
+  # bash 3.2 -- which is macOS's /bin/bash, and what this script runs under on
+  # a stock Mac -- treats an EMPTY array's `"${arr[@]}"` as an unset variable
+  # and aborts under `set -u`. The array really is empty in one supported
+  # case: captures present and duckdb skipped, i.e. `--no-duckdb`. The `+`
+  # form expands to nothing at all when the array is unset or empty, and
+  # expands each element quoted otherwise.
+  step "$test_label" env ${test_env[@]+"${test_env[@]}"} cargo test --workspace
 fi
 
 echo
 if [ ${#failed[@]} -eq 0 ]; then
-  if [ "$tests" -eq 1 ] && [ "$captures" -eq 1 ]; then
-    echo "All checks passed, capture-gated assertions included."
+  if [ "$tests" -eq 1 ] && [ "$captures" -eq 1 ] && [ "$duckdb" -eq 1 ]; then
+    echo "All checks passed, capture-gated and DuckDB view assertions included."
+  elif [ "$tests" -eq 0 ]; then
+    echo "All checks passed (reduced run: no tests)."
   else
-    echo "All checks passed (reduced run: $([ "$tests" -eq 0 ] && echo 'no tests' || echo 'captures skipped'))."
+    reasons=()
+    [ "$captures" -eq 0 ] && reasons+=("captures skipped")
+    [ "$duckdb" -eq 0 ] && reasons+=("DuckDB skipped")
+    reasons_joined="$(printf '%s, ' "${reasons[@]}")"
+    reasons_joined="${reasons_joined%, }"
+    echo "All checks passed (reduced run: ${reasons_joined})."
   fi
   exit 0
 fi

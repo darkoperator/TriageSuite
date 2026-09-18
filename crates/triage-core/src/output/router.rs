@@ -2,6 +2,7 @@ use crate::attribution::Identity;
 use crate::error::TriageError;
 use crate::output::dataset::{CsvSink, DatasetSpec, JsonSink};
 use crate::output::layout::{OutputLayout, OutputLayoutMode, SideCarReference};
+use crate::output::published::{DatasetKey, OutputFormat, PublishedFile};
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
@@ -231,10 +232,11 @@ fn dataset_filename(
 #[must_use]
 pub struct FinishReport {
     /// Every final destination whose staged file was successfully renamed
-    /// into place by this `finish()`, sorted and deduplicated. Empty when
-    /// the router aborted after an earlier write failure, because that path
+    /// into place by this `finish()`, sorted by path and deduplicated, each
+    /// carrying the dataset and identity that produced it. Empty when the
+    /// router aborted after an earlier write failure, because that path
     /// deletes every staged file and publishes none of them.
-    pub published: Vec<PathBuf>,
+    pub published: Vec<PublishedFile>,
     /// Total records written, or the first error `finish()` hit.
     pub outcome: Result<u64, TriageError>,
 }
@@ -244,6 +246,12 @@ impl FinishReport {
     /// which destinations were published.
     pub fn into_outcome(self) -> Result<u64, TriageError> {
         self.outcome
+    }
+
+    /// Just the paths, for a caller that does not care which dataset or
+    /// identity produced them.
+    pub fn published_paths(&self) -> Vec<std::path::PathBuf> {
+        self.published.iter().map(|f| f.path.clone()).collect()
     }
 }
 
@@ -840,9 +848,9 @@ impl OutputRouter {
             };
         }
         let mut first_err: Option<TriageError> = None;
-        let mut published: Vec<PathBuf> = Vec::new();
+        let mut published: Vec<PublishedFile> = Vec::new();
 
-        for (_, files) in self.open.drain() {
+        for ((identity, dataset_id), files) in self.open.drain() {
             if let Some((csv, temporary, path)) = files.csv {
                 if let Err(e) = csv.finish() {
                     let _ = std::fs::remove_file(&temporary);
@@ -852,7 +860,12 @@ impl OutputRouter {
                     });
                 } else {
                     match publish(&temporary, &path, self.overwrite) {
-                        Ok(()) => published.push(path),
+                        Ok(()) => published.push(PublishedFile {
+                            path,
+                            format: OutputFormat::Csv,
+                            dataset: DatasetKey::Static(dataset_id),
+                            identity: identity.clone(),
+                        }),
                         Err(e) => {
                             first_err.get_or_insert(e);
                         }
@@ -868,7 +881,12 @@ impl OutputRouter {
                     });
                 } else {
                     match publish(&temporary, &path, self.overwrite) {
-                        Ok(()) => published.push(path),
+                        Ok(()) => published.push(PublishedFile {
+                            path,
+                            format: OutputFormat::Json,
+                            dataset: DatasetKey::Static(dataset_id),
+                            identity: identity.clone(),
+                        }),
                         Err(e) => {
                             first_err.get_or_insert(e);
                         }
@@ -877,7 +895,7 @@ impl OutputRouter {
             }
         }
 
-        for (_, files) in self.dynamic.drain() {
+        for ((identity, basename), files) in self.dynamic.drain() {
             if let Some((mut csv, temporary, path)) = files.csv {
                 if let Err(e) = csv.flush() {
                     let _ = std::fs::remove_file(&temporary);
@@ -887,7 +905,12 @@ impl OutputRouter {
                     });
                 } else {
                     match publish(&temporary, &path, self.overwrite) {
-                        Ok(()) => published.push(path),
+                        Ok(()) => published.push(PublishedFile {
+                            path,
+                            format: OutputFormat::Csv,
+                            dataset: DatasetKey::Dynamic(basename.clone()),
+                            identity: identity.clone(),
+                        }),
                         Err(e) => {
                             first_err.get_or_insert(e);
                         }
@@ -903,7 +926,12 @@ impl OutputRouter {
                     });
                 } else {
                     match publish(&temporary, &path, self.overwrite) {
-                        Ok(()) => published.push(path),
+                        Ok(()) => published.push(PublishedFile {
+                            path,
+                            format: OutputFormat::Json,
+                            dataset: DatasetKey::Dynamic(basename.clone()),
+                            identity: identity.clone(),
+                        }),
                         Err(e) => {
                             first_err.get_or_insert(e);
                         }
@@ -912,8 +940,8 @@ impl OutputRouter {
             }
         }
 
-        published.sort();
-        published.dedup();
+        published.sort_by(|a, b| a.path.cmp(&b.path));
+        published.dedup_by(|a, b| a.path == b.path);
         FinishReport {
             published,
             outcome: match first_err {

@@ -205,7 +205,7 @@ impl From<crate::execute::ToolRunResult> for ToolEntryReport {
         // then has no sources, so this array is empty while a previous run's
         // files may be sitting at every one of those paths.
         let mut output_paths = r.output_paths;
-        output_paths.extend(r.merged);
+        output_paths.extend(r.merged.into_iter().map(|m| m.merged_path));
         ToolEntryReport {
             tool: r.binary_name,
             key: r.key,

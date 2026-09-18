@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::SystemTime;
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::timestamp::WinTimestamp;
 use triage_core::tool::{Scope, Tool, Validation};
@@ -91,6 +92,56 @@ pub const DATASETS: &[DatasetSpec] = &[DatasetSpec {
     framing: JsonFraming::Ndjson,
     csv_only: false,
     override_suffix: None,
+}];
+
+/// Declared SQL types for the DuckDB view layer: the seven native
+/// `WinTimestamp` columns plus `FileSize` (`u32`). Every other column is
+/// `String`/`Option<String>` free text or a hex/GUID rendering with no
+/// type-guaranteed shape, so it stays undeclared.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[DatasetColumnTypes {
+    dataset_id: "main",
+    columns: &[
+        ColumnType {
+            column: "SourceCreated",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "SourceModified",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "SourceAccessed",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "TargetCreated",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "TargetModified",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "TargetAccessed",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "FileSize",
+            sql_type: SqlType::UBigInt,
+            time_semantics: None,
+        },
+        ColumnType {
+            column: "TrackerCreatedOn",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+    ],
 }];
 
 /// LECmd target FILETIME -> WinTimestamp with the 1601->null rule. LECmd emits
@@ -286,6 +337,10 @@ impl Tool for LeTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     /// LNK files attribute to the in-capture user when derivable, else system.

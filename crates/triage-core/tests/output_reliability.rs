@@ -122,7 +122,7 @@ fn an_aborted_finish_publishes_nothing_even_where_a_previous_runs_file_exists() 
         "an aborted transaction must still report failure"
     );
     assert_eq!(
-        report.published,
+        report.published_paths(),
         Vec::<std::path::PathBuf>::new(),
         "nothing was renamed into place, so nothing may be reported as published"
     );
@@ -146,7 +146,6 @@ fn a_successful_finish_reports_every_destination_it_published() {
         .unwrap();
 
     let report = router.finish();
-    assert_eq!(report.outcome.unwrap(), 2);
     let mut expected = vec![
         temp.path().join("csv/Reliability_Output_system.csv"),
         temp.path().join("json/Reliability_Output_system.json"),
@@ -154,8 +153,65 @@ fn a_successful_finish_reports_every_destination_it_published() {
         temp.path().join("json/Runtime_system.json"),
     ];
     expected.sort();
-    assert_eq!(report.published, expected);
+    assert_eq!(report.published_paths(), expected);
     for path in &expected {
         assert!(path.is_file(), "{path:?} was reported published");
     }
+    // `published_paths()` borrows `report` as a whole, so it must run before
+    // this `unwrap()` partially moves `report.outcome` out.
+    assert_eq!(report.outcome.unwrap(), 2);
+}
+
+/// The router is the only thing that knows which dataset and which identity
+/// a published path belongs to. Re-deriving it downstream by parsing the
+/// filename would mean reimplementing `dataset_filename` and `velo_basename`
+/// and drifting from them silently.
+///
+/// Both write paths are covered: a static dataset carries its `DatasetSpec`
+/// id, a dynamic one carries the runtime basename, and each file names the
+/// identity that was current when it was opened.
+#[test]
+fn every_published_file_names_its_dataset_and_identity() {
+    use triage_core::output::published::{DatasetKey, OutputFormat};
+
+    let temp = tempfile::tempdir().unwrap();
+    let mut router = OutputRouter::new("Reliability", DATASETS, options(temp.path())).unwrap();
+    router.set_identity(Identity::System);
+    router.write("main", &Row { name: "one" }).unwrap();
+    router
+        .write_dynamic_row("Runtime", &["A".into()], &["two".into()])
+        .unwrap();
+
+    let report = router.finish();
+
+    let csv_main = report
+        .published
+        .iter()
+        .find(|f| f.path.ends_with("Reliability_Output_system.csv"))
+        .expect("the static dataset's CSV must be published");
+    assert_eq!(csv_main.dataset, DatasetKey::Static("main"));
+    assert_eq!(csv_main.identity, Identity::System);
+    assert_eq!(csv_main.format, OutputFormat::Csv);
+
+    let json_dynamic = report
+        .published
+        .iter()
+        .find(|f| f.path.ends_with("Runtime_system.json"))
+        .expect("the dynamic dataset's JSON must be published");
+    assert_eq!(json_dynamic.dataset, DatasetKey::Dynamic("Runtime".into()));
+    assert_eq!(json_dynamic.format, OutputFormat::Json);
+
+    // The helper is exactly the old field, so the manifest keeps reporting
+    // the same paths in the same order.
+    let mut expected = vec![
+        temp.path().join("csv/Reliability_Output_system.csv"),
+        temp.path().join("json/Reliability_Output_system.json"),
+        temp.path().join("csv/Runtime_system.csv"),
+        temp.path().join("json/Runtime_system.json"),
+    ];
+    expected.sort();
+    assert_eq!(report.published_paths(), expected);
+    // `published_paths()` borrows `report` as a whole, so it must run before
+    // this `unwrap()` partially moves `report.outcome` out.
+    assert_eq!(report.outcome.unwrap(), 2);
 }

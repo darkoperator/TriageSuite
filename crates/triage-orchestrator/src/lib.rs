@@ -3,6 +3,7 @@
 
 pub mod archive;
 pub mod capture;
+pub mod duckdb;
 pub mod execute;
 pub mod external;
 pub mod input;

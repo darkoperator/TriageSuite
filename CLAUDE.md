@@ -2,7 +2,7 @@
 
 ## Running the tests
 
-Two environment variables control test behaviour. Neither affects an ordinary
+Three environment variables control test behaviour. None affects an ordinary
 run of any tool.
 
 - **`TRIAGE_ALLOW_COMPAT_SKIP=1`** — lets capture-gated tests skip instead of
@@ -20,6 +20,12 @@ run of any tool.
   under a loaded `cargo test --workspace`. Values are restricted to a short
   alphanumeric token; anything else is ignored and the clock is used, because
   the stamp becomes part of a path.
+- **`TRIAGE_REQUIRE_DUCKDB=1`** — makes the DuckDB view assertions panic
+  instead of skipping when no `duckdb` binary is on `PATH`. They prove the
+  generated `duckdb/views.sql` actually loads, and unlike the capture-gated
+  tests they need no evidence tree, so `PR checks` sets it and is the one job
+  that always runs them for real. `scripts/check.sh` sets it too when `duckdb`
+  is present; `scripts/check.sh --no-duckdb` opts out.
 
 A full check:
 

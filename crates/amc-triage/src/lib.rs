@@ -9,12 +9,225 @@ use std::path::{Path, PathBuf};
 
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_registry::hive::Hive;
 
 /// `regf` magic at the start of every registry hive.
 const REGF_MAGIC: [u8; 4] = [0x72, 0x65, 0x67, 0x66];
+
+/// Declared SQL types for the DuckDB view layer.
+///
+/// Every field on every record in `records.rs` is a Rust `String`: the whole
+/// point of this crate is byte-for-byte AmcacheParser CSV parity, so nothing
+/// here is a native `WinTimestamp`/`bool`/integer the way the other six
+/// seeded crates are. Two of `values.rs`'s renderers are nonetheless total
+/// and unambiguous regardless of the field's Rust type:
+///
+/// - `values::ts_string` / `values::ts_opt` call `WinTimestamp::to_string()`
+///   directly (including `FileEntryRecord::link_date`'s parse-failure
+///   sentinel, which is itself a literal in that same format), so a column
+///   built from either is exactly as safe to declare `Timestamp` as a native
+///   `WinTimestamp` field would be.
+/// - `ValueMap::dotnet_bool` always renders the literal `"True"` or `"False"`,
+///   so a column built from it is exactly as safe to declare `Boolean` as a
+///   native `bool` field would be.
+///
+/// Every other column is either free text (`ValueMap::str`) or an integer
+/// rendered by a helper this task does not model (`parse_int`, `parse_size`,
+/// `parse_usn`, `strip_sha1`, `strip_prefix4`) and stays undeclared: the
+/// OMIT rule for a custom serializer applies to a rendering function exactly
+/// as it would to a Rust wrapper type -- the CSV shape is chosen by the
+/// function, not proven by this task's `WinTimestamp`/`bool`-only stance.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[
+    DatasetColumnTypes {
+        dataset_id: "program_entries",
+        columns: &[
+            ColumnType {
+                column: "KeyLastWriteTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "InstallDate",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "InstallDateMsi",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "HiddenArp",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "InboxModernApp",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "associated_file_entries",
+        columns: &[
+            ColumnType {
+                column: "FileKeyLastWriteTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LinkDate",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "IsOsComponent",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "IsPeFile",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "unassociated_file_entries",
+        columns: &[
+            ColumnType {
+                column: "FileKeyLastWriteTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LinkDate",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "IsOsComponent",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "IsPeFile",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "shortcuts",
+        columns: &[ColumnType {
+            column: "KeyLastWriteTimestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DatasetColumnTypes {
+        dataset_id: "drive_binaries",
+        columns: &[
+            ColumnType {
+                column: "KeyLastWriteTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "DriverTimeStamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "DriverLastWriteTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "DriverInBox",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "DriverIsKernelMode",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "DriverSigned",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "device_containers",
+        columns: &[
+            ColumnType {
+                column: "KeyLastWriteTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "IsActive",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "IsConnected",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "IsMachineContainer",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "IsNetworked",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "IsPaired",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "driver_packages",
+        columns: &[
+            ColumnType {
+                column: "KeyLastWriteTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "Date",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "DriverInBox",
+                sql_type: SqlType::Boolean,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "device_pnps",
+        columns: &[ColumnType {
+            column: "KeyLastWriteTimestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+];
 
 pub const DATASETS: &[DatasetSpec] = &[
     DatasetSpec {
@@ -121,6 +334,10 @@ impl Tool for AmcacheTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {

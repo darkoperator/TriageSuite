@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_ese::{Database, EseError};
@@ -66,6 +67,467 @@ pub const DATASETS: &[DatasetSpec] = &[
     },
 ];
 
+/// Declared SQL types for the DuckDB view layer.
+///
+/// Every `i64`/`WinTimestamp` field from `datasets.rs` is declared.
+/// `EnergyUsageRecord::IsLt` carries `serialize_with = "serialize_bool_titlecase"`
+/// and `VfuprovRecord::Duration` is a computed/formatted `String`
+/// ("d.hh:mm:ss"); both are OMIT cases. `ExeInfo`, `ExeInfoDescription`,
+/// `SidType`, `Sid`, `UserName`, `InterfaceType` and `ProfileName` are free
+/// text and also stay undeclared.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[
+    DatasetColumnTypes {
+        dataset_id: "network_usage",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BytesReceived",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BytesSent",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "InterfaceLuid",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "L2ProfileFlags",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "L2ProfileId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "network_connections",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ConnectedTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ConnectStartTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "InterfaceLuid",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "L2ProfileFlags",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "L2ProfileId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "app_resource_usage",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundBytesRead",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundBytesWritten",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundContextSwitches",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundCycleTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundNumberOfFlushes",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundNumReadOperations",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "BackgroundNumWriteOperations",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "FaceTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundBytesRead",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundBytesWritten",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundContextSwitches",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundCycleTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundNumberOfFlushes",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundNumReadOperations",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ForegroundNumWriteOperations",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "push_notifications",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "NetworkType",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "NotificationType",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "PayloadSize",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "energy_usage",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ConfigurationHash",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "EventTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "StateTransition",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ChargeLevel",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "CycleCount",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "DesignedCapacity",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "FullChargedCapacity",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ActiveAcTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ActiveDcTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ActiveDischargeTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ActiveEnergy",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "CsAcTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "CsDcTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "CsDischargeTime",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "CsEnergy",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "app_timeline",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "EndTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "DurationMs",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+    DatasetColumnTypes {
+        dataset_id: "vfuprov",
+        columns: &[
+            ColumnType {
+                column: "Id",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "UserId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "AppId",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+            ColumnType {
+                column: "ExeTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "StartTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "EndTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "Flags",
+                sql_type: SqlType::BigInt,
+                time_semantics: None,
+            },
+        ],
+    },
+];
+
 #[derive(Default)]
 pub struct SrumeTool {
     pub software: Option<PathBuf>,
@@ -90,6 +552,10 @@ impl Tool for SrumeTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {
