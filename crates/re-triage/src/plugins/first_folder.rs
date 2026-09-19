@@ -57,7 +57,9 @@ fn decode_exe_and_folder(raw: &[u8]) -> (String, String) {
         return (String::new(), String::new());
     }
     let words: Vec<u16> = raw
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let full = String::from_utf16_lossy(&words);

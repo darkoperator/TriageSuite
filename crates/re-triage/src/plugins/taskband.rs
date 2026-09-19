@@ -197,7 +197,9 @@ fn property_store_pid10(prop_bytes: &[u8]) -> Option<String> {
                 let count = read_u32(val, 0)? as usize;
                 let chars = val.get(4..4 + count * 2)?;
                 let units: Vec<u16> = chars
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .collect();
                 let s = String::from_utf16_lossy(&units);

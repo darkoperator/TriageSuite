@@ -40,7 +40,7 @@ pub(crate) fn read_i32(d: &[u8], off: usize) -> Result<i32, ParseError> {
 /// Decode UTF-16LE up to the first NUL (matching C# .Split('\0').First()).
 pub(crate) fn utf16_to_nul(bytes: &[u8]) -> String {
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let u = u16::from_le_bytes([pair[0], pair[1]]);
         if u == 0 {
             break;

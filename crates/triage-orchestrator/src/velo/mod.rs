@@ -15,18 +15,13 @@ pub mod sysinfo;
 pub mod veloresults;
 
 /// Which output tree `TriageSuite run` writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum Layout {
     /// VeloProcessor-shaped category tree (default).
+    #[default]
     Velo,
     /// The per-tool, per-identity tree (`<out>/<HOST>/<Tool>/<identity>/`).
     Native,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Self::Velo
-    }
 }
 
 /// The forensic category directory a tool's output belongs in.

@@ -104,7 +104,9 @@ pub fn parse_win10(raw: &[u8]) -> Vec<ShimEntry> {
 /// Decode a UTF-16LE byte slice; unpaired surrogates → U+FFFD.
 fn decode_utf16le(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     char::decode_utf16(units)

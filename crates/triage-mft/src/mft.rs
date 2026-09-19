@@ -525,7 +525,7 @@ pub fn parse_mft_with_progress(
     let total = bytes.len() as u64;
     let mut fixed_records = Vec::new();
 
-    for (entry_number, chunk) in bytes.chunks_exact(MFT_RECORD_SIZE).enumerate() {
+    for (entry_number, chunk) in bytes.as_chunks::<MFT_RECORD_SIZE>().0.iter().enumerate() {
         let mut record = chunk.to_vec();
         if apply_update_sequence_fixup(&mut record).is_err() {
             continue;
@@ -994,7 +994,9 @@ fn extension_for(name: &str) -> String {
 
 fn decode_utf16le(bytes: &[u8]) -> String {
     let code_units = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect::<Vec<_>>();
     String::from_utf16_lossy(&code_units)

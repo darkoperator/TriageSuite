@@ -101,7 +101,9 @@ fn render_utf16_value(raw: &[u8]) -> String {
         return String::new();
     }
     let words: Vec<u16> = raw
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16_lossy(&words)
@@ -122,7 +124,9 @@ fn decode_slack(raw: &[u8]) -> String {
     }
     // Decode the entire buffer as UTF-16LE (notatin's raw includes everything).
     let words: Vec<u16> = raw
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let decoded = String::from_utf16_lossy(&words);

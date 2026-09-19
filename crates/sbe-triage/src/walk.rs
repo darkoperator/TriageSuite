@@ -52,7 +52,7 @@ fn mru_positions(key: &CellKeyNode) -> HashMap<u32, usize> {
     let mut m = HashMap::new();
     if let Some(v) = key.get_value("MRUListEx") {
         let raw = raw_bytes(&v);
-        for (pos, chunk) in raw.chunks_exact(4).enumerate() {
+        for (pos, chunk) in raw.as_chunks::<4>().0.iter().enumerate() {
             let slot = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             if slot == 0xFFFF_FFFF {
                 break;

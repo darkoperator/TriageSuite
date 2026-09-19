@@ -85,7 +85,9 @@ fn u64_at(data: &[u8], off: usize, what: &'static str) -> Result<u64, ParseError
 /// Decode UTF-16LE bytes (lossy, like C# Encoding.Unicode.GetString).
 fn utf16le(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16_lossy(&units)

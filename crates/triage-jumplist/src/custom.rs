@@ -167,7 +167,7 @@ fn parse_category(chunk: &[u8], codepage: u16, out: &mut Vec<CustomEntry>) {
 /// Decode a UTF-16LE byte slice up to the first NUL terminator, lossily.
 fn utf16le_until_nul(bytes: &[u8]) -> String {
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let u = u16::from_le_bytes([pair[0], pair[1]]);
         if u == 0 {
             break;

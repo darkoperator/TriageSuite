@@ -151,7 +151,9 @@ fn read_utf16(data: &[u8], off: usize, char_len: usize) -> Result<String, ParseE
         .ok_or(ParseError::Corrupt("utf16 overflow"))?;
     let b = data.get(off..end).ok_or(ParseError::Corrupt("utf16 oob"))?;
     let units: Vec<u16> = b
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     Ok(String::from_utf16_lossy(&units))
@@ -344,7 +346,9 @@ fn parse_entry(
         let field = raw.get(72..88).ok_or(ParseError::Corrupt("hostname oob"))?;
         if field[1] == 0 {
             let units: Vec<u16> = field
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             let s = String::from_utf16_lossy(&units);

@@ -74,7 +74,9 @@ fn read_block(
             .get(cur..end)
             .ok_or(ParseError::Corrupt("stringdata truncated"))?;
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         cur = end;

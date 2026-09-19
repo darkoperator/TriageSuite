@@ -190,7 +190,9 @@ fn parse_actions(raw: &[u8]) -> (String, String) {
 
 fn decode_utf16le_trimmed(bytes: &[u8]) -> String {
     let words: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let s: String = char::decode_utf16(words.iter().copied())

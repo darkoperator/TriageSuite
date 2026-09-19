@@ -56,7 +56,9 @@ pub fn build_id_maps(db: &Database) -> Result<IdMaps, triage_ese::EseError> {
 /// Decode a UTF-16LE blob, trimming trailing NULs.
 fn utf16le_trim_nul(b: &[u8]) -> String {
     let u16s: Vec<u16> = b
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| u16::from_le_bytes([p[0], p[1]]))
         .collect();
     String::from_utf16_lossy(&u16s)

@@ -76,7 +76,9 @@ pub fn parse_icon_layouts(raw: &[u8]) -> Vec<String> {
         }
         let name_bytes = &raw[pos..pos + byte_count];
         let words: Vec<u16> = name_bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         let name = String::from_utf16_lossy(&words).to_string();

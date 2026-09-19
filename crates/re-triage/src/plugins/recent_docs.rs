@@ -88,7 +88,9 @@ fn parse_mru_list_ex(raw: &[u8]) -> std::collections::HashMap<u32, usize> {
 /// Decode UTF-16LE bytes, split on NUL, return first segment.
 fn decode_utf16le_first(bytes: &[u8]) -> String {
     let words: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let full = String::from_utf16_lossy(&words);
