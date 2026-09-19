@@ -805,7 +805,7 @@ fn copy_tree(from: &Path, to: &Path) {
 /// check alone only proves a declared column *name* exists in the CSV
 /// header -- it says nothing about whether DuckDB can parse the values that
 /// live there. Task 8 proved `TRY_CAST` against synthetic values; it never
-/// exercised these seven crates' real emitted formats (amc's
+/// exercised these nine crates' real emitted formats (amc's
 /// 7-digit-fraction ISO-8601 with a `Z` suffix, the
 /// `0001-01-01T00:00:00.0000000Z` parse-failure sentinel, ...). If DuckDB
 /// rejected one of those, every value in that column would silently become
@@ -824,7 +824,24 @@ fn no_declared_override_names_a_column_its_dataset_lacks() {
     // actually runs it from this crate's manifest dir, as every other
     // capture-gated test in this file's own crate already accounts for
     // (`validate_e2e.rs`, `velo_plugin_detail_file.rs`): go up two levels.
-    let capture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test captures");
+    //
+    // ONE collection, not the whole tree. Pointing this at `test captures/`
+    // ran all three collections and took 25 minutes once MFTriage and
+    // EvtxTriage joined the seeded list -- they alone account for ~7.3M MFT
+    // records and ~2.8M events across the three. A second host proves
+    // nothing this test is about: the declarations are compile-time
+    // constants, identical for every host, so the second and third runs
+    // re-assert the first's result at full price.
+    //
+    // STCL1 specifically, and not either of its siblings, because it is the
+    // only one of the three where all nine seeded tools emit records --
+    // DESKTOP-OA8SHHC has no recycle-bin evidence (RBTriage: 0 records) and
+    // STDC1 has none for RBTriage, PETriage or WxTTriage either. On the
+    // other two the seeded-tool assertion below would fail, which is the
+    // check working, not a reason to weaken it. STCL1 also carries the
+    // smallest $MFT of the three (1.19M records against STDC1's 4.63M).
+    let capture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test captures/Collection-STCL1_umbralabs_dev-2026-03-11T21_20_14Z");
     if triage_testkit::skip_if_missing(&capture, "DuckDB override drift check") {
         return;
     }
@@ -835,9 +852,9 @@ fn no_declared_override_names_a_column_its_dataset_lacks() {
     // a tool that gains a `column_types()` declaration without being added
     // here would have its drift go unchecked, which is exactly the silent
     // failure mode this test exists to catch. Without `--only`, a run over
-    // the full `test captures/` tree exercises every registered parser, not
-    // just the seven this test asserts about, which is minutes of unrelated
-    // work this test does not need to prove its point. Registry keys are
+    // the collection exercises every registered parser, not just the nine
+    // this test asserts about, which is minutes of unrelated work this test
+    // does not need to prove its point. Registry keys are
     // `crates/triage-orchestrator/src/registry.rs`'s `build()` match arms,
     // not each tool's `binary_name()` -- note `srum`, not `srume`.
     let o = run_orchestrator(&[
@@ -849,7 +866,7 @@ fn no_declared_override_names_a_column_its_dataset_lacks() {
         "--csv",
         "--overwrite",
         "--only",
-        "amc,pe,le,jle,rb,srum,wxt",
+        "amc,pe,le,jle,rb,srum,wxt,mft,evtx",
     ]);
     assert!(o.status.success(), "run failed: {o:?}");
 
@@ -878,6 +895,8 @@ fn no_declared_override_names_a_column_its_dataset_lacks() {
         "RBTriage",
         "SrumETriage",
         "WxTTriage",
+        "MFTriage",
+        "EvtxTriage",
     ] {
         assert!(
             tools.contains(&seeded),

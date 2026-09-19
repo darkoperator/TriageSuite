@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_evtx::{MapIndex, ParseOptions};
@@ -53,6 +54,67 @@ pub const DATASETS: &[DatasetSpec] = &[DatasetSpec {
     framing: JsonFraming::Ndjson,
     csv_only: false,
     override_suffix: None,
+}];
+
+/// Declared SQL types for the DuckDB view layer.
+///
+/// `TimeCreated` is a `String` on `EventRecord`, but every value comes from
+/// `parser::time_created`, which returns `format_time(..)` on both of its
+/// branches and never an empty string -- a canonical ISO-8601 instant with
+/// the 100ns tick recovered from the record header where the XML SystemTime
+/// lost it. The shape is therefore proven by that function, not by the field
+/// type.
+///
+/// `ProcessId` and `ThreadId` are deliberately NOT declared even though they
+/// look numeric: they are `String` on the record for EvtxECmd parity, which
+/// keeps whatever the event XML carried, and an event whose `Execution` node
+/// is absent or malformed leaves a non-numeric value there. Declaring BIGINT
+/// would turn those rows' text into a NULL the `__text` companion could only
+/// half explain.
+///
+/// These apply to the combined `events` dataset only. The `--split` and
+/// `Individual/` exports are dynamic datasets, and the view builder attaches
+/// declared types to static dataset ids alone, so those views stay
+/// all-VARCHAR.
+///
+/// Left undeclared, all free text: `Level`, `Provider`, `Channel`,
+/// `Computer`, `UserId`, `MapDescription`, `UserName`, `RemoteHost`,
+/// `PayloadData1`..`6`, `ExecutableInfo`, `HiddenRecord`, `SourceFile`,
+/// `Keywords` and `Payload`.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[DatasetColumnTypes {
+    dataset_id: "events",
+    columns: &[
+        ColumnType {
+            column: "RecordNumber",
+            sql_type: SqlType::UBigInt,
+            time_semantics: None,
+        },
+        ColumnType {
+            column: "EventRecordId",
+            sql_type: SqlType::UBigInt,
+            time_semantics: None,
+        },
+        ColumnType {
+            column: "TimeCreated",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        },
+        ColumnType {
+            column: "EventId",
+            sql_type: SqlType::BigInt,
+            time_semantics: None,
+        },
+        ColumnType {
+            column: "ChunkNumber",
+            sql_type: SqlType::BigInt,
+            time_semantics: None,
+        },
+        ColumnType {
+            column: "ExtraDataOffset",
+            sql_type: SqlType::BigInt,
+            time_semantics: None,
+        },
+    ],
 }];
 
 pub struct EvtxTool {
@@ -206,6 +268,10 @@ impl Tool for EvtxTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {
