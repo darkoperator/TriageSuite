@@ -1057,7 +1057,7 @@ every elision.
 {
   "schema_version": 3,
   "run_id": "20260913200120375",
-  "orchestrator_version": "0.2.0",
+  "orchestrator_version": "0.3.0",
   "started_utc": "2026-09-13T20:01:20.3758620Z",
   "finished_utc": "2026-09-13T20:03:26.9479110Z",
   "capture_type": "velociraptor",
@@ -1287,7 +1287,7 @@ at:
 {
   "schema_version": 3,
   "run_id": "20260913232350096",
-  "orchestrator_version": "0.2.0",
+  "orchestrator_version": "0.3.0",
   "started_utc": "2026-09-13T23:23:50.0967150Z",
   "finished_utc": "2026-09-13T23:23:50.0988860Z",
   "capture_type": "unidentified",
