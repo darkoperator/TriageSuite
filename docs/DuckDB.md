@@ -206,6 +206,214 @@ excluded and its slices are included instead, each with its own real
 `_triage_identity` — over-counting is recoverable by an analyst; silently dropping
 evidence is not.
 
+## Query templates for an incident response analyst
+
+These are ordered the way an investigation actually runs: establish what evidence
+survived, establish whether it is intact, then hunt. Every query below was run against
+a real collection; the outputs shown are real.
+
+### 1. What do I actually have?
+
+Ask the inventory, not the views — this works even if the collection has moved and the
+views' paths are stale, because `datasets.json` is readable as SQL on its own:
+
+```sql
+SELECT d.tool, d.dataset_id, d.view,
+       len(d.files)                   AS files,
+       cardinality(d.effective_types) AS typed_cols
+FROM read_json('duckdb/datasets.json') j, UNNEST(j.datasets) AS t(d)
+ORDER BY d.tool, d.dataset_id;
+```
+
+A tool that ran but produced nothing has **no row here at all**, which is itself a
+finding: an artifact class the host should have had and does not. Pair it with
+`j.dropped_overrides` and `j.warnings` for anything the generator itself flagged.
+
+Row counts and the real time span need the views. There is no loop over view names, and
+that is fine — choosing which datasets matter is the analyst's job:
+
+```sql
+SELECT 'evtx'    AS ds, count(*) n, min(TimeCreated) lo, max(TimeCreated) hi FROM evtxtriage_events
+UNION ALL SELECT 'mft',  count(*), min(Created0x10), max(Created0x10)         FROM mftriage_mft
+UNION ALL SELECT 'usn',  count(*), min(UpdateTimestamp), max(UpdateTimestamp) FROM mftriage_usn
+UNION ALL SELECT 'pf',   count(*), min(RunTime), max(RunTime)                 FROM petriage_timeline
+ORDER BY ds;
+```
+
+Which users are represented — a profile that should be there and is not is a lead:
+
+```sql
+SELECT TriageUser, count(*) n FROM jletriage_auto GROUP BY 1 ORDER BY n DESC;
+```
+
+### 2. Is the evidence intact?
+
+**Channel coverage and window.** Run this before concluding anything from an *absence*
+of events:
+
+```sql
+SELECT Channel, count(*) AS events,
+       min(TimeCreated) AS first_event, max(TimeCreated) AS last_event,
+       date_diff('day', min(TimeCreated), max(TimeCreated)) AS days
+FROM evtxtriage_events
+GROUP BY Channel ORDER BY events DESC;
+```
+
+On a real host this returned `Application` covering 964 days and `Security` covering 24
+on the same machine. That is either rollover under audit volume or a clearing, and the
+difference matters before you read anything into a missing logon.
+
+**Blackout gaps — and whether they correlate.** A gap in one channel is suspicious; the
+same gap in three is the machine being switched off. Always check more than one:
+
+```sql
+WITH e AS (
+  SELECT Channel, TimeCreated,
+         lag(TimeCreated) OVER (PARTITION BY Channel ORDER BY TimeCreated) AS prev
+  FROM evtxtriage_events
+  WHERE Channel IN ('Security','System','Microsoft-Windows-Sysmon/Operational')
+)
+SELECT Channel, prev AS gap_start, TimeCreated AS gap_end,
+       date_diff('hour', prev, TimeCreated) AS gap_hours
+FROM e
+WHERE prev IS NOT NULL AND date_diff('hour', prev, TimeCreated) >= 24
+ORDER BY gap_hours DESC;
+```
+
+**Explicit clearing.** Zero rows is a result, not a failure:
+
+```sql
+SELECT TimeCreated, Channel, EventId, MapDescription, UserName, Computer
+FROM evtxtriage_events
+WHERE (Channel = 'Security' AND EventId = 1102)
+   OR (Channel = 'System'   AND EventId IN (104, 1100))
+ORDER BY TimeCreated;
+```
+
+**Record-number discontinuities.** Catches selective record removal that leaves the time
+series looking continuous:
+
+```sql
+WITH r AS (
+  SELECT SourceFile, EventRecordId,
+         lag(EventRecordId) OVER (PARTITION BY SourceFile ORDER BY EventRecordId) AS prev
+  FROM evtxtriage_events
+)
+SELECT regexp_extract(SourceFile, '[^/\\]+$') AS log,
+       prev AS after_record, EventRecordId AS next_record,
+       EventRecordId - prev - 1 AS missing
+FROM r
+WHERE prev IS NOT NULL AND EventRecordId - prev > 1
+ORDER BY missing DESC;
+```
+
+**Did anything stop parsing?** The `__text` idiom above, applied as a health check — a
+column that suddenly fails to convert is a format change or corruption, not an empty
+host:
+
+```sql
+SELECT count(*) FILTER (WHERE TimeCreated IS NULL AND TimeCreated__text <> '') AS cast_failures,
+       count(*) FILTER (WHERE TimeCreated__text = '')                          AS blank
+FROM evtxtriage_events;
+```
+
+### 3. What can I hunt for?
+
+The provider and event-ID map for a channel, with the window each ID actually covers:
+
+```sql
+SELECT Provider, EventId, MapDescription, count(*) AS n,
+       min(TimeCreated) AS first, max(TimeCreated) AS last
+FROM evtxtriage_events
+WHERE Channel = 'Security'
+GROUP BY ALL ORDER BY n DESC;
+```
+
+A `NULL` `MapDescription` means no EvtxECmd map covers that event ID, so its payload
+fields are not broken out — worth knowing before assuming a field is parsed.
+
+### 4. Pivots
+
+**Cross-artifact timeline around an anchor.** Add or drop legs as the case needs. Note
+`anchor`, not `pivot`: `PIVOT` is a reserved word in DuckDB.
+
+```sql
+WITH anchor AS (SELECT TIMESTAMP '2026-02-14 15:04:07' AS t, INTERVAL 30 MINUTE AS w)
+SELECT e.ts, e.src, e.what, e.who FROM (
+  SELECT TimeCreated AS ts, 'EVTX' AS src,
+         Channel || ' ' || EventId || ' ' || coalesce(MapDescription, '') AS what,
+         coalesce(UserName, '') AS who                          FROM evtxtriage_events
+  UNION ALL SELECT RunTime,   'Prefetch',   ExecutableName, ''   FROM petriage_timeline
+  UNION ALL SELECT DeletedOn, 'RecycleBin', FileName, TriageUser FROM rbtriage_main
+  UNION ALL SELECT UpdateTimestamp, 'USN',
+         ParentPath || '\' || Name || ' [' || UpdateReasons || ']', '' FROM mftriage_usn
+) e, anchor p
+WHERE e.ts BETWEEN p.t - p.w AND p.t + p.w
+ORDER BY e.ts;
+```
+
+**One binary across every execution source**, which is the query that turns three
+artifacts into one answer:
+
+```sql
+SELECT 'Prefetch' AS src, ExecutableName AS item, RunTime AS ts
+  FROM petriage_timeline WHERE lower(ExecutableName) LIKE '%<name>%'
+UNION ALL SELECT 'Amcache', FullPath, FileKeyLastWriteTimestamp
+  FROM amcachetriage_unassociated_file_entries WHERE lower(FullPath) LIKE '%<name>%'
+UNION ALL SELECT 'AppCompat', Path, NULL
+  FROM appcompattriage_appcompat WHERE lower(Path) LIKE '%<name>%'
+ORDER BY ts NULLS LAST;
+```
+
+**Deletion evidence** from the journal, which records deletions the Recycle Bin never
+sees:
+
+```sql
+SELECT UpdateTimestamp, ParentPath, Name, UpdateReasons
+FROM mftriage_usn
+WHERE UpdateReasons LIKE '%FileDelete%'
+  AND UpdateTimestamp BETWEEN TIMESTAMP '<from>' AND TIMESTAMP '<to>'
+ORDER BY UpdateTimestamp DESC;
+```
+
+### Querying a dataset that has no declared types
+
+Not every dataset declares column types; the inventory query in §1 shows which do
+(`typed_cols`). An undeclared dataset still gets both views, with every column VARCHAR,
+so comparisons and ordering need an explicit cast. RETriage's registry plugin output is
+the case an analyst hits first — its per-plugin schemas are built at runtime, so they
+cannot carry a compile-time declaration:
+
+```sql
+SELECT Name, StartMode, ImagePath,
+       TRY_CAST(NameKeyLastWrite AS TIMESTAMP) AS last_write
+FROM retriage_services_system
+WHERE TRY_CAST(NameKeyLastWrite AS TIMESTAMP) > TIMESTAMP '<from>'
+ORDER BY last_write DESC;
+```
+
+Use `TRY_CAST`, never `CAST`: one malformed cell aborts the whole query with `CAST`,
+while `TRY_CAST` yields `NULL` for that row and leaves the original text beside it — the
+same guarantee the declared columns give you through `__text`.
+
+### Multiple hosts
+
+Every view carries `_triage_host`, so the cross-host form of any query above is one
+`GROUP BY _triage_host` away — provided the runs share a database. Views from separate
+runs use the same view names, so loading two `views.sql` files into one session makes
+the second win. To compare hosts, materialize each run into tables first:
+
+```sql
+.read /run-a/duckdb/views.sql
+CREATE TABLE IF NOT EXISTS t_evtx AS SELECT * FROM evtxtriage_events LIMIT 0;
+INSERT INTO t_evtx BY NAME SELECT * FROM evtxtriage_events;
+-- repeat for /run-b, then query t_evtx across both
+```
+
+`BY NAME` absorbs the column differences between runs. Materialize into a database whose
+tables were created from a **typed** run: if a table is created all-VARCHAR first, later
+typed inserts are silently down-cast to match it, with no error.
+
 ## Moving a collection: `duckdb regenerate`
 
 `views.sql` contains absolute paths (DuckDB's `read_csv` has no notion of a base
