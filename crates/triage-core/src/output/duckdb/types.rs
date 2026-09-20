@@ -61,6 +61,28 @@ impl SqlType {
     }
 }
 
+/// Declared SQL types for datasets whose id is built at run time.
+///
+/// `DatasetColumnTypes` names one exact `dataset_id`, which a dynamic
+/// dataset does not have: RETriage writes a plugin detail file per
+/// `<Plugin>_<hive stem>` and EvtxTriage writes a per-channel export per
+/// `Individual/<Channel>`, so the id varies with the evidence rather than
+/// with the code. There is no constant to name, and a declaration keyed on
+/// one would simply never match.
+///
+/// The prefix carries its own separator -- `"Services_"`, `"Individual/"` --
+/// instead of the builder inferring one. The tools do not agree on a
+/// separator, and writing the boundary explicitly is what stops a
+/// `"Services"` declaration from also claiming a future `ServicesHub_SYSTEM`.
+/// When several prefixes match one id the longest wins, so a specific
+/// declaration can sit alongside a general one.
+#[derive(Debug, Clone, Copy)]
+pub struct DynamicColumnTypes {
+    /// Matches a dynamic `dataset_id` that starts with this string.
+    pub prefix: &'static str,
+    pub columns: &'static [ColumnType],
+}
+
 /// What a timestamp column's values are relative to.
 ///
 /// Declared by the tool that emits the column, never inferred. A column

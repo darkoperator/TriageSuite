@@ -11,7 +11,7 @@ use crate::output::duckdb::inventory::{
     InventoryOnly, MetadataColumns, Status,
 };
 use crate::output::duckdb::sql::{view_name, NameAllocator};
-use crate::output::duckdb::types::DatasetColumnTypes;
+use crate::output::duckdb::types::{ColumnType, DatasetColumnTypes, DynamicColumnTypes};
 use crate::output::published::{DatasetKey, OutputFormat, PublishedFile};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -37,6 +37,7 @@ pub struct ToolOutputs {
     pub published: Vec<PublishedFile>,
     pub merged: Vec<MergedFile>,
     pub column_types: &'static [DatasetColumnTypes],
+    pub dynamic_column_types: &'static [DynamicColumnTypes],
 }
 
 #[derive(Debug, Clone)]
@@ -78,8 +79,7 @@ pub fn build(request: BuildRequest<'_>) -> Inventory {
 
     // (tool, dataset id) -> the files that belong to it, in host order.
     let mut grouped: BTreeMap<(String, String), Vec<StagedFile>> = BTreeMap::new();
-    let mut types_for: BTreeMap<(String, String), Vec<&'static DatasetColumnTypes>> =
-        BTreeMap::new();
+    let mut types_for: BTreeMap<(String, String), Vec<&'static [ColumnType]>> = BTreeMap::new();
 
     for host in request.hosts {
         for tool in &host.tools {
@@ -138,12 +138,27 @@ pub fn build(request: BuildRequest<'_>) -> Inventory {
                             derived_into: consumed.get(&file.path).cloned(),
                         });
                 }
-                if let DatasetKey::Static(id) = &file.dataset {
-                    let declared: Vec<&'static DatasetColumnTypes> = tool
+                let declared: Vec<&'static [ColumnType]> = match &file.dataset {
+                    DatasetKey::Static(id) => tool
                         .column_types
                         .iter()
                         .filter(|d| d.dataset_id == *id)
-                        .collect();
+                        .map(|d| d.columns)
+                        .collect(),
+                    // A dynamic id carries the evidence in its name
+                    // (`Services_SYSTEM`, `Individual/Security`), so it is
+                    // matched by prefix. Longest wins and nothing else is
+                    // applied: two declarations that both match are a
+                    // specific one and a general one, not two halves of a
+                    // schema, and merging them would let the general one
+                    // contradict the specific one it exists to refine.
+                    DatasetKey::Dynamic(name) => {
+                        dynamic_columns_for(tool.dynamic_column_types, name)
+                            .into_iter()
+                            .collect()
+                    }
+                };
+                {
                     if !declared.is_empty() {
                         // Recorded once per (tool, dataset), not once per
                         // file: the declaration is a compile-time constant
@@ -286,12 +301,39 @@ struct Sinks<'a> {
     dropped: &'a mut Vec<DroppedOverride>,
 }
 
+/// The declared columns for a dynamic dataset id, or `None`.
+///
+/// A dynamic id carries the evidence in its name -- `Services_SYSTEM`,
+/// `BamDam_SYSTEM_RegBack`, `Individual/Security` -- so it is matched by
+/// prefix rather than by equality. Two rules make that safe to declare
+/// against:
+///
+/// * **Longest prefix wins.** Two declarations that both match are a general
+///   one and a specific one refining it, so the specific one is the answer.
+/// * **Only the winner applies.** The matches are not merged. Merging would
+///   let the general declaration contribute a column type the specific one
+///   deliberately left out, or contradict one it deliberately changed.
+///
+/// The prefix carries its own separator (`"Services_"`, not `"Services"`),
+/// which is what stops a declaration from claiming a longer plugin name that
+/// merely starts the same way.
+fn dynamic_columns_for(
+    declared: &'static [DynamicColumnTypes],
+    dataset_id: &str,
+) -> Option<&'static [ColumnType]> {
+    declared
+        .iter()
+        .filter(|d| dataset_id.starts_with(d.prefix))
+        .max_by_key(|d| d.prefix.len())
+        .map(|d| d.columns)
+}
+
 fn assemble(
     out_root: &Path,
     tool: &str,
     dataset_id: &str,
     staged: Vec<StagedFile>,
-    declared: &[&'static DatasetColumnTypes],
+    declared: &[&'static [ColumnType]],
     sinks: &mut Sinks<'_>,
 ) -> Option<Dataset> {
     let view = sinks.view_names.allocate(&view_name(tool, dataset_id));
@@ -348,7 +390,7 @@ fn assemble(
     let mut allocator = NameAllocator::new(ordered_columns.clone());
     let mut effective_types = BTreeMap::new();
     for set in declared {
-        for column in set.columns {
+        for column in *set {
             if !all_columns.contains(column.column) {
                 sinks.dropped.push(DroppedOverride {
                     view: view.clone(),
@@ -556,4 +598,81 @@ fn extension_of(path: &Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string()
+}
+
+#[cfg(test)]
+mod dynamic_match_tests {
+    use super::dynamic_columns_for;
+    use crate::output::duckdb::types::{ColumnType, DynamicColumnTypes, SqlType};
+
+    const A: &[ColumnType] = &[ColumnType {
+        column: "a",
+        sql_type: SqlType::BigInt,
+        time_semantics: None,
+    }];
+    const B: &[ColumnType] = &[ColumnType {
+        column: "b",
+        sql_type: SqlType::Boolean,
+        time_semantics: None,
+    }];
+
+    const DECL: &[DynamicColumnTypes] = &[
+        DynamicColumnTypes {
+            prefix: "Services_",
+            columns: A,
+        },
+        DynamicColumnTypes {
+            prefix: "Services_SYSTEM_Reg",
+            columns: B,
+        },
+    ];
+
+    /// Compared by column name: `ColumnType` is a public data struct and does
+    /// not need a `PartialEq` it has no other caller for.
+    fn names(got: Option<&'static [ColumnType]>) -> Option<Vec<&'static str>> {
+        got.map(|cs| cs.iter().map(|c| c.column).collect())
+    }
+
+    #[test]
+    fn matches_a_prefix_and_ignores_the_rest_of_the_id() {
+        // The hive stem varies per capture; the plugin name does not.
+        assert_eq!(
+            names(dynamic_columns_for(DECL, "Services_SYSTEM")),
+            Some(vec!["a"])
+        );
+    }
+
+    #[test]
+    fn the_longest_prefix_wins_and_does_not_merge() {
+        // Both prefixes match this id. The specific one answers alone: if the
+        // two were merged, `a` would come back alongside `b`.
+        assert_eq!(
+            names(dynamic_columns_for(DECL, "Services_SYSTEM_RegBack")),
+            Some(vec!["b"]),
+            "the more specific declaration must win outright"
+        );
+    }
+
+    #[test]
+    fn a_separator_in_the_prefix_stops_a_longer_plugin_name_matching() {
+        // This is why prefixes are written `Services_` and not `Services`.
+        assert_eq!(names(dynamic_columns_for(DECL, "ServicesHub_SYSTEM")), None);
+    }
+
+    #[test]
+    fn the_prefix_must_start_the_id_not_merely_appear_in_it() {
+        // A substring match would claim this: the id contains "Services_"
+        // but names a different plugin. Written because a `contains` bug
+        // passed every other test in this module.
+        assert_eq!(
+            names(dynamic_columns_for(DECL, "Legacy_Services_SYSTEM")),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unknown_dataset_gets_nothing_rather_than_a_guess() {
+        assert_eq!(names(dynamic_columns_for(DECL, "TaskCache_SOFTWARE")), None);
+        assert_eq!(names(dynamic_columns_for(&[], "Services_SYSTEM")), None);
+    }
 }

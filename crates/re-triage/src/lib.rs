@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use triage_core::attribution::{sanitize_component, Identity};
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
+use triage_core::output::duckdb::types::{
+    ColumnType, DatasetColumnTypes, DynamicColumnTypes, SqlType, TimeSemantics,
+};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_registry::hive::Hive;
@@ -41,6 +44,202 @@ pub const DATASETS: &[DatasetSpec] = &[
         framing: JsonFraming::Ndjson,
         csv_only: false,
         override_suffix: None,
+    },
+];
+
+/// Declared SQL types for the `batch` dataset. RECmd's batch output is a
+/// single static schema, so it is declared the ordinary way; the per-plugin
+/// detail files are dynamic and are declared below.
+pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[DatasetColumnTypes {
+    dataset_id: "batch",
+    columns: &[ColumnType {
+        column: "LastWriteTimestamp",
+        sql_type: SqlType::Timestamp,
+        time_semantics: Some(TimeSemantics::Utc),
+    }],
+}];
+
+/// Declared SQL types for the per-plugin detail files.
+///
+/// These datasets are named `<Plugin>_<hive stem>` at run time -- and the
+/// stem is qualified further when two hives would collide, so `BamDam_SYSTEM`
+/// on one host is `BamDam_SYSTEM_RegBack` on another. There is no constant to
+/// key on, which is why these are matched by prefix.
+///
+/// The prefix includes the trailing separator so that `Services_` cannot also
+/// claim a future `ServicesHub_SYSTEM`. `TypedURLs_` deliberately covers all
+/// four of `TypedURLs_NTUSER.DAT{,_Default,_LocalService,_NetworkService}`,
+/// which is the point of prefix matching.
+///
+/// Every column here was proven to `TRY_CAST` with zero failures against a
+/// real collection. Five candidates whose *names* say time were rejected
+/// because their values are not timestamps:
+///
+/// - `ETW_SYSTEM.LastWriteTimestamp` -- `8/31/2022 2:17:27 AM +00:00`, RECmd's
+///   US-locale rendering rather than ISO-8601; 455 of 455 rows fail.
+/// - `NetworkAdapters_SYSTEM.DriverDate` -- `6-21-2006`, ambiguous M-D-Y.
+/// - `Products_SOFTWARE.InstallDate` and `UnInstall_*.InstallDate` --
+///   `20260220`, the bare MSI `YYYYMMDD` integer.
+/// - `UserAssist_NTUSER.DAT.FocusTime` -- `0d, 0h, 00m, 00s`, a duration, not
+///   an instant. Declaring it TIMESTAMP would be wrong even if it parsed.
+///
+/// Declaring any of those would turn every value in the column into a NULL
+/// with only its `__text` companion surviving, which is worse than leaving it
+/// VARCHAR for the analyst to `TRY_CAST` deliberately.
+pub const DYNAMIC_COLUMN_TYPES: &[DynamicColumnTypes] = &[
+    DynamicColumnTypes {
+        prefix: "AppCompatCache_",
+        columns: &[ColumnType {
+            column: "ModifiedTime",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "AppPaths_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "BamDam_",
+        columns: &[ColumnType {
+            column: "ExecutionTime",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "DeviceClasses_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "NetworkAdapters_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "Products_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "ProfileList_",
+        columns: &[
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastLogonTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "LastLogoffTime",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+        ],
+    },
+    DynamicColumnTypes {
+        prefix: "RADAR_",
+        columns: &[ColumnType {
+            column: "LastDetectionTime",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "SCSI_",
+        columns: &[
+            ColumnType {
+                column: "Timestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "InitialTimestamp",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+        ],
+    },
+    DynamicColumnTypes {
+        prefix: "Services_",
+        columns: &[
+            ColumnType {
+                column: "NameKeyLastWrite",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+            ColumnType {
+                column: "ParametersKeyLastWrite",
+                sql_type: SqlType::Timestamp,
+                time_semantics: Some(TimeSemantics::Utc),
+            },
+        ],
+    },
+    DynamicColumnTypes {
+        prefix: "TrustedDocuments_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "TypedURLs_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "UnInstall_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "VolumeInfoCache_",
+        columns: &[ColumnType {
+            column: "Timestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "Windows App_",
+        columns: &[ColumnType {
+            column: "InstallTime",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
+    },
+    DynamicColumnTypes {
+        prefix: "WordWheelQuery_",
+        columns: &[ColumnType {
+            column: "LastWriteTimestamp",
+            sql_type: SqlType::Timestamp,
+            time_semantics: Some(TimeSemantics::Utc),
+        }],
     },
 ];
 
@@ -133,6 +332,14 @@ impl Tool for RegistryTool {
 
     fn datasets(&self) -> &'static [DatasetSpec] {
         DATASETS
+    }
+
+    fn column_types(&self) -> &'static [DatasetColumnTypes] {
+        COLUMN_TYPES
+    }
+
+    fn dynamic_column_types(&self) -> &'static [DynamicColumnTypes] {
+        DYNAMIC_COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {

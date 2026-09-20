@@ -10,7 +10,9 @@ use std::sync::Mutex;
 
 use triage_core::error::TriageError;
 use triage_core::output::dataset::{DatasetSpec, JsonFraming};
-use triage_core::output::duckdb::types::{ColumnType, DatasetColumnTypes, SqlType, TimeSemantics};
+use triage_core::output::duckdb::types::{
+    ColumnType, DatasetColumnTypes, DynamicColumnTypes, SqlType, TimeSemantics,
+};
 use triage_core::output::router::OutputRouter;
 use triage_core::tool::{Scope, Tool};
 use triage_evtx::{MapIndex, ParseOptions};
@@ -72,10 +74,9 @@ pub const DATASETS: &[DatasetSpec] = &[DatasetSpec {
 /// would turn those rows' text into a NULL the `__text` companion could only
 /// half explain.
 ///
-/// These apply to the combined `events` dataset only. The `--split` and
-/// `Individual/` exports are dynamic datasets, and the view builder attaches
-/// declared types to static dataset ids alone, so those views stay
-/// all-VARCHAR.
+/// `Individual/<Channel>` is covered too, via `DYNAMIC_COLUMN_TYPES` below.
+/// `--split` is not: its dataset id is the source file's stem with no
+/// prefix to key on, so there is nothing stable to match.
 ///
 /// Left undeclared, all free text: `Level`, `Provider`, `Channel`,
 /// `Computer`, `UserId`, `MapDescription`, `UserName`, `RemoteHost`,
@@ -83,39 +84,51 @@ pub const DATASETS: &[DatasetSpec] = &[DatasetSpec {
 /// `Keywords` and `Payload`.
 pub const COLUMN_TYPES: &[DatasetColumnTypes] = &[DatasetColumnTypes {
     dataset_id: "events",
-    columns: &[
-        ColumnType {
-            column: "RecordNumber",
-            sql_type: SqlType::UBigInt,
-            time_semantics: None,
-        },
-        ColumnType {
-            column: "EventRecordId",
-            sql_type: SqlType::UBigInt,
-            time_semantics: None,
-        },
-        ColumnType {
-            column: "TimeCreated",
-            sql_type: SqlType::Timestamp,
-            time_semantics: Some(TimeSemantics::Utc),
-        },
-        ColumnType {
-            column: "EventId",
-            sql_type: SqlType::BigInt,
-            time_semantics: None,
-        },
-        ColumnType {
-            column: "ChunkNumber",
-            sql_type: SqlType::BigInt,
-            time_semantics: None,
-        },
-        ColumnType {
-            column: "ExtraDataOffset",
-            sql_type: SqlType::BigInt,
-            time_semantics: None,
-        },
-    ],
+    columns: EVENT_COLUMNS,
 }];
+
+/// The `Individual/<Channel>` exports are the same rows as `events`, split by
+/// channel, so they carry the same schema -- verified: all 133 of them on a
+/// real collection matched `events` column for column. One declaration keyed
+/// on the `Individual/` prefix covers every channel, including channels this
+/// code has never seen.
+pub const DYNAMIC_COLUMN_TYPES: &[DynamicColumnTypes] = &[DynamicColumnTypes {
+    prefix: "Individual/",
+    columns: EVENT_COLUMNS,
+}];
+
+const EVENT_COLUMNS: &[ColumnType] = &[
+    ColumnType {
+        column: "RecordNumber",
+        sql_type: SqlType::UBigInt,
+        time_semantics: None,
+    },
+    ColumnType {
+        column: "EventRecordId",
+        sql_type: SqlType::UBigInt,
+        time_semantics: None,
+    },
+    ColumnType {
+        column: "TimeCreated",
+        sql_type: SqlType::Timestamp,
+        time_semantics: Some(TimeSemantics::Utc),
+    },
+    ColumnType {
+        column: "EventId",
+        sql_type: SqlType::BigInt,
+        time_semantics: None,
+    },
+    ColumnType {
+        column: "ChunkNumber",
+        sql_type: SqlType::BigInt,
+        time_semantics: None,
+    },
+    ColumnType {
+        column: "ExtraDataOffset",
+        sql_type: SqlType::BigInt,
+        time_semantics: None,
+    },
+];
 
 pub struct EvtxTool {
     pub maps: MapIndex,
@@ -272,6 +285,10 @@ impl Tool for EvtxTool {
 
     fn column_types(&self) -> &'static [DatasetColumnTypes] {
         COLUMN_TYPES
+    }
+
+    fn dynamic_column_types(&self) -> &'static [DynamicColumnTypes] {
+        DYNAMIC_COLUMN_TYPES
     }
 
     fn scope(&self) -> Scope {

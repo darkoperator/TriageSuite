@@ -380,17 +380,26 @@ ORDER BY UpdateTimestamp DESC;
 
 Not every dataset declares column types; the inventory query in §1 shows which do
 (`typed_cols`). An undeclared dataset still gets both views, with every column VARCHAR,
-so comparisons and ordering need an explicit cast. RETriage's registry plugin output is
-the case an analyst hits first — its per-plugin schemas are built at runtime, so they
-cannot carry a compile-time declaration:
+so comparisons and ordering need an explicit cast:
 
 ```sql
 SELECT Name, StartMode, ImagePath,
-       TRY_CAST(NameKeyLastWrite AS TIMESTAMP) AS last_write
-FROM retriage_services_system
-WHERE TRY_CAST(NameKeyLastWrite AS TIMESTAMP) > TIMESTAMP '<from>'
-ORDER BY last_write DESC;
+       TRY_CAST(SomeUndeclaredColumn AS TIMESTAMP) AS ts
+FROM some_untyped_view
+WHERE TRY_CAST(SomeUndeclaredColumn AS TIMESTAMP) > TIMESTAMP '<from>'
+ORDER BY ts DESC;
 ```
+
+A column can be undeclared for two quite different reasons, and `typed_cols` does not
+distinguish them. Either no one has declared it yet — most datasets, and a matter of
+time — or it was declared and **deliberately rejected** because the values are not what
+the column name suggests. `UserAssist_NTUSER.DAT.FocusTime` reads `0d, 0h, 00m, 00s`: a
+duration, not an instant, so TIMESTAMP would be wrong even where it parsed.
+`ETW_SYSTEM.LastWriteTimestamp` reads `8/31/2022 2:17:27 AM +00:00`, which DuckDB
+rejects outright. Declaring either would turn the whole column into NULLs with only its
+`__text` companion surviving, which is worse than leaving it VARCHAR for you to cast
+deliberately. Those cases are recorded in each tool's `COLUMN_TYPES` doc comment, with
+the value that disqualified them.
 
 Use `TRY_CAST`, never `CAST`: one malformed cell aborts the whole query with `CAST`,
 while `TRY_CAST` yields `NULL` for that row and leaves the original text beside it — the

@@ -95,6 +95,7 @@ fn typed_host(root: &Path) -> Vec<HostOutputs> {
             published: vec![published(path, "ds", Identity::System)],
             merged: Vec::new(),
             column_types: TYPES,
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }]
@@ -199,6 +200,7 @@ fn hosts_with_different_headers_union_by_name() {
                 published: vec![published(a, "ds", Identity::System)],
                 merged: Vec::new(),
                 column_types: &[],
+                dynamic_column_types: &[],
             }],
             external: Vec::new(),
         },
@@ -209,6 +211,7 @@ fn hosts_with_different_headers_union_by_name() {
                 published: vec![published(b, "ds", Identity::System)],
                 merged: Vec::new(),
                 column_types: &[],
+                dynamic_column_types: &[],
             }],
             external: Vec::new(),
         },
@@ -239,6 +242,7 @@ fn a_key_value_directory_injects_no_phantom_column() {
             published: vec![published(path, "ds", Identity::System)],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -277,6 +281,7 @@ fn a_merged_dataset_counts_its_rows_once() {
                 format: OutputFormat::Csv,
             }],
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -342,6 +347,7 @@ fn every_inventoried_path_stays_under_the_root() {
             )],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -410,6 +416,7 @@ fn an_out_of_root_json_publish_is_warned_about() {
             }],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -805,7 +812,7 @@ fn copy_tree(from: &Path, to: &Path) {
 /// check alone only proves a declared column *name* exists in the CSV
 /// header -- it says nothing about whether DuckDB can parse the values that
 /// live there. Task 8 proved `TRY_CAST` against synthetic values; it never
-/// exercised these nine crates' real emitted formats (amc's
+/// exercised these ten crates' real emitted formats (amc's
 /// 7-digit-fraction ISO-8601 with a `Z` suffix, the
 /// `0001-01-01T00:00:00.0000000Z` parse-failure sentinel, ...). If DuckDB
 /// rejected one of those, every value in that column would silently become
@@ -866,7 +873,7 @@ fn no_declared_override_names_a_column_its_dataset_lacks() {
         "--csv",
         "--overwrite",
         "--only",
-        "amc,pe,le,jle,rb,srum,wxt,mft,evtx",
+        "amc,pe,le,jle,rb,srum,wxt,mft,evtx,re",
     ]);
     assert!(o.status.success(), "run failed: {o:?}");
 
@@ -897,6 +904,7 @@ fn no_declared_override_names_a_column_its_dataset_lacks() {
         "WxTTriage",
         "MFTriage",
         "EvtxTriage",
+        "RETriage",
     ] {
         assert!(
             tools.contains(&seeded),

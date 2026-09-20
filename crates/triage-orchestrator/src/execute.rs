@@ -124,6 +124,9 @@ pub struct ToolRunResult {
     /// the tool instance that produced it and the DuckDB view layer is built
     /// from the results.
     pub column_types: &'static [triage_core::output::duckdb::types::DatasetColumnTypes],
+    /// The same, for datasets whose id is built at run time and so is
+    /// matched by prefix (`Tool::dynamic_column_types`).
+    pub dynamic_column_types: &'static [triage_core::output::duckdb::types::DynamicColumnTypes],
     /// Category-level files produced by the Velo per-user merge post-pass
     /// (`crate::velo::merge`), each naming the per-user slices it consumed,
     /// kept separate from `output_paths` (the router's own per-user files)
@@ -154,6 +157,7 @@ impl ToolRunResult {
             output_paths: Vec::new(),
             published: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
             merged: Vec::new(),
             error: None,
             exit: None,
@@ -269,6 +273,7 @@ pub fn run_tool_on_host(
     // from the result rather than from the tool instance, which does not
     // outlive this function.
     result.column_types = tool.column_types();
+    result.dynamic_column_types = tool.dynamic_column_types();
 
     // Where this tool's process log would live under `--layout velo`, or
     // `None` under `--layout native` (`crate::velo::collection_dir_for`,

@@ -393,6 +393,7 @@ fn a_merged_file_excludes_the_slices_it_consumed() {
                 format: OutputFormat::Csv,
             }],
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -460,6 +461,7 @@ fn an_override_for_an_absent_column_is_dropped_and_recorded() {
             }],
             merged: Vec::new(),
             column_types: TYPES,
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -497,6 +499,7 @@ fn a_colliding_metadata_name_is_allocated_around() {
             }],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -531,6 +534,7 @@ fn a_json_file_is_inventory_only() {
             }],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -575,6 +579,7 @@ fn a_published_path_that_vanished_is_excluded_with_a_warning() {
             ],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -655,6 +660,7 @@ fn a_dataset_id_with_a_newline_cannot_escape_its_comment() {
             }],
             merged: Vec::new(),
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -724,6 +730,7 @@ fn a_declaration_repeated_across_hosts_is_recorded_once() {
                     }],
                     merged: Vec::new(),
                     column_types: TYPES,
+                    dynamic_column_types: &[],
                 }],
                 external: Vec::new(),
             }
@@ -779,6 +786,7 @@ fn a_path_that_is_both_published_and_merged_is_staged_once() {
                 format: OutputFormat::Csv,
             }],
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -849,6 +857,7 @@ fn a_merged_path_recorded_twice_is_staged_once() {
                 },
             ],
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];
@@ -901,6 +910,7 @@ fn a_dataset_whose_merged_file_vanished_is_warned_about() {
                 format: OutputFormat::Csv,
             }],
             column_types: &[],
+            dynamic_column_types: &[],
         }],
         external: Vec::new(),
     }];

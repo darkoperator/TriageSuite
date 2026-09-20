@@ -799,6 +799,7 @@ fn run_host(ctx: &RunContext, host: &HostCapture, totals: &mut Totals) -> HostRu
                 published: r.published.clone(),
                 merged: r.merged.clone(),
                 column_types: r.column_types,
+                dynamic_column_types: r.dynamic_column_types,
             })
             .collect(),
         external: external_tools

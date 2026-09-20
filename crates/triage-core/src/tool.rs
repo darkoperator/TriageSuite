@@ -102,6 +102,13 @@ pub trait Tool {
         &[]
     }
 
+    /// Declared SQL types for this tool's *dynamic* datasets, matched by
+    /// prefix rather than by exact id. Defaulted to empty: a tool whose
+    /// dataset ids are all static has nothing to say here.
+    fn dynamic_column_types(&self) -> &'static [crate::output::duckdb::types::DynamicColumnTypes] {
+        &[]
+    }
+
     fn scope(&self) -> Scope;
 
     fn resource_class(&self) -> ResourceClass {
