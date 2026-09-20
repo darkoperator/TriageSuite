@@ -27,10 +27,23 @@ own `$MFT`/`$J`/`$Boot`), see [Multi-drive captures](#multi-drive-captures) belo
 
 ## Compatibility
 
-Output is compatible with Eric Zimmerman's MFTECmd — same column names, order, and
-content for the `$MFT`, file-listing, `$J`, and `$Boot` datasets. MFTriage's parser is a
-streaming design (bounded memory, two-pass `$J` parent-path resolution) rather than a
-full in-memory structure walk.
+Output follows Eric Zimmerman's MFTECmd — same column names, order, and content for the
+`$MFT`, file-listing, `$J`, and `$Boot` datasets, with **one deliberate divergence**:
+
+- **`$J` carries an `Extension` column that MFTECmd does not**, in position 2, derived
+  from `Name` exactly as the `$MFT` dataset derives it from `FileName`. MFTECmd emits
+  `Extension` in its `$MFT` output but not in its `$J` output; MFTriage emits it in
+  both, so the same filter works across the two datasets (`WHERE Extension = '.exe'`
+  rather than a string match on `Name` in one and a column read in the other). The
+  consequence is that MFTriage's `$J` has 13 columns where MFTECmd's has 12, so a
+  consumer written against MFTECmd's `$J` header sees one unexpected column.
+
+MFTriage's parser is a streaming design (bounded memory, two-pass `$J` parent-path
+resolution) rather than a full in-memory structure walk.
+
+Column compatibility is documented rather than proven: there is no MFTECmd comparison
+harness for MFTriage yet, unlike the thirteen other parsers in this suite. Until there
+is, treat the claim above as an intent, not a test result.
 
 ## Flags
 
@@ -151,6 +164,9 @@ ParentSequenceNumber, ParentPath, UpdateSequenceNumber, UpdateTimestamp,
 UpdateReasons, FileAttributes, OffsetToData, SourceFile`
 
 Notes:
+- **`Extension` is MFTriage-added** and has no counterpart in MFTECmd's `$J` output —
+  see [Compatibility](#compatibility). It is derived from `Name` the same way the
+  `$MFT` dataset derives its own `Extension` from `FileName`.
 - `UpdateReasons` and `FileAttributes` are `|`-joined flag names (e.g.
   `DataExtend|DataTruncation`, `Archive|NotContentIndexed`).
 - `ParentPath` is resolved against the `$MFT` path index described above (`--mft` or
