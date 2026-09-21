@@ -15,8 +15,12 @@ json = true
 rules = "./rules"
 rules_config = "./rules/config"
 min_level = "informational"
-threads = 0
 proven_rules = false
+# threads: omit to let Hayabusa pick (one worker per core). Do NOT set 0 --
+# it is passed through as `--threads 0`, and Hayabusa 4 panics on it with
+# "Worker threads cannot be set to 0", which surfaces here as a failed
+# external-tool step rather than as a config error.
+# threads = 4
 
 [takajo]
 bin = "takajo"

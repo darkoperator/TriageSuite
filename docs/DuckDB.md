@@ -405,6 +405,99 @@ Use `TRY_CAST`, never `CAST`: one malformed cell aborts the whole query with `CA
 while `TRY_CAST` yields `NULL` for that row and leaves the original text beside it — the
 same guarantee the declared columns give you through `__text`.
 
+### Takajo's stacks, as queries
+
+Takajo writes a `ThreatHunting/` directory of stacked CSVs — `StackProcesses.csv`,
+`StackSuccessfulLogons.csv`, `StackServices.csv` and so on. Those files are **not** part
+of the view layer: the orchestrator registers `ThreatHunting` as one directory, so the
+inventory records it under `inventory_only` with reason `external-not-csv`.
+
+They do not need to be. Every `Stack*` file is a `GROUP BY` over Hayabusa's timeline,
+and that timeline *is* a view (`ext_hayabusa_csv_timeline`). Writing the aggregation in
+SQL costs one query and gains three things the file cannot give you: it runs across
+every host at once, the filtering is visible instead of built in, and the result joins
+to the rest of the run.
+
+The timeline's `Details` column packs its fields as `Key: value` separated by `¦`, so
+each field comes out with one `regexp_extract`:
+
+```sql
+trim(regexp_extract(Details, 'Proc: ([^¦]*)', 1))      -- process image
+trim(regexp_extract(Details, 'TgtUser: ([^¦]*)', 1))   -- target user
+trim(regexp_extract(Details, 'Type: ([^¦]*)', 1))      -- logon type
+trim(regexp_extract(Details, 'Svc: ([^¦]*)', 1))       -- service name
+```
+
+**`StackProcesses.csv`** — process creation is Sysmon 1 plus Security 4688, and the
+`Levels`/`Alerts` columns are the rule levels and titles aggregated per process:
+
+```sql
+WITH e AS (
+  SELECT _triage_host AS host,
+         trim(regexp_extract(Details, 'Proc: ([^¦]*)', 1)) AS process,
+         Level, RuleTitle
+  FROM ext_hayabusa_csv_timeline
+  WHERE EventID IN ('1', '4688')
+),
+lv AS (SELECT host, process, Level,     count(*) n FROM e GROUP BY ALL),
+al AS (SELECT host, process, RuleTitle, count(*) n FROM e GROUP BY ALL)
+SELECT e.host, count(*) AS "Count", e.process AS "processes",
+       (SELECT string_agg(Level     || ' (' || n || ')', ' | ' ORDER BY n DESC)
+          FROM lv WHERE lv.host = e.host AND lv.process = e.process) AS "Levels",
+       (SELECT string_agg(RuleTitle || ' (' || n || ')', ' | ' ORDER BY n DESC)
+          FROM al WHERE al.host = e.host AND al.process = e.process) AS "Alerts"
+FROM e GROUP BY e.host, e.process
+ORDER BY "Count" DESC;
+```
+
+Checked against Takajo's own output on a real collection: **382 rows to Takajo's 382**,
+39,709 events to Takajo's 39,709, and `svchost.exe` 8,442 to Takajo's 8,442.
+
+**`StackServices.csv`** — service installation, `7045` on System and `4697` on Security:
+
+```sql
+SELECT _triage_host AS host, count(*) AS "Count", Channel, EventID,
+       trim(regexp_extract(Details, 'Svc: ([^¦]*)',  1)) AS "ServiceName",
+       trim(regexp_extract(Details, 'Path: ([^¦]*)', 1)) AS "Path"
+FROM ext_hayabusa_csv_timeline
+WHERE EventID IN ('7045', '4697')
+GROUP BY ALL ORDER BY "Count" DESC;
+```
+
+53 rows against Takajo's 53 on the same host.
+
+**`StackSuccessfulLogons.csv`** — 4624, and the one case where a plain `GROUP BY` does
+*not* reproduce the file:
+
+```sql
+SELECT _triage_host AS host, count(*) AS "Count",
+       trim(regexp_extract(Details, 'TgtUser: ([^¦]*)', 1)) AS "TgtUser",
+       Computer                                             AS "TgtComp",
+       trim(regexp_extract(Details, 'Type: ([^¦]*)',    1)) AS "LogonType",
+       trim(regexp_extract(Details, 'SrcIP: ([^¦]*)',   1)) AS "SrcIP",
+       trim(regexp_extract(Details, 'SrcComp: ([^¦]*)', 1)) AS "SrcComp"
+FROM ext_hayabusa_csv_timeline
+WHERE EventID = '4624'
+  -- Takajo's default filter. Drop these two lines for its *-NoFiltering variant.
+  AND trim(regexp_extract(Details, 'TgtUser: ([^¦]*)', 1)) NOT IN ('SYSTEM', 'ANONYMOUS LOGON')
+  AND trim(regexp_extract(Details, 'TgtUser: ([^¦]*)', 1)) NOT LIKE '%$'
+GROUP BY ALL ORDER BY "Count" DESC;
+```
+
+Use `4625` for `StackFailedLogons.csv`.
+
+**Takajo filters by default, and that is the one thing to be deliberate about.** It
+ships both `StackTargetUsers.csv` and `StackTargetUsers-NoFiltering.csv` precisely
+because the unfiltered stack is mostly machine accounts and `SYSTEM`. Without the two
+filter lines above this query returns 2 rows where Takajo's file has 1 — the extra being
+a `SYSTEM` / `Type: 0` logon. Neither answer is wrong; the SQL is better only because
+the choice is on the page rather than inside a binary. Check any stack you reproduce
+against Takajo's file once, as these three were, before relying on it.
+
+The rest follow the same shape: find the event IDs, extract the fields from `Details`,
+`GROUP BY ALL`. The `List*` files (`ListIP-Addresses.txt`, `ListHashes-*.txt`) are
+`SELECT DISTINCT` over the same extractions.
+
 ### Multiple hosts
 
 Every view carries `_triage_host`, so the cross-host form of any query above is one
