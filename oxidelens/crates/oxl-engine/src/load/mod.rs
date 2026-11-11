@@ -189,10 +189,7 @@ fn remove_in(
     let after = serde_json::json!({
         "kind": kind, "path": path, "run_id": run_id, "removed": true,
         "relations_dropped": dropped,
-        "reinstated": reinstated.iter().map(|r| serde_json::json!({
-            "relation": r.relation, "host": r.host, "source_id": r.source,
-            "moved": r.moved, "left_behind": r.left_behind,
-        })).collect::<Vec<_>>(),
+        "reinstated": reinstated.iter().map(|r| r.history_json()).collect::<Vec<_>>(),
         "orphaned_marks": report.orphaned_marks,
         "orphaned_tags": report.orphaned_tags,
         "orphaned_notes": report.orphaned_notes,

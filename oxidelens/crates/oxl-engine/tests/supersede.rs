@@ -143,7 +143,7 @@ fn marks_follow_identical_rows_and_report_the_rest() {
     .unwrap();
     let old_row = mark(&mut case, SVCH0ST_WS01);
     assert!(add_tag(&mut case, &[old_row], "lateral", &analyst()).unwrap()[0].done);
-    add_note(&mut case, old_row, "look here", &analyst()).unwrap();
+    let note = add_note(&mut case, old_row, "look here", &analyst()).unwrap();
     let r = load_run(
         &mut case,
         &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
@@ -169,10 +169,37 @@ fn marks_follow_identical_rows_and_report_the_rest() {
     let after = n(
         &case,
         "select count(*) from ox.history where action = 'supersede' \
-         and json_extract(after_json, '$.moved')::BIGINT = 3 \
-         and json_extract(after_json, '$.left_behind')::BIGINT = 0",
+         and json_extract(after_json, '$.moved_count')::BIGINT = 3 \
+         and json_extract(after_json, '$.left_behind_count')::BIGINT = 0",
     );
     assert_eq!(after, 1);
+
+    // The history row says which annotation went from which row to which.
+    let after = supersede_after(&case);
+    let mut moved = after["moved"].as_array().unwrap().clone();
+    moved.sort_by_key(|m| m["kind"].as_str().unwrap().to_string());
+    assert_eq!(
+        moved,
+        vec![
+            serde_json::json!({"kind": "note", "from_row": old_row, "to_row": new_row,
+                               "note_id": note.id, "deleted": false}),
+            serde_json::json!({"kind": "row_mark", "from_row": old_row, "to_row": new_row}),
+            serde_json::json!({"kind": "row_tag", "from_row": old_row, "to_row": new_row,
+                               "tag": "lateral"}),
+        ]
+    );
+    assert_eq!(after["left_behind"], serde_json::json!([]));
+}
+
+/// The `after_json` of the case's one `supersede` history row.
+fn supersede_after(case: &Case) -> serde_json::Value {
+    let entries = oxl_engine::history(case, Some("source"), 1000, 0)
+        .unwrap()
+        .0;
+    let mut supersede = entries.into_iter().filter(|e| e.action == "supersede");
+    let one = supersede.next().expect("a supersede row");
+    assert!(supersede.next().is_none(), "more than one supersede row");
+    one.after.unwrap()
 }
 
 /// A copy of the run at `rerun` (a `rerun_ws01_prefetch` tree) under `to`,
@@ -285,8 +312,10 @@ fn reinstating_never_doubles_a_mark_or_a_tag() {
                 "select count(*) from ox.history where action = 'source_remove' \
                  and target_id = '{}' \
                  and json_extract(after_json, '$.reinstated[0].source_id')::BIGINT = 1 \
-                 and json_extract(after_json, '$.reinstated[0].moved')::BIGINT = 0 \
-                 and json_extract(after_json, '$.reinstated[0].left_behind')::BIGINT = 2",
+                 and json_extract(after_json, '$.reinstated[0].moved_count')::BIGINT = 0 \
+                 and json_extract(after_json, '$.reinstated[0].left_behind_count')::BIGINT = 2 \
+                 and json_array_length(json_extract(after_json, '$.reinstated[0].moved')) = 0 \
+                 and json_array_length(json_extract(after_json, '$.reinstated[0].left_behind')) = 2",
                 s3.source_id
             )
         ),
@@ -313,9 +342,13 @@ fn a_deleted_note_moves_with_its_row_but_is_not_counted() {
     )
     .unwrap();
     assert_eq!((r.superseded[0].moved, r.superseded[0].left_behind), (0, 0));
+    let new_row = n(&case, SVCH0ST_WS01);
+    assert_eq!(n(&case, "select row_id from ox.note"), new_row);
+    // Listed as moved, flagged deleted, though not counted.
     assert_eq!(
-        n(&case, "select row_id from ox.note"),
-        n(&case, SVCH0ST_WS01)
+        supersede_after(&case)["moved"],
+        serde_json::json!([{"kind": "note", "from_row": old_row, "to_row": new_row,
+                            "note_id": note.id, "deleted": true}])
     );
 }
 
@@ -581,7 +614,7 @@ fn removing_a_rerun_moves_marks_back_and_orphans_the_rest() {
         &analyst(),
     )
     .unwrap();
-    mark(&mut case, SVCH0ST_WS01);
+    let rerun_svch0st = mark(&mut case, SVCH0ST_WS01);
     let psexesvc = mark(
         &mut case,
         "select _ox_row from petriage_timeline where ExecutableName = 'PSEXESVC.EXE'",
@@ -621,11 +654,28 @@ fn removing_a_rerun_moves_marks_back_and_orphans_the_rest() {
         n(
             &case,
             "select count(*) from ox.history where action = 'source_remove' \
-             and json_extract(after_json, '$.reinstated[0].moved')::BIGINT = 1 \
-             and json_extract(after_json, '$.reinstated[0].left_behind')::BIGINT = 1 \
+             and json_extract(after_json, '$.reinstated[0].moved_count')::BIGINT = 1 \
+             and json_extract(after_json, '$.reinstated[0].left_behind_count')::BIGINT = 1 \
              and json_extract(after_json, '$.orphaned_marks')::BIGINT = 1"
         ),
         1
+    );
+    let removal = oxl_engine::history(&case, Some("source"), 1000, 0)
+        .unwrap()
+        .0
+        .into_iter()
+        .find(|e| e.action == "source_remove")
+        .unwrap();
+    let entry = &removal.after.unwrap()["reinstated"][0];
+    let original_svch0st = n(&case, SVCH0ST_WS01);
+    assert_eq!(
+        entry["moved"],
+        serde_json::json!([{"kind": "row_mark", "from_row": rerun_svch0st,
+                            "to_row": original_svch0st}])
+    );
+    assert_eq!(
+        entry["left_behind"],
+        serde_json::json!([{"kind": "row_mark", "from_row": psexesvc}])
     );
 }
 

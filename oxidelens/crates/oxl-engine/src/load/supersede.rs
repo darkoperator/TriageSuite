@@ -69,14 +69,17 @@ pub(crate) fn supersede(
                  WHERE source_id = ? AND relation = ? AND host = ?",
                 params![old_source, relation, host],
             )?;
-            let (moved, left_behind) = rebind(conn, old_source, new_source, &relation, &host)?;
+            let rebound = rebind(conn, old_source, new_source, &relation, &host)?;
             let before = serde_json::json!({
                 "source_id": old_source, "relation": relation, "host": host, "active": true,
             });
-            let after = serde_json::json!({
+            let mut after = serde_json::json!({
                 "source_id": old_source, "relation": relation, "host": host, "active": false,
-                "superseded_by": new_source, "moved": moved, "left_behind": left_behind,
+                "superseded_by": new_source,
             });
+            if let Some(after) = after.as_object_mut() {
+                after.extend(rebound.history_fields());
+            }
             conn.execute(
                 "INSERT INTO ox.history \
                  (id, \"at\", \"by\", target_kind, target_id, action, before_json, after_json) \
@@ -93,8 +96,8 @@ pub(crate) fn supersede(
                 relation: relation.clone(),
                 host: host.clone(),
                 old_source,
-                moved,
-                left_behind,
+                moved: rebound.moved,
+                left_behind: rebound.left_behind,
             });
         }
     }
@@ -107,11 +110,22 @@ pub(super) struct Reinstated {
     pub relation: String,
     pub host: String,
     pub source: i64,
-    /// Annotations (marks, tags, live notes) that moved back, as `rebind`
-    /// counts them.
-    pub moved: u64,
-    /// Annotations left on the removed run's rows; orphaned.
-    pub left_behind: u64,
+    /// What moved back and what was left on the removed run's rows
+    /// (orphaned), as `rebind` reports it.
+    pub rebound: Rebound,
+}
+
+impl Reinstated {
+    /// This reinstatement's entry in the `source_remove` history row.
+    pub(super) fn history_json(&self) -> serde_json::Value {
+        let mut e = serde_json::json!({
+            "relation": self.relation, "host": self.host, "source_id": self.source,
+        });
+        if let Some(e) = e.as_object_mut() {
+            e.extend(self.rebound.history_fields());
+        }
+        e
+    }
 }
 
 /// Supersession undone, inside a removal's transaction and before
@@ -152,16 +166,66 @@ pub(super) fn reinstate(conn: &Connection, removed_source: i64) -> Result<Vec<Re
              WHERE source_id = ? AND relation = ? AND host = ?",
             params![source, relation, host],
         )?;
-        let (moved, left_behind) = rebind(conn, removed_source, source, &relation, &host)?;
+        let rebound = rebind(conn, removed_source, source, &relation, &host)?;
         reinstated.push(Reinstated {
             relation,
             host,
             source,
-            moved,
-            left_behind,
+            rebound,
         });
     }
     Ok(reinstated)
+}
+
+/// What `rebind` did, for the caller's report and its history row.
+pub(super) struct Rebound {
+    /// Annotations that moved, counted per record: each mark, each tag row
+    /// and each note that is not deleted.
+    pub moved: u64,
+    /// Annotations that stayed on the old rows, counted the same way.
+    pub left_behind: u64,
+    /// Every annotation that moved, deleted notes included, as
+    /// `{kind, from_row, to_row}` plus `tag` for a tag and `note_id` and
+    /// `deleted` for a note; `kind` is `row_mark`, `row_tag` or `note`.
+    pub moves: Vec<serde_json::Value>,
+    /// Every annotation that stayed, in the same shape without `to_row`.
+    pub stayed: Vec<serde_json::Value>,
+}
+
+impl Rebound {
+    /// The history fields: the lists under `moved` and `left_behind`, so a
+    /// row's history reaches the annotations that left it, and the counts
+    /// beside them.
+    fn history_fields(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut fields = serde_json::Map::new();
+        fields.insert("moved".into(), self.moves.clone().into());
+        fields.insert("left_behind".into(), self.stayed.clone().into());
+        fields.insert("moved_count".into(), self.moved.into());
+        fields.insert("left_behind_count".into(), self.left_behind.into());
+        fields
+    }
+}
+
+/// One annotation `rebind` moved (with `to_row`) or left (without).
+fn entry(kind: &str, from_row: i64, to_row: Option<i64>) -> serde_json::Value {
+    let mut e = serde_json::json!({"kind": kind, "from_row": from_row});
+    if let Some(to_row) = to_row {
+        e["to_row"] = to_row.into();
+    }
+    e
+}
+
+fn tag_entry(tag: &str, from_row: i64, to_row: Option<i64>) -> serde_json::Value {
+    let mut e = entry("row_tag", from_row, to_row);
+    e["tag"] = tag.into();
+    e
+}
+
+fn note_entry(note: (i64, bool), from_row: i64, to_row: Option<i64>) -> serde_json::Value {
+    let mut e = entry("note", from_row, to_row);
+    e["note_id"] = note.0.into();
+    e["deleted"] = note.1.into();
+    e
 }
 
 /// Repoint every mark, tag and note on an annotated row of `from_source`'s
@@ -169,18 +233,17 @@ pub(super) fn reinstate(conn: &Connection, removed_source: i64) -> Result<Vec<Re
 /// occurrence. Supersession moves them forward to the new run; removing
 /// that run moves them back to the run it had superseded.
 ///
-/// Returns `(moved, left_behind)` counted per annotation record: each mark,
-/// each tag row and each note that is not deleted (a deleted note moves
-/// with its row but is not counted). An annotation stays where it is, and is
-/// left behind, when its row has no counterpart, or when the counterpart
-/// already has a mark (for a mark) or the same tag (for a tag).
+/// Counted per annotation record (see `Rebound`); a deleted note moves with
+/// its row and is listed, but is not counted. An annotation stays where it
+/// is, and is left behind, when its row has no counterpart, or when the
+/// counterpart already has a mark (for a mark) or the same tag (for a tag).
 pub(super) fn rebind(
     conn: &Connection,
     from_source: i64,
     to_source: i64,
     relation: &str,
     host: &str,
-) -> Result<(u64, u64)> {
+) -> Result<Rebound> {
     let host_column = quote_ident(&host_column(conn, relation)?.ok_or_else(|| {
         EngineError::Invalid(format!(
             "{relation} has rows for host {host} but no host column"
@@ -209,13 +272,26 @@ pub(super) fn rebind(
         .query_map(params![host, host], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
 
-    let (mut moved, mut left_behind) = (0u64, 0u64);
+    let mut out = Rebound {
+        moved: 0,
+        left_behind: 0,
+        moves: Vec::new(),
+        stayed: Vec::new(),
+    };
     for (old_row, new_row) in pairs {
         let marks = count(conn, "ox.row_mark", old_row, "")?;
         let tags = tags_on(conn, old_row)?;
-        let notes = count(conn, "ox.note", old_row, " AND NOT deleted")?;
+        let notes = notes_on(conn, old_row)?;
+        let live = len(notes.iter().filter(|(_, deleted)| !deleted));
         let Some(new_row) = new_row else {
-            left_behind += marks + len(&tags) + notes;
+            out.left_behind += marks + len(tags.iter()) + live;
+            if marks > 0 {
+                out.stayed.push(entry("row_mark", old_row, None));
+            }
+            out.stayed
+                .extend(tags.iter().map(|t| tag_entry(t, old_row, None)));
+            out.stayed
+                .extend(notes.iter().map(|n| note_entry(*n, old_row, None)));
             continue;
         };
         // A row carries at most one mark: one the target already has (an
@@ -223,26 +299,30 @@ pub(super) fn rebind(
         // stands, and the incoming one stays where it is.
         if marks > 0 {
             if count(conn, "ox.row_mark", new_row, "")? > 0 {
-                left_behind += marks;
+                out.left_behind += marks;
+                out.stayed.push(entry("row_mark", old_row, None));
             } else {
                 conn.execute(
                     "UPDATE ox.row_mark SET row_id = ? WHERE row_id = ?",
                     params![new_row, old_row],
                 )?;
-                moved += marks;
+                out.moved += marks;
+                out.moves.push(entry("row_mark", old_row, Some(new_row)));
             }
         }
         // Likewise a tag the target already carries is not doubled.
         let present = tags_on(conn, new_row)?;
         for tag in tags {
             if present.contains(&tag) {
-                left_behind += 1;
+                out.left_behind += 1;
+                out.stayed.push(tag_entry(&tag, old_row, None));
             } else {
                 conn.execute(
                     "UPDATE ox.row_tag SET row_id = ? WHERE row_id = ? AND tag = ?",
                     params![new_row, old_row, tag],
                 )?;
-                moved += 1;
+                out.moved += 1;
+                out.moves.push(tag_entry(&tag, old_row, Some(new_row)));
             }
         }
         // Notes always move, deleted ones too; only live ones are counted.
@@ -250,9 +330,11 @@ pub(super) fn rebind(
             "UPDATE ox.note SET row_id = ? WHERE row_id = ?",
             params![new_row, old_row],
         )?;
-        moved += notes;
+        out.moved += live;
+        out.moves
+            .extend(notes.iter().map(|n| note_entry(*n, old_row, Some(new_row))));
     }
-    Ok((moved, left_behind))
+    Ok(out)
 }
 
 /// The rows of annotation table `table` on `row`, with `extra` added to the
@@ -274,6 +356,14 @@ fn tags_on(conn: &Connection, row: i64) -> Result<Vec<String>> {
         .collect::<std::result::Result<_, _>>()?)
 }
 
-fn len(items: &[String]) -> u64 {
-    u64::try_from(items.len()).unwrap_or(u64::MAX)
+/// `(id, deleted)` of every note on `row`, deleted ones included.
+fn notes_on(conn: &Connection, row: i64) -> Result<Vec<(i64, bool)>> {
+    Ok(conn
+        .prepare("SELECT id, deleted FROM ox.note WHERE row_id = ? ORDER BY id")?
+        .query_map(params![row], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?)
+}
+
+fn len<T>(items: impl Iterator<Item = T>) -> u64 {
+    u64::try_from(items.count()).unwrap_or(u64::MAX)
 }
