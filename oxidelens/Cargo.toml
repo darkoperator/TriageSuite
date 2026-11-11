@@ -36,6 +36,9 @@ unusual_byte_groupings = "deny"
 oxl-engine = { path = "crates/oxl-engine" }
 oxl-fixtures = { path = "crates/oxl-fixtures" }
 triage-core = { path = "../crates/triage-core" }
+# Test scaffolding only: skip_if_missing, the suite's gate for tests that
+# need evidence the repository does not carry.
+triage-testkit = { path = "../crates/triage-testkit" }
 # Pinned exactly: the case file is a DuckDB database, and a storage-format
 # change between DuckDB releases is a case file the analyst can no longer open.
 duckdb = { version = "=1.10505.0", features = ["bundled", "json"] }

@@ -821,7 +821,7 @@ dependencies = [
  "tar",
  "ureq",
  "vcpkg",
- "zip",
+ "zip 6.0.0",
 ]
 
 [[package]]
@@ -930,9 +930,12 @@ dependencies = [
  "chrono",
  "duckdb",
  "oxl-fixtures",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "triage-core",
+ "triage-testkit",
 ]
 
 [[package]]
@@ -1436,6 +1439,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "triage-testkit"
+version = "0.3.0"
+dependencies = [
+ "csv",
+ "flate2",
+ "serde_json",
+ "zip 4.6.1",
+]
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1811,6 +1824,19 @@ name = "zeroize"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+
+[[package]]
+name = "zip"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+]
 
 [[package]]
 name = "zip"

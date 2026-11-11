@@ -9,9 +9,11 @@
 pub mod actor;
 pub mod case;
 pub mod error;
+pub mod load;
 pub mod time;
 
 pub use actor::Actor;
 pub use case::{Case, CaseInfo, CASE_FORMAT};
 pub use error::{EngineError, Result};
+pub use load::{load_run, sources, LoadReport, LoadedRelation, SourceInfo, Superseded};
 pub use time::{now_iso, parse_utc_text};

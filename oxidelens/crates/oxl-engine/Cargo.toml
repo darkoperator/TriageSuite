@@ -9,6 +9,8 @@ description = "The OxideLens case engine: a DuckDB case file over TriageSuite ou
 [dependencies]
 triage-core.workspace = true
 duckdb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 
@@ -17,6 +19,7 @@ chrono.workspace = true
 # crate, and a unit test inside src/ that used it would link a second copy.
 oxl-fixtures.workspace = true
 tempfile.workspace = true
+triage-testkit.workspace = true
 
 [lints]
 workspace = true

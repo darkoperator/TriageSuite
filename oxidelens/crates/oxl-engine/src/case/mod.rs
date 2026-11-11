@@ -132,6 +132,11 @@ impl Case {
         &self.conn
     }
 
+    /// Mutable access, which a transaction needs.
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }

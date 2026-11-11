@@ -35,7 +35,7 @@ CREATE TABLE ox.source (
 COMMENT ON TABLE ox.source IS 'One row per load: a TriageSuite run or a loose file. Its data lives in schema src_<id>.';
 COMMENT ON COLUMN ox.source.id IS 'Source id, from ox.source_seq; names the schema src_<id>.';
 COMMENT ON COLUMN ox.source.kind IS 'run (a TriageSuite output root) or file (a loose file).';
-COMMENT ON COLUMN ox.source.path IS 'The path that was loaded, as given at load time.';
+COMMENT ON COLUMN ox.source.path IS 'The path that was loaded, made absolute with links resolved at load time.';
 COMMENT ON COLUMN ox.source.run_id IS 'The run''s id from datasets.json; NULL for a loose file.';
 COMMENT ON COLUMN ox.source.generation IS 'The datasets.json generation that was loaded; NULL for a loose file.';
 COMMENT ON COLUMN ox.source.loaded_at IS 'When it was loaded (UTC text).';
