@@ -316,6 +316,36 @@ fn set_primary_time_requires_a_catalogued_timestamp_and_is_recorded() {
 }
 
 #[test]
+fn an_agent_cannot_set_a_primary_time() {
+    let (_d, mut case) = loaded();
+    for column in [None, Some("TimeCreated")] {
+        let err = set_primary_time(&mut case, "evtxtriage_events", column, &agent()).unwrap_err();
+        assert_eq!(err.code(), "refused", "{column:?}");
+    }
+    assert_eq!(
+        relation(&case, "evtxtriage_events")
+            .unwrap()
+            .primary_time
+            .as_deref(),
+        Some("TimeCreated")
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.relation where primary_time_chosen"
+        ),
+        0
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'set_primary_time'"
+        ),
+        0
+    );
+}
+
+#[test]
 fn unknown_relation_or_column_is_not_found() {
     let (_d, mut case) = loaded();
     assert_eq!(relation(&case, "nope").unwrap_err().code(), "not_found");

@@ -125,13 +125,12 @@ pub fn declare(
         SqlTypeArg::UBigInt => SqlType::UBigInt,
         SqlTypeArg::Boolean => SqlType::Boolean,
     };
-    let semantics = match semantics {
-        Some(SemanticsArg::Utc) => Some(TimeSemantics::Utc),
-        Some(SemanticsArg::Unknown) => Some(TimeSemantics::Unknown),
-        // Step 1 reads timestamps as UTC unless told otherwise.
-        None if sql_type == SqlType::Timestamp => Some(TimeSemantics::Utc),
-        None => None,
-    };
+    // A zone is never guessed: without --semantics a TIMESTAMP reaches the
+    // engine without one, and the engine refuses it as invalid.
+    let semantics = semantics.map(|s| match s {
+        SemanticsArg::Utc => TimeSemantics::Utc,
+        SemanticsArg::Unknown => TimeSemantics::Unknown,
+    });
     let mut case = ctx.open_case()?;
     oxl_engine::declare_type(&mut case, relation, column, sql_type, semantics, &ctx.actor)?;
     Ok(Reply::new(json!({"declared": true})))

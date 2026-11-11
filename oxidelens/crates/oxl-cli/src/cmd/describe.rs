@@ -105,11 +105,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ("note list", "List the notes on a row: note list --row <id>"),
     (
         "column declare",
-        "Type a column (analyst only; a column the suite typed keeps its type): column declare <relation> <column> --type TIMESTAMP|BIGINT|UBIGINT|BOOLEAN [--semantics utc|unknown (TIMESTAMP only, default utc)]",
+        "Type a column (analyst only; a column the suite typed keeps its type): column declare <relation> <column> --type TIMESTAMP|BIGINT|UBIGINT|BOOLEAN [--semantics utc|unknown]. --semantics is required for TIMESTAMP and refused for any other type: a zone is never guessed",
     ),
     (
         "column primary-time",
-        "Set the timestamp column a relation's timeline runs on, or clear it: column primary-time <relation> (<column> | --none)",
+        "Set the timestamp column a relation's timeline runs on, or clear it (analyst only): column primary-time <relation> (<column> | --none)",
     ),
     (
         "history",

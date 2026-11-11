@@ -234,6 +234,79 @@ fn column_declare_and_primary_time() {
         "BIGINT",
     ]);
     assert_eq!(c, 2);
+    // A timestamp's zone is never guessed: --semantics is required.
+    let ts = |extra: &[&str]| {
+        let mut args = vec![
+            "--case",
+            p,
+            "column",
+            "declare",
+            hayabusa,
+            "Timestamp",
+            "--type",
+            "TIMESTAMP",
+        ];
+        args.extend_from_slice(extra);
+        ox(&args)
+    };
+    let (c, v) = ts(&[]);
+    assert_eq!(
+        (c, v["error"]["code"].as_str()),
+        (2, Some("invalid")),
+        "{v}"
+    );
+    assert!(
+        inner(&v["error"]["untrusted"])["message"]
+            .as_str()
+            .unwrap()
+            .contains("semantics"),
+        "{v}"
+    );
+    assert_eq!(ts(&["--semantics", "unknown"]).0, 0);
+    let (_, schema) = ox(&["--case", p, "schema", hayabusa]);
+    let columns = inner(&schema["data"]["untrusted"])["columns"].clone();
+    let time = columns
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "Timestamp")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (time["sql_type"].as_str(), time["time_semantics"].as_str()),
+        (Some("TIMESTAMP"), Some("unknown"))
+    );
+
+    // An agent may not choose a relation's time.
+    for args in [
+        &[
+            "--case",
+            p,
+            "--as",
+            "agent:claude",
+            "column",
+            "primary-time",
+            "fw_csv",
+            "--none",
+        ][..],
+        &[
+            "--case",
+            p,
+            "--as",
+            "agent:claude",
+            "column",
+            "primary-time",
+            "fw_csv",
+            "time",
+        ][..],
+    ] {
+        let (c, v) = ox(args);
+        assert_eq!(
+            (c, v["error"]["code"].as_str()),
+            (4, Some("refused")),
+            "{v}"
+        );
+    }
 
     let hist = ["--case", p, "histogram", "fw_csv"];
     assert_eq!(ox(&hist).0, 0);

@@ -335,11 +335,12 @@ pub enum ColumnCmd {
         column: String,
         #[arg(long = "type", value_enum)]
         sql_type: SqlTypeArg,
-        /// For a TIMESTAMP: utc (the default) or unknown.
+        /// Required for a TIMESTAMP, and only for one: utc or unknown.
         #[arg(long, value_enum)]
         semantics: Option<SemanticsArg>,
     },
-    /// Set the timestamp column a relation's timeline runs on, or clear it.
+    /// Set the timestamp column a relation's timeline runs on, or clear it
+    /// (analyst only).
     PrimaryTime {
         relation: String,
         #[arg(required_unless_present = "none", conflicts_with = "none")]

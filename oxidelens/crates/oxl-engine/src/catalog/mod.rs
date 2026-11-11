@@ -284,13 +284,19 @@ fn declare_in(
 }
 
 /// Make `column` (a catalogued timestamp) the time `relation`'s timeline
-/// runs on, or clear it with `None`.
+/// runs on, or clear it with `None`. An agent may not: the choice outlives
+/// later loads and changes the analyst's histogram, default sort and pivots.
 pub fn set_primary_time(
     case: &mut Case,
     relation: &str,
     column: Option<&str>,
     actor: &Actor,
 ) -> Result<()> {
+    if actor.is_agent() {
+        return Err(EngineError::Refused(
+            "an agent may not choose a relation's primary time; an analyst must".to_string(),
+        ));
+    }
     let tx = case.conn_mut().transaction()?;
     let before = read_relation(&tx, relation)?.primary_time;
     if let Some(column) = column {

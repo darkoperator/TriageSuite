@@ -73,7 +73,8 @@ enforces what each may do, and the CLI adds no rules of its own:
 - An agent's tags must start `ai:`; an analyst's must not.
 - An agent never changes a mark that exists, clears only marks it set,
   removes only tags it applied and deletes only notes it wrote.
-- An agent cannot declare a column's type or remove a source.
+- An agent cannot declare a column's type, choose a relation's primary time
+  or remove a source.
 
 ## Commands
 
@@ -110,7 +111,7 @@ command and limit and needs no case.
 | `note delete <note id>` | Delete a note (the history keeps a tombstone) |
 | `note list --row <id>` | A row's notes |
 | `column declare <relation> <column> --type TIMESTAMP\|BIGINT\|UBIGINT\|BOOLEAN [--semantics utc\|unknown]` | Type a column (analyst only) |
-| `column primary-time <relation> (<column> \| --none)` | Set or clear the time a relation's timeline runs on |
+| `column primary-time <relation> (<column> \| --none)` | Set or clear the time a relation's timeline runs on (analyst only) |
 | `history [--kind K] [--limit N] [--offset N]` | Every change, newest first; `K` is `source`, `relation`, `row_mark`, `row_tag` or `note` |
 
 `QUERY` is the set of options every command that reads a relation shares:
@@ -128,8 +129,10 @@ comma-separated list of integers; anything else (an empty entry, a sign, a
 decimal) is `invalid`. They exit 0 when the call was accepted, even if some
 rows were not done: `done` and `not_done` count them and `outcomes` says why
 for each row. A refusal of the whole call (an agent over the row cap, a
-malformed tag) is an error. A `TIMESTAMP` declared without `--semantics`
-is read as UTC; local time is not supported yet.
+malformed tag) is an error. `column declare --type TIMESTAMP` requires
+`--semantics utc` or `--semantics unknown` (without it the call is `invalid`:
+a zone is never guessed), and `--semantics` with any other type is `invalid`;
+local time is not supported yet.
 
 A column the suite already typed keeps its type, so `column declare` on it is
 `invalid`. A relation's primary time must be a typed timestamp column.
