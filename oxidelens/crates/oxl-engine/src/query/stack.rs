@@ -3,10 +3,12 @@
 //! do in a spreadsheet pivot.
 
 use super::group::{as_count, first_last_sql, key_sql, MAX_BY};
+use super::page::clip_text;
 use super::{find_column, marked_sql, scope, GridQuery, ROW_ALIAS};
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo};
 use crate::error::{EngineError, Result};
+use crate::listing::check_limit;
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
 use triage_core::output::duckdb::sql::quote_ident;
@@ -20,7 +22,8 @@ pub enum StackOrder {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StackRow {
-    /// One entry per `by` column; `None` for an empty cell.
+    /// One entry per `by` column, cut to `CELL_CAP` characters; `None` for
+    /// an empty cell.
     pub values: Vec<Option<String>>,
     pub count: u64,
     /// Distinct hosts the combination appears on; 0 without a host column.
@@ -42,11 +45,15 @@ pub struct Stack {
     pub rows: Vec<StackRow>,
     /// More combinations follow this page.
     pub truncated: bool,
+    /// Some value on this page was longer than `CELL_CAP` characters and
+    /// was cut.
+    pub cells_clipped: bool,
 }
 
-/// Stack `by` (1 to 4 columns) over the rows `q` selects, ordered by count
-/// (ties by the values ascending, empty last). `Invalid` for a bad column
-/// count; `NotFound` for a column the relation lacks.
+/// Up to `limit` combinations from `offset` of `by` (1 to 4 columns) over
+/// the rows `q` selects, ordered by count (ties by the values ascending,
+/// empty last). `Invalid` for a bad column count or a `limit` of 0 or over
+/// `MAX_LIMIT`; `NotFound` for a column the relation lacks.
 pub fn stack(
     case: &Case,
     q: &GridQuery,
@@ -55,6 +62,7 @@ pub fn stack(
     limit: u32,
     offset: u64,
 ) -> Result<Stack> {
+    check_limit(limit)?;
     if by.is_empty() || by.len() > MAX_BY {
         return Err(EngineError::Invalid(format!(
             "stack needs 1 to {MAX_BY} columns (got {})",
@@ -118,10 +126,14 @@ pub fn stack(
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
+    let mut cells_clipped = false;
     while let Some(row) = rows.next()? {
-        let values = (0..n)
-            .map(|i| row.get::<_, Option<String>>(i))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut values = Vec::with_capacity(n);
+        for i in 0..n {
+            let (value, clipped) = clip_text(row.get::<_, Option<String>>(i)?);
+            cells_clipped |= clipped;
+            values.push(value);
+        }
         out.push(StackRow {
             values,
             count: as_count(row.get(n)?),
@@ -140,5 +152,6 @@ pub fn stack(
         rows_counted: as_count(rows_counted),
         truncated: shown < distinct,
         rows: out,
+        cells_clipped,
     })
 }

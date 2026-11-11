@@ -63,7 +63,7 @@ pub struct Page {
 }
 
 /// Up to `limit` rows of `q` from `offset`, in `q`'s order. `Invalid` when
-/// `limit` is over `MAX_LIMIT`.
+/// `limit` is 0 or over `MAX_LIMIT`.
 pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page> {
     check_limit(limit)?;
     let scope = scope(case, q)?;

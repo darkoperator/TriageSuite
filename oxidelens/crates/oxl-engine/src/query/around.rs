@@ -140,7 +140,7 @@ const FALLBACK_VALUES: usize = 4;
 
 /// Up to `limit` rows of `source` from `offset`, across every relation it
 /// covers: time ascending, untimed last, then relation name, then row id.
-/// `Invalid` when `limit` is over `MAX_LIMIT`, or for what `find` or
+/// `Invalid` when `limit` is 0 or over `MAX_LIMIT`, or for what `find` or
 /// `around` would refuse.
 pub fn merged_rows(
     case: &Case,

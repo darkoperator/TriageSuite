@@ -65,6 +65,9 @@ fn a_page_over_the_maximum_is_invalid() {
     let (_d, path) = closed();
     let e = query_sql(&path, "select 1", MAX_LIMIT + 1, 0).unwrap_err();
     assert_eq!(e.code(), "invalid");
+    // A page of nothing is a mistake, not an empty page.
+    let e = query_sql(&path, "select 1", 0, 0).unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
     assert_eq!(
         query_sql(&path, "select 1", MAX_LIMIT, 0).unwrap().rows,
         vec![vec![s("1")]]

@@ -187,6 +187,9 @@ pub fn groups(
     Ok(Reply {
         data: json!({
             "groups": groups.len(),
+            // A cut key is not the group's key, so it cannot go back as
+            // --parent; the engine keeps the whole one for in-process callers.
+            "cells_clipped": list.items.iter().any(|g| g.key_clipped),
             "untrusted": wrap(&json!({"groups": groups})),
         }),
         truncated: list.truncated,
@@ -246,6 +249,7 @@ pub fn stack(
             "distinct": s.distinct,
             "rows_counted": s.rows_counted,
             "rows": rows.len(),
+            "cells_clipped": s.cells_clipped,
             "untrusted": wrap(&json!({"by": s.by, "rows": rows})),
         }),
         truncated: s.truncated,

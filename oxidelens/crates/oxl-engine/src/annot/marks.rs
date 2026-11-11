@@ -188,7 +188,7 @@ fn change<'a>(
 
 /// Up to `limit` marked rows from `offset`, every mark or only `by`'s, in
 /// the order they were marked. A row out of the view is listed, with
-/// `active` false. `Invalid` when `limit` is over `MAX_LIMIT`.
+/// `active` false. `Invalid` when `limit` is 0 or over `MAX_LIMIT`.
 pub fn marks(
     case: &Case,
     by: Option<&Actor>,

@@ -54,7 +54,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "groups",
-        "One level of grouping: groups <relation> --by a,b [--parent <json array>] [QUERY] [--limit N] [--offset N]",
+        "One level of grouping: groups <relation> --by a,b [--parent <json array>] [QUERY] [--limit N] [--offset N]. Keys longer than cell_chars are cut (cells_clipped); a cut key selects nothing as --parent",
     ),
     (
         "histogram",
@@ -62,7 +62,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "stack",
-        "Distinct value combinations and their host spread: stack <relation> --by a,b [--order rarest|commonest] [QUERY] [--limit N] [--offset N]",
+        "Distinct value combinations and their host spread: stack <relation> --by a,b [--order rarest|commonest] [QUERY] [--limit N] [--offset N]. Values longer than cell_chars are cut (cells_clipped)",
     ),
     (
         "find",
@@ -151,6 +151,8 @@ pub fn capabilities() -> Reply {
         "commands": commands,
         "query_options": QUERY_OPTIONS,
         "limits": {
+            // Every paged list (rows, groups, stack, find --rows, around
+            // --rows, mark, tag and note lists, history, query): 1 to rows_max.
             "rows_default": DEFAULT_LIMIT,
             "rows_max": MAX_LIMIT,
             "cell_chars": CELL_CAP,

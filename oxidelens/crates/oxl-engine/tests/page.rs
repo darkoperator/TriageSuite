@@ -27,6 +27,61 @@ fn code<T>(result: oxl_engine::Result<T>) -> (&'static str, String) {
 }
 
 #[test]
+fn every_paged_call_refuses_a_limit_of_0_or_over_the_maximum() {
+    let (_d, case) = loaded();
+    let r = n(&case, "select min(_ox_row) from evtxtriage_events");
+    let by = vec!["Channel".to_string()];
+    let around = oxl_engine::MergedSource::Around {
+        host: "WS01".into(),
+        at: "2026-01-05T02:15:00Z".into(),
+        window_seconds: 300,
+    };
+    for limit in [0, MAX_LIMIT + 1] {
+        let calls: [(&str, &'static str); 8] = [
+            ("page", code(page(&case, &events(), limit, 0)).0),
+            (
+                "groups",
+                code(oxl_engine::groups(&case, &events(), &by, &[], limit, 0)).0,
+            ),
+            (
+                "stack",
+                code(oxl_engine::stack(
+                    &case,
+                    &events(),
+                    &by,
+                    oxl_engine::StackOrder::Rarest,
+                    limit,
+                    0,
+                ))
+                .0,
+            ),
+            ("marks", code(oxl_engine::marks(&case, None, limit, 0)).0),
+            (
+                "history",
+                code(oxl_engine::history(&case, None, limit, 0)).0,
+            ),
+            (
+                "merged_rows",
+                code(oxl_engine::merged_rows(&case, &around, limit, 0)).0,
+            ),
+            ("tags", code(oxl_engine::tags(&case, limit, 0)).0),
+            ("notes", code(oxl_engine::notes(&case, r, limit, 0)).0),
+        ];
+        for (name, c) in calls {
+            assert_eq!(c, "invalid", "{name} with limit {limit}");
+        }
+    }
+    // The bounds themselves are fine.
+    for limit in [1, MAX_LIMIT] {
+        assert_eq!(code(page(&case, &events(), limit, 0)).0, "ok");
+        assert_eq!(
+            code(oxl_engine::groups(&case, &events(), &by, &[], limit, 0)).0,
+            "ok"
+        );
+    }
+}
+
+#[test]
 fn the_default_page_is_time_ordered_and_shows_full_precision_text() {
     let (_d, case) = loaded();
     let p = page(&case, &events(), 50, 0).unwrap();

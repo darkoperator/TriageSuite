@@ -5,6 +5,7 @@ mod common;
 use common::{analyst, loaded, n};
 use oxl_engine::{
     load_file, load_run, mark_suspicious, stack, EngineError, FileOptions, GridQuery, StackOrder,
+    CELL_CAP,
 };
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
@@ -17,6 +18,65 @@ fn q(relation: &str) -> GridQuery {
 
 fn s(names: &[&str]) -> Vec<String> {
     names.iter().map(|n| n.to_string()).collect()
+}
+
+#[test]
+fn long_keys_are_clipped_in_groups_and_stacks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let long = "k".repeat(5_000);
+    let p = d.path().join("long.csv");
+    std::fs::write(&p, format!("a,b\n{long},1\n{long},2\nshort,3\n")).unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let by = s(&["a"]);
+
+    let g = oxl_engine::groups(&case, &q("long_csv"), &by, &[], 50, 0).unwrap();
+    let top = &g.items[0];
+    assert_eq!(top.count, 2);
+    assert_eq!(
+        top.key.as_deref().map(|k| k.chars().count()),
+        Some(CELL_CAP)
+    );
+    assert!(top.key_clipped);
+    assert!(!g.items[1].key_clipped);
+    // The full key stays with the engine's caller and still selects the
+    // group; the clipped text alone is a different key and selects nothing.
+    assert_eq!(top.full_key.as_deref(), Some(long.as_str()));
+    let full = vec![top.full_key.clone()];
+    assert_eq!(
+        oxl_engine::count(&case, &oxl_engine::group_filter(&q("long_csv"), &by, &full)).unwrap(),
+        2
+    );
+    let clipped = vec![top.key.clone()];
+    assert_eq!(
+        oxl_engine::count(
+            &case,
+            &oxl_engine::group_filter(&q("long_csv"), &by, &clipped)
+        )
+        .unwrap(),
+        0
+    );
+    // Serialised, a row carries the clipped key only.
+    let json = serde_json::to_value(top).unwrap();
+    assert!(json.get("full_key").is_none(), "{json}");
+
+    let st = stack(&case, &q("long_csv"), &by, StackOrder::Commonest, 50, 0).unwrap();
+    assert!(st.cells_clipped);
+    assert_eq!(
+        st.rows[0].values[0].as_deref().map(|v| v.chars().count()),
+        Some(CELL_CAP)
+    );
+    assert_eq!(st.rows[1].values[0].as_deref(), Some("short"));
+    let short = stack(
+        &case,
+        &q("long_csv"),
+        &s(&["b"]),
+        StackOrder::Commonest,
+        50,
+        0,
+    )
+    .unwrap();
+    assert!(!short.cells_clipped);
 }
 
 #[test]

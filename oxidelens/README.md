@@ -96,7 +96,7 @@ command and limit and needs no case.
 | `count <relation> [QUERY]` | Count the rows a query selects |
 | `groups <relation> --by a,b [--parent <json array>] [QUERY] [--limit N] [--offset N]` | One level of grouping |
 | `histogram <relation> [--column c] [--buckets N] [QUERY]` | Rows per time bucket |
-| `stack <relation> --by a,b [--order rarest\|commonest] [QUERY]` | Distinct value combinations and how many hosts show them |
+| `stack <relation> --by a,b [--order rarest\|commonest] [QUERY] [--limit N] [--offset N]` | Distinct value combinations and how many hosts show them |
 | `find <value> [--mode exact\|contains] [--host H]... [--from T] [--to T] [--rows] [--limit N] [--offset N]` | Look a value up in every relation (default `exact`) |
 | `around (--row <id> \| --host H --at T) --window 5m [--rows] [--limit N] [--offset N]` | What happened near a row or a moment |
 | `row <id>` | One row in full, with its mark, tags and notes |
@@ -245,8 +245,8 @@ remain.
 
 | Limit | Value |
 |---|---|
-| Rows per page: default, maximum | 50, 1,000 |
-| Cell text in list output | 2,000 characters; `cells_clipped` says when cut |
+| Items per page, every list (`--limit`): default, range | 50, 1 to 1,000 |
+| Cell text, group keys and stack values in list output | 2,000 characters; `cells_clipped` says when cut |
 | Filter depth, conditions | 8 levels, 200 leaves |
 | Values in an `in` list | 10,000 |
 | Regular expression | 1,000 characters |
@@ -259,6 +259,10 @@ remain.
 | `query` rows, memory | 1,000 rows at a time, 2 GiB |
 
 `oxidelens capabilities` reports the same numbers from the build itself.
+
+A group key cut to 2,000 characters is not the group's key: passed back as
+`--parent` it selects nothing, so such a group cannot be expanded from the
+CLI. Narrow the rows with a filter on that column instead.
 
 ### What `query` refuses
 

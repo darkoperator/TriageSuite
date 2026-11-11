@@ -191,7 +191,7 @@ fn change(
 
 /// Up to `limit` of the tags the case has defined, from `offset`, by name,
 /// with the rows carrying each (a tag stays defined when its last row loses
-/// it). `Invalid` when `limit` is over `MAX_LIMIT`.
+/// it). `Invalid` when `limit` is 0 or over `MAX_LIMIT`.
 pub fn tags(case: &Case, limit: u32, offset: u64) -> Result<Listing<TagInfo>> {
     check_limit(limit)?;
     let fetched = case

@@ -89,9 +89,10 @@
 //! caller must not hold the case open read-write meanwhile.
 
 use super::page::clip_text;
-use super::{ISO_FORMAT, MAX_LIMIT};
+use super::ISO_FORMAT;
 use crate::case::{check_format, is_lock_conflict};
 use crate::error::{EngineError, Result};
+use crate::listing::check_limit;
 use crate::query::CELL_CAP;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
@@ -197,14 +198,10 @@ pub struct Described {
 /// Run one SELECT over the case at `case_path`: up to `limit` rows from
 /// `offset`. Opens its own locked connection; `case_path` must not be open
 /// read-write in this process. `Invalid` for anything that is not exactly
-/// one SELECT (with DuckDB's message) or a `limit` over `MAX_LIMIT`;
+/// one SELECT (with DuckDB's message) or a `limit` of 0 or over `MAX_LIMIT`;
 /// `CaseLocked` when another connection holds the file.
 pub fn query_sql(case_path: &Path, sql: &str, limit: u32, offset: u64) -> Result<SqlResult> {
-    if limit > MAX_LIMIT {
-        return Err(EngineError::Invalid(format!(
-            "a query returns at most {MAX_LIMIT} rows at a time, not {limit}"
-        )));
-    }
+    check_limit(limit)?;
     let select = the_select(sql)?;
     let conn = locked(case_path)?;
     run_select(&conn, &select, limit, offset)

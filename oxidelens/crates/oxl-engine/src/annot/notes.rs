@@ -143,7 +143,7 @@ fn change(
 
 /// Up to `limit` of the notes on row `row_id` that are not deleted, from
 /// `offset`, oldest first; none for an unknown row. `Invalid` when `limit`
-/// is over `MAX_LIMIT`.
+/// is 0 or over `MAX_LIMIT`.
 pub fn notes(case: &Case, row_id: i64, limit: u32, offset: u64) -> Result<Listing<Note>> {
     check_limit(limit)?;
     let fetched = case

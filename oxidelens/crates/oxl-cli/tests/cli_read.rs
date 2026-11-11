@@ -57,6 +57,35 @@ fn assert_invalid(args: &[&str]) {
 }
 
 #[test]
+fn groups_and_stack_clip_long_keys_and_say_so() {
+    let (d, p) = loaded();
+    let csv = d.path().join("long.csv");
+    std::fs::write(&csv, format!("a,b\n{},1\nshort,2\n", "k".repeat(5_000))).unwrap();
+    assert_eq!(
+        ox(&["--case", &p, "load", "file", &csv.to_string_lossy()]).0,
+        0
+    );
+    let (c, g) = ox(&["--case", &p, "groups", "long_csv", "--by", "a"]);
+    assert_eq!(c, 0, "{g}");
+    assert_eq!(g["data"]["cells_clipped"], true);
+    let groups = inner(&g["data"]["untrusted"])["groups"].clone();
+    let longest = groups
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|g| g["key"].as_str())
+        .map(|k| k.chars().count())
+        .max();
+    assert_eq!(longest, Some(2_000));
+    let (_, s) = ox(&["--case", &p, "stack", "long_csv", "--by", "a"]);
+    assert_eq!(s["data"]["cells_clipped"], true);
+    let (_, s) = ox(&["--case", &p, "stack", "long_csv", "--by", "b"]);
+    assert_eq!(s["data"]["cells_clipped"], false);
+    let (_, g) = ox(&["--case", &p, "groups", "long_csv", "--by", "b"]);
+    assert_eq!(g["data"]["cells_clipped"], false);
+}
+
+#[test]
 fn rows_with_filter_search_sort_and_limit() {
     let (_d, p) = loaded();
     let p = p.as_str();

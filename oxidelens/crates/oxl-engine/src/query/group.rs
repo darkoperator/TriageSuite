@@ -1,6 +1,7 @@
 //! Timeline Explorer-style grouping: groups of one column with counts and
 //! time spans, nested by further columns and expanded one level at a time.
 
+use super::page::clip_text;
 use super::{find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo};
@@ -17,8 +18,18 @@ pub(super) const MAX_BY: usize = 4;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GroupRow {
-    /// The column's text; `None` for an empty cell.
+    /// The column's text, cut to `CELL_CAP` characters; `None` for an empty
+    /// cell.
     pub key: Option<String>,
+    /// `key` was longer than `CELL_CAP` characters and was cut. A cut key is
+    /// not the group's key: as a `parent` or in `group_filter` it selects
+    /// nothing. Use `full_key` for that.
+    pub key_clipped: bool,
+    /// The whole key, for a caller in this process to drill into the group
+    /// with (`parent`, `group_filter`). Never serialised, so list output
+    /// stays within the cell cap.
+    #[serde(skip)]
+    pub full_key: Option<String>,
     pub count: u64,
     /// The earliest and latest primary time in the group, UTC; `None` when
     /// the relation has no primary time or the group has no timed row.
@@ -30,7 +41,7 @@ pub struct GroupRow {
 /// Up to `limit` groups of `by[parent.len()]` from `offset`, among rows
 /// whose earlier `by` columns equal `parent`. Ordered by count descending,
 /// then key. `Invalid` for an empty `by`, more than four columns, a
-/// `parent` as long as `by`, or a `limit` over `MAX_LIMIT`.
+/// `parent` as long as `by`, or a `limit` of 0 or over `MAX_LIMIT`.
 pub fn groups(
     case: &Case,
     q: &GridQuery,
@@ -84,8 +95,12 @@ pub fn groups(
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
+        let full_key: Option<String> = row.get(0)?;
+        let (key, key_clipped) = clip_text(full_key.clone());
         out.push(GroupRow {
-            key: row.get(0)?,
+            key,
+            key_clipped,
+            full_key,
             count: as_count(row.get(1)?),
             first: row.get(2)?,
             last: row.get(3)?,
@@ -97,7 +112,8 @@ pub fn groups(
 
 /// The filter that selects one group's rows: q's filter AND each `by[i] =
 /// key[i]` (IsEmpty for a None key). Pairs beyond the shorter list are
-/// ignored.
+/// ignored. The keys are whole keys (`GroupRow::full_key`); a key cut to
+/// the cell cap matches no row.
 pub fn group_filter(q: &GridQuery, by: &[String], key: &[Option<String>]) -> GridQuery {
     let leaves = by.iter().zip(key).map(|(column, key)| {
         FilterNode::Leaf(match key {

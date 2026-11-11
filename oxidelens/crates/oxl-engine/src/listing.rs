@@ -31,8 +31,14 @@ impl<T> Listing<T> {
     }
 }
 
-/// The page-size rule: at most `MAX_LIMIT` items. `Invalid` otherwise.
+/// The page-size rule every paged call shares: 1 to `MAX_LIMIT` items.
+/// `Invalid` otherwise; a page of nothing is a mistake, not an empty page.
 pub(crate) fn check_limit(limit: u32) -> Result<()> {
+    if limit == 0 {
+        return Err(EngineError::Invalid(
+            "a page is at least 1 row, not 0".to_string(),
+        ));
+    }
     if limit > MAX_LIMIT {
         return Err(EngineError::Invalid(format!(
             "a page is at most {MAX_LIMIT} rows, not {limit}"

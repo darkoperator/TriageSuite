@@ -54,8 +54,8 @@ pub(super) fn record(conn: &Connection, actor: &Actor, at: &str, change: Change<
 }
 
 /// Up to `limit` history rows from `offset`, newest first, of one target
-/// kind or of all. `Invalid` for an unknown target kind or a `limit` over
-/// `MAX_LIMIT`.
+/// kind or of all. `Invalid` for an unknown target kind or a `limit` of 0
+/// or over `MAX_LIMIT`.
 pub fn history(
     case: &Case,
     target_kind: Option<&str>,
