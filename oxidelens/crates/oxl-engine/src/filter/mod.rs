@@ -13,6 +13,7 @@
 
 mod compile;
 
+pub(crate) use compile::escape_like;
 pub use compile::{compile_filter, SqlFragment};
 
 use crate::error::{EngineError, Result};

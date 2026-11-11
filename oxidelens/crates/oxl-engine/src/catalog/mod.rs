@@ -81,10 +81,52 @@ impl RelationKind {
     }
 }
 
+/// What a column holds: the source's own data, or one of the metadata
+/// columns the suite injects into a run's datasets (or the engine adds to a
+/// loose file loaded with a host). Metadata names can carry a collision
+/// suffix (`_triage_host_1`), so the role, not the name, says which is which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnRole {
+    Data,
+    RunId,
+    Host,
+    Identity,
+    OutputFile,
+}
+
+impl ColumnRole {
+    const ALL: [ColumnRole; 5] = [
+        ColumnRole::Data,
+        ColumnRole::RunId,
+        ColumnRole::Host,
+        ColumnRole::Identity,
+        ColumnRole::OutputFile,
+    ];
+
+    /// The spelling stored in `ox.column_catalog.role`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ColumnRole::Data => "data",
+            ColumnRole::RunId => "run_id",
+            ColumnRole::Host => "host",
+            ColumnRole::Identity => "identity",
+            ColumnRole::OutputFile => "output_file",
+        }
+    }
+
+    fn parse(text: &str) -> Result<ColumnRole> {
+        ColumnRole::ALL
+            .into_iter()
+            .find(|r| r.as_str() == text)
+            .ok_or_else(|| corrupt(format!("column role {text:?}")))
+    }
+}
+
 /// One logical column of a relation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnInfo {
     pub name: String,
+    pub role: ColumnRole,
     /// The physical column holding the original cell text.
     pub text_column: String,
     /// The physical column holding the typed value; `None` when untyped.
@@ -354,6 +396,8 @@ pub(crate) fn check_typing(conn: &Connection, dataset: &Dataset) -> Result<()> {
 /// One column of a loose file, as the loader found it.
 pub(crate) struct FileColumn {
     pub name: String,
+    /// `Host` for the column holding the host assigned at load time.
+    pub role: ColumnRole,
     /// What type detection found, with the time semantics for a timestamp;
     /// `None` leaves the column as text.
     pub sniffed: Option<(SqlType, Option<TimeSemantics>)>,
@@ -371,14 +415,16 @@ pub(crate) fn catalog_file(
     for (i, column) in columns.iter().enumerate() {
         conn.execute(
             "INSERT INTO ox.column_catalog \
-             (relation, name, ordinal, text_column, typed_column, sql_type, time_semantics, origin) \
-             VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)",
+             (relation, name, ordinal, text_column, typed_column, sql_type, time_semantics, \
+              origin, role) \
+             VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)",
             params![
                 relation,
                 column.name,
                 i32::try_from(i + 1).unwrap_or(i32::MAX),
                 column.name,
-                UNTYPED
+                UNTYPED,
+                column.role.as_str()
             ],
         )?;
     }
@@ -416,10 +462,15 @@ fn record_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
         |r| r.get(0),
     )?;
     let meta = &dataset.metadata_columns;
-    let named = [&meta.run_id, &meta.host, &meta.identity, &meta.output_file]
-        .into_iter()
-        .chain(&dataset.columns);
-    for column in named {
+    let named = [
+        (&meta.run_id, ColumnRole::RunId),
+        (&meta.host, ColumnRole::Host),
+        (&meta.identity, ColumnRole::Identity),
+        (&meta.output_file, ColumnRole::OutputFile),
+    ]
+    .into_iter()
+    .chain(dataset.columns.iter().map(|c| (c, ColumnRole::Data)));
+    for (column, role) in named {
         if !known.insert(column.clone()) {
             continue;
         }
@@ -457,8 +508,9 @@ fn record_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
             };
         conn.execute(
             "INSERT INTO ox.column_catalog \
-             (relation, name, ordinal, text_column, typed_column, sql_type, time_semantics, origin) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (relation, name, ordinal, text_column, typed_column, sql_type, time_semantics, \
+              origin, role) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 relation,
                 column,
@@ -467,7 +519,8 @@ fn record_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
                 typed_column,
                 sql_type,
                 semantics,
-                origin
+                origin,
+                role.as_str()
             ],
         )?;
     }
@@ -718,10 +771,11 @@ type CatalogRow = (
     Option<String>,
     Option<String>,
     String,
+    String,
 );
 
 const CATALOG_SELECT: &str = "SELECT name, text_column, typed_column, sql_type, time_semantics, \
-                              origin FROM ox.column_catalog WHERE relation = ?";
+                              origin, role FROM ox.column_catalog WHERE relation = ?";
 
 fn read_columns(conn: &Connection, relation: &str) -> Result<Vec<ColumnInfo>> {
     let rows: Vec<CatalogRow> = conn
@@ -756,11 +810,12 @@ fn catalog_row(r: &duckdb::Row<'_>) -> duckdb::Result<CatalogRow> {
         r.get(3)?,
         r.get(4)?,
         r.get(5)?,
+        r.get(6)?,
     ))
 }
 
 fn decode_column(row: CatalogRow) -> Result<ColumnInfo> {
-    let (name, text_column, typed_column, sql_type, semantics, origin) = row;
+    let (name, text_column, typed_column, sql_type, semantics, origin, role) = row;
     let sql_type = sql_type
         .map(|t| SqlType::from_sql(&t).ok_or_else(|| corrupt(format!("SQL type {t:?}"))))
         .transpose()?;
@@ -769,6 +824,7 @@ fn decode_column(row: CatalogRow) -> Result<ColumnInfo> {
         .transpose()?;
     Ok(ColumnInfo {
         name,
+        role: ColumnRole::parse(&role)?,
         text_column,
         typed_column,
         sql_type,

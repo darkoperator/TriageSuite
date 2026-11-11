@@ -100,6 +100,7 @@ CREATE TABLE ox.column_catalog (
     sql_type VARCHAR,
     time_semantics VARCHAR,
     origin VARCHAR NOT NULL,
+    role VARCHAR NOT NULL,
     PRIMARY KEY (relation, name)
 );
 COMMENT ON TABLE ox.column_catalog IS 'One row per logical column of each relation: where its text is and where its typed value is.';
@@ -111,6 +112,7 @@ COMMENT ON COLUMN ox.column_catalog.typed_column IS 'The physical column holding
 COMMENT ON COLUMN ox.column_catalog.sql_type IS 'The typed column''s SQL type; NULL when untyped.';
 COMMENT ON COLUMN ox.column_catalog.time_semantics IS 'utc, local or unknown for a timestamp; NULL otherwise.';
 COMMENT ON COLUMN ox.column_catalog.origin IS 'Who typed it: suite, app-map, sniffed or analyst; text when untyped.';
+COMMENT ON COLUMN ox.column_catalog.role IS 'What the column holds: data (the source''s own), or the metadata column run_id, host, identity or output_file. Search reads data and host columns only.';
 
 CREATE TABLE ox.inventory_dataset (
     source_id BIGINT NOT NULL,

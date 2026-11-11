@@ -6,9 +6,10 @@ mod common;
 use common::{agent, analyst, loaded, n};
 use oxl_engine::catalog::appmap::PRIMARY_TIME;
 use oxl_engine::catalog::{
-    columns, declare_type, relation, relations, set_primary_time, RelationKind, SqlType,
-    TimeSemantics, TypeOrigin,
+    columns, declare_type, relation, relations, set_primary_time, ColumnRole, RelationKind,
+    SqlType, TimeSemantics, TypeOrigin,
 };
+use oxl_engine::{load_file, FileOptions};
 use std::collections::BTreeSet;
 
 #[test]
@@ -370,6 +371,50 @@ fn relations_report_rows_and_hosts() {
             "petriage_timeline"
         ]
     );
+}
+
+#[test]
+fn columns_carry_their_role() {
+    let (d, mut case) = loaded();
+    let c = columns(&case, "evtxtriage_events").unwrap();
+    let role = |name: &str| c.iter().find(|c| c.name == name).unwrap().role;
+    assert_eq!(
+        [
+            role("_triage_run_id"),
+            role("_triage_host"),
+            role("_triage_identity"),
+            role("_triage_output_file"),
+            role("EventId"),
+        ],
+        [
+            ColumnRole::RunId,
+            ColumnRole::Host,
+            ColumnRole::Identity,
+            ColumnRole::OutputFile,
+            ColumnRole::Data,
+        ]
+    );
+
+    let report = load_file(
+        &mut case,
+        &oxl_fixtures::loose_fw_csv(d.path()),
+        FileOptions {
+            host: Some("WS01".into()),
+            ..Default::default()
+        },
+        &analyst(),
+    )
+    .unwrap();
+    let fw = columns(&case, &report.relations[0].name).unwrap();
+    let hosts: Vec<&str> = fw
+        .iter()
+        .filter(|c| c.role == ColumnRole::Host)
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(hosts, ["_triage_host"]);
+    assert!(fw
+        .iter()
+        .all(|c| c.role == ColumnRole::Host || c.role == ColumnRole::Data));
 }
 
 #[test]

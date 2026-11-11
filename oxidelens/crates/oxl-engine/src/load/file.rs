@@ -16,7 +16,7 @@ use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::{LoadReport, LoadedRelation};
 use crate::actor::Actor;
 use crate::case::Case;
-use crate::catalog::{catalog_file, FileColumn, SqlType, TimeSemantics};
+use crate::catalog::{catalog_file, ColumnRole, FileColumn, SqlType, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
@@ -304,12 +304,14 @@ fn load_in(
         };
         columns.push(FileColumn {
             name: name.clone(),
+            role: ColumnRole::Data,
             sniffed,
         });
     }
     if opts.host.is_some() {
         columns.push(FileColumn {
             name: HOST_COLUMN.to_string(),
+            role: ColumnRole::Host,
             sniffed: None,
         });
     }

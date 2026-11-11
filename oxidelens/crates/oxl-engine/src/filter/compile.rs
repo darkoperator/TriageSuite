@@ -192,8 +192,8 @@ fn fold(sql: &str, case_sensitive: bool) -> String {
 }
 
 /// `%`, `_` and the escape character itself, escaped so a `LIKE` pattern
-/// built around the text matches it literally.
-fn escape_like(text: &str) -> String {
+/// built around the text matches it literally. Pair it with `ESCAPE '\'`.
+pub(crate) fn escape_like(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         if matches!(c, '\\' | '%' | '_') {

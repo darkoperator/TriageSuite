@@ -931,6 +931,7 @@ dependencies = [
  "csv",
  "duckdb",
  "oxl-fixtures",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
