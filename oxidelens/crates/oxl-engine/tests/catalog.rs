@@ -203,6 +203,59 @@ fn declaring_again_replaces_the_companion_in_place() {
 }
 
 #[test]
+fn a_suite_typed_column_cannot_be_redeclared() {
+    let (_d, mut case) = loaded();
+    let before = columns(&case, "evtxtriage_events")
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "TimeCreated")
+        .unwrap();
+    let err = declare_type(
+        &mut case,
+        "evtxtriage_events",
+        "TimeCreated",
+        SqlType::BigInt,
+        None,
+        &analyst(),
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), "invalid", "{err}");
+    let after = columns(&case, "evtxtriage_events")
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "TimeCreated")
+        .unwrap();
+    assert_eq!(after, before);
+    assert_eq!(
+        (
+            after.typed_column.as_deref(),
+            after.text_column.as_str(),
+            after.origin
+        ),
+        (
+            Some("TimeCreated"),
+            "TimeCreated__text",
+            Some(TypeOrigin::Suite)
+        )
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from (describe evtxtriage_events) \
+             where lower(column_name) = 'timecreated__typed'"
+        ),
+        0
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'declare_type'"
+        ),
+        0
+    );
+}
+
+#[test]
 fn a_local_or_missing_timestamp_semantics_is_invalid() {
     let (_d, mut case) = loaded();
     for semantics in [Some(TimeSemantics::Local), None] {

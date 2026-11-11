@@ -138,7 +138,8 @@ pub fn columns(case: &Case, relation: &str) -> Result<Vec<ColumnInfo>> {
 
 /// Type `column` of `relation` as `sql_type`, in a companion column filled
 /// from its text. An agent may not; a timestamp needs semantics `Utc` or
-/// `Unknown` (step 1 has no zone conversion, so `Local` is `Invalid`).
+/// `Unknown` (step 1 has no zone conversion, so `Local` is `Invalid`). A
+/// column the suite typed keeps its type: declaring one is `Invalid`.
 pub fn declare_type(
     case: &mut Case,
     relation: &str,
@@ -188,16 +189,24 @@ fn declare_in(
 ) -> Result<()> {
     let info = read_relation(conn, relation)?;
     let before = read_column(conn, relation, column)?;
+    // The suite's typing is what its documented queries read; the case
+    // never re-points such a column at another physical column.
+    if before.origin == Some(TypeOrigin::Suite) {
+        return Err(EngineError::Invalid(format!(
+            "{relation}.{column} is already typed by the suite; its type cannot be redeclared"
+        )));
+    }
     if info.primary_time.as_deref() == Some(column) && sql_type != SqlType::Timestamp {
         return Err(EngineError::Refused(format!(
             "{column} is the primary time of {relation}; choose another primary time first"
         )));
     }
 
-    // A companion this column already has is replaced under the same name;
-    // otherwise a new one is named beside the suite's columns.
+    // Past the suite check, a typed column is always a companion: one this
+    // column already has is replaced under the same name; otherwise a new
+    // one is named.
     let typed = match &before.typed_column {
-        Some(companion) if *companion != before.name => {
+        Some(companion) => {
             for schema in source_schemas(conn, relation)? {
                 if physical_columns(conn, &schema, relation)?.contains(&companion.to_lowercase()) {
                     conn.execute_batch(&format!(
