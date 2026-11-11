@@ -93,13 +93,13 @@ command and limit and needs no case.
 | `schema [<relation>]` | List relations, or describe one relation's columns |
 | `rows <relation> [QUERY] [--limit N] [--offset N]` | A page of rows |
 | `count <relation> [QUERY]` | Count the rows a query selects |
-| `groups <relation> --by a,b [--parent <json array>] [QUERY]` | One level of grouping |
+| `groups <relation> --by a,b [--parent <json array>] [QUERY] [--limit N] [--offset N]` | One level of grouping |
 | `histogram <relation> [--column c] [--buckets N] [QUERY]` | Rows per time bucket |
 | `stack <relation> --by a,b [--order rarest\|commonest] [QUERY]` | Distinct value combinations and how many hosts show them |
-| `find <value> [--mode exact\|contains] [--host H]... [--from T] [--to T] [--rows]` | Look a value up in every relation (default `exact`) |
-| `around (--row <id> \| --host H --at T) --window 5m [--rows]` | What happened near a row or a moment |
+| `find <value> [--mode exact\|contains] [--host H]... [--from T] [--to T] [--rows] [--limit N] [--offset N]` | Look a value up in every relation (default `exact`) |
+| `around (--row <id> \| --host H --at T) --window 5m [--rows] [--limit N] [--offset N]` | What happened near a row or a moment |
 | `row <id>` | One row in full, with its mark, tags and notes |
-| `query <sql \| @file>` | One read-only SELECT over the case |
+| `query <sql \| @file> [--limit N] [--offset N]` | One read-only SELECT over the case |
 | `mark set --rows 1,2,3` | Mark rows suspicious |
 | `mark clear --rows 1,2,3` | Clear marks |
 | `mark list [--by <actor>] [--limit N] [--offset N]` | List marked rows |
@@ -123,7 +123,7 @@ command and limit and needs no case.
 `@file` reads the text from a file. Every `--help` prints an envelope, and
 the `help` subcommand does not exist.
 
-Batch commands (`mark`, `tag add`, `tag remove`) take `--rows` as a
+Batch commands (`mark set`, `mark clear`, `tag add`, `tag remove`) take `--rows` as a
 comma-separated list of integers; anything else (an empty entry, a sign, a
 decimal) is `invalid`. They exit 0 when the call was accepted, even if some
 rows were not done: `done` and `not_done` count them and `outcomes` says why
@@ -145,9 +145,12 @@ A filter is a JSON document: a leaf, or `and` / `or` (arrays of nodes) or
 ```
 
 A leaf is `{"column": …, "op": …, "value": …, "case_sensitive": false}`.
-`value` is a string (or a number for the ordered operators on an untyped
-column), a list for `in`, `not_in` and `between`, and absent for the emptiness
-operators. Text comparison ignores case unless `case_sensitive` is true.
+`value` is a string for `eq`, `ne`, `contains`, `not_contains`,
+`starts_with`, `ends_with` and `regex` (these compare the cell's text, on
+typed columns too); a list of strings for `in` and `not_in`; a two-element
+list `[low, high]` for `between`; a scalar for `gt`, `gte`, `lt` and `lte`;
+and absent for `is_empty`, `not_empty` and `conversion_failed`. Text comparison
+ignores case unless `case_sensitive` is true.
 A condition on an empty cell is false, so `not` is the exact complement of
 what it wraps.
 
@@ -163,9 +166,18 @@ what it wraps.
 | `is_empty`, `not_empty` | The cell is empty (null or blank), or is not |
 | `conversion_failed` | A typed column's text did not convert to its type |
 
-Every value, including those of typed columns (`"4624"`, not `4624`), is a
-string, except numbers on untyped columns for the ordered operators.
-Timestamp bounds are UTC text. The pseudo-column `_mark` filters on marks:
+What the ordered operators (`gt`, `gte`, `lt`, `lte`, `between`, and each bound
+of `between`) accept depends on the column:
+
+| Column | Accepted value |
+|---|---|
+| `TIMESTAMP` | UTC timestamp text, `YYYY-MM-DDTHH:MM:SS[.f]Z` |
+| `BIGINT` | a JSON integer, or a string holding a signed integer |
+| `UBIGINT` | a JSON non-negative integer, or a string holding one |
+| `BOOLEAN` | a JSON boolean (`true` or `false`) |
+| untyped | a JSON number (the cell is compared as a number) or a string (compared as text); both bounds of a `between` must be of one kind |
+
+`conversion_failed` needs a typed column. The pseudo-column `_mark` filters on marks:
 `eq`, `ne` or `in` with `"suspicious"` or `"none"`.
 
 ## Search syntax
@@ -221,7 +233,8 @@ the wrapper stay values the tool produced itself: ids, counts, flags, marks,
 tag names, actor labels and error codes. `--help` text is wrapped too, and
 `--version` prints an envelope.
 
-A test (`tests/cli_contract.rs`) runs every command against a fixture,
+A test (`tests/cli_contract.rs`) runs every command (and fails if a command has no
+call in it) against a fixture,
 strips the wrappers and checks that none of the fixture's evidence strings
 remain.
 
@@ -240,6 +253,7 @@ remain.
 | Tag | 64 characters of `a-z 0-9 : _ . -` (stored lower-case) |
 | Note | 10,000 characters |
 | `around` window | at most 24h (`30s`, `5m`, `1h`) |
+| `query` rows, memory | 1,000 rows at a time, 2 GiB |
 
 `oxidelens capabilities` reports the same numbers from the build itself.
 
@@ -251,8 +265,8 @@ memory). Anything but a single SELECT is refused; so are table functions other
 than `range`, `generate_series`, `unnest` and `generate_subscripts`, functions
 that read files or the environment (`read_*`, `parquet_*`, `getenv`, `glob`
 and the like), and any table outside the case (a name that spells a file path,
-or a catalog or schema other than `main`, `ox`, `src_<n>`,
-`information_schema` and `pg_catalog`). It returns at most 1,000 rows at a
+or a catalog other than `ox_case`, `system` and `temp`, or a schema other
+than `main`, `ox`, `src_<n>`, `information_schema` and `pg_catalog`). It returns at most 1,000 rows at a
 time. The case is opened read-only for it, so it cannot run while another
 process has the case open for writing.
 

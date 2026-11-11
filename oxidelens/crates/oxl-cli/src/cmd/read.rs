@@ -13,7 +13,7 @@ use oxl_engine::{
 use serde_json::{json, Value};
 
 /// The longest `around` window: a day, in seconds.
-const MAX_WINDOW_SECONDS: u64 = 24 * 3600;
+pub(super) const MAX_WINDOW_SECONDS: u64 = 24 * 3600;
 
 /// `text`, or the content of the file named by `@path`. The file is read
 /// because the caller named it; a failure to read it is the caller's

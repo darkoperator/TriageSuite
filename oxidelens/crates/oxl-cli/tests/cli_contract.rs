@@ -36,13 +36,32 @@ fn first_row(p: &str, search: &str) -> String {
 /// One representative successful call per command, in an order that works
 /// (a mark exists before it is listed, a note before it is deleted).
 /// `(arguments after --case <p>, an actor if not the default)`.
-fn calls(p: &str) -> Vec<Vec<String>> {
+fn calls(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
     let r = first_row(p, "svch0st");
+    // A prefetch row of the first run: the later run loaded below supersedes it.
+    let (_, pf) = ox(&["--case", p, "rows", "petriage_timeline", "--host", "WS01"]);
+    let old = pf["data"]["row_ids"][0].as_i64().unwrap().to_string();
+    let rerun = oxl_fixtures::rerun_ws01_prefetch(&dir.join("rerun"));
+    let loose = dir.join("loose");
+    let fw_two = loose.join("fw_two.csv");
+    std::fs::copy(loose.join("fw.csv"), &fw_two).unwrap();
+    let new_case = dir.join("second.case.duckdb");
+    let (rerun, fw_two, new_case) = (
+        rerun.to_string_lossy().into_owned(),
+        fw_two.to_string_lossy().into_owned(),
+        new_case.to_string_lossy().into_owned(),
+    );
     let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let ev = "evtxtriage_events";
     vec![
+        s(&["case", "new", &new_case, "--name", "WS01 second case"]),
         s(&["case", "info"]),
         s(&["sources"]),
+        s(&["load", "run", &rerun]),
+        s(&[
+            "load", "file", &fw_two, "--name", "fw_two", "--host", "WS01",
+        ]),
+        s(&["mark", "set", "--rows", &old]),
         s(&["capabilities"]),
         s(&["schema"]),
         s(&["schema", ev]),
@@ -71,6 +90,8 @@ fn calls(p: &str) -> Vec<Vec<String>> {
             "svc_backup on WS01 from 203.0.113.7",
         ]),
         s(&["note", "list", "--row", &r]),
+        s(&["note", "delete", "1"]),
+        s(&["source", "remove", "4"]),
         s(&[
             "column",
             "declare",
@@ -115,8 +136,10 @@ fn every_command_is_listed_in_capabilities_and_has_help() {
 
 #[test]
 fn every_successful_command_emits_the_envelope_keys() {
-    let (_d, p) = loaded();
-    for args in calls(&p) {
+    let (d, p) = loaded();
+    let known = oxl_cli::command_paths();
+    let mut exercised = std::collections::BTreeSet::new();
+    for args in calls(&p, d.path()) {
         let mut full = vec!["--case", p.as_str()];
         full.extend(args.iter().map(String::as_str));
         let (code, v) = ox(&full);
@@ -124,13 +147,27 @@ fn every_successful_command_emits_the_envelope_keys() {
         let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
         keys.sort_unstable();
         assert_eq!(keys, ["command", "data", "ok", "truncated"], "{args:?}");
+        exercised.insert(path_of(&args, &known));
         assert_eq!(v["ok"], true, "{args:?}");
         let name = v["command"].as_str().unwrap().to_string();
-        assert!(
-            oxl_cli::command_paths().contains(&name),
-            "{args:?} -> {name}"
-        );
+        assert!(known.contains(&name), "{args:?} -> {name}");
     }
+    // A command added without a contract call here would pass every test in
+    // this file unchecked, so the calls must cover clap's whole tree.
+    let all: std::collections::BTreeSet<String> = known.into_iter().collect();
+    assert_eq!(exercised, all, "commands with no contract call, or unknown");
+}
+
+/// The command path an argument list runs: the known path its leading words spell.
+fn path_of(args: &[String], known: &[String]) -> String {
+    known
+        .iter()
+        .find(|k| {
+            let words: Vec<&str> = k.split(' ').collect();
+            args.len() >= words.len() && words.iter().zip(args).all(|(w, a)| w == a)
+        })
+        .unwrap_or_else(|| panic!("{args:?} is no known command"))
+        .clone()
 }
 
 /// Remove every `<untrusted_data …>…</untrusted_data …>` block.
@@ -158,6 +195,8 @@ const MARKERS: &[&str] = &[
     "SRV01",
     "Security.evtx",
     "fw_csv",
+    "petriage_timeline",
+    "evtxtriage_events",
 ];
 
 fn assert_clean(label: &str, raw: &str) {
@@ -172,9 +211,9 @@ fn assert_clean(label: &str, raw: &str) {
 
 #[test]
 fn no_evidence_text_escapes_the_wrapper() {
-    let (_d, p) = loaded();
+    let (d, p) = loaded();
     let mut checked = 0;
-    for args in calls(&p) {
+    for args in calls(&p, d.path()) {
         let mut full = vec!["--case", p.as_str()];
         full.extend(args.iter().map(String::as_str));
         let (code, raw) = ox_raw(&full);

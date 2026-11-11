@@ -39,7 +39,7 @@ pub use query::{
     query_sql, stack, AroundCount, Bucket, Cell, Described, DescribedColumn, FindHit, FindMode,
     FindRequest, FindResult, GridQuery, GroupRow, Histogram, MarkState, MergedRow, MergedSource,
     Page, SortKey, SqlResult, Stack, StackOrder, StackRow, BUCKET_LADDER, CELL_CAP, DEFAULT_LIMIT,
-    MAX_LIMIT, MAX_VALUE,
+    MAX_LIMIT, MAX_VALUE, SQL_MEMORY_LIMIT,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};

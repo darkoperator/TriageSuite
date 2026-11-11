@@ -104,7 +104,7 @@ const CASE_ALIAS: &str = "ox_case";
 
 /// The most memory one query may use. Nothing spills to disk, so a query
 /// that needs more fails rather than writing a temporary file.
-const SQL_MEMORY_LIMIT: &str = "2GiB";
+pub const SQL_MEMORY_LIMIT: &str = "2GiB";
 
 /// What the locked instance must report for each setting, as
 /// `duckdb_settings()` spells it, checked after the lockdown.

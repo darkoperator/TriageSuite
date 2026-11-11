@@ -2,6 +2,7 @@
 //! agent can learn the contract without a case; and `schema`, which shows
 //! what a case holds.
 
+use super::read::MAX_WINDOW_SECONDS;
 use super::{Ctx, Reply};
 use crate::envelope::wrap;
 use oxl_engine::filter::{MAX_DEPTH, MAX_IN, MAX_LEAVES, MAX_REGEX};
@@ -9,7 +10,7 @@ use oxl_engine::search::{MAX_SEARCH, MAX_TERMS};
 use oxl_engine::{Described, RelationKind, Result};
 use oxl_engine::{
     AGENT_ROWS_PER_CALL, CASE_FORMAT, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_NOTE, MAX_TAG,
-    MAX_VALUE,
+    MAX_VALUE, SQL_MEMORY_LIMIT,
 };
 use serde_json::json;
 
@@ -157,6 +158,9 @@ pub fn capabilities() -> Reply {
             "agent_rows_per_call": AGENT_ROWS_PER_CALL,
             "tag_chars": MAX_TAG,
             "note_chars": MAX_NOTE,
+            "around_window_seconds_max": MAX_WINDOW_SECONDS,
+            "query_rows_max": MAX_LIMIT,
+            "query_memory": SQL_MEMORY_LIMIT,
         },
         "untrusted_wrapper": UNTRUSTED,
     }))

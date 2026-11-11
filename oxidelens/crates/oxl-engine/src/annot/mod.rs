@@ -211,8 +211,7 @@ fn inactive(row: &LocatedRow) -> Option<String> {
         Standing::Active => None,
         Standing::Superseded => Some(format!(
             "row {row_id} is from a superseded run: a later run of its host replaced \
-             {}, so the row is no longer in the view",
-            row.relation
+             it, so the row is no longer in the view"
         )),
         Standing::Removed => Some(format!(
             "row {row_id} is from a removed source (source {}); its data is no longer \

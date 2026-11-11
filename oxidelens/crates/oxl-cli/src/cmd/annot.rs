@@ -4,7 +4,8 @@
 //! the reply.
 //!
 //! Outcome reasons and tag names are text the engine produced from fixed
-//! wording, validated tag characters and validated actor labels, so they
+//! wording, row and source ids, validated tag characters and validated actor
+//! labels (never a relation or host name, which come from evidence), so they
 //! stay outside the wrapper. Everything a list returns about rows (relation
 //! and host names, note text, history targets and their before and after
 //! objects) goes inside it.
