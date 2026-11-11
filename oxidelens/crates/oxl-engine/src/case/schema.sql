@@ -182,7 +182,7 @@ CREATE TABLE ox.row_mark (
     marked_by VARCHAR NOT NULL,
     marked_at VARCHAR NOT NULL
 );
-COMMENT ON TABLE ox.row_mark IS 'At most one mark per row (_ox_row).';
+COMMENT ON TABLE ox.row_mark IS 'At most one mark per row (_ox_row). The engine enforces it, not a constraint: supersession repoints row_id, so a mark is only inserted where none exists.';
 COMMENT ON COLUMN ox.row_mark.row_id IS 'The marked row''s _ox_row.';
 COMMENT ON COLUMN ox.row_mark.mark IS 'The mark, for example suspicious.';
 COMMENT ON COLUMN ox.row_mark.marked_by IS 'Who set the mark (actor label).';

@@ -5,8 +5,8 @@ mod common;
 
 use common::{analyst, loaded, n};
 use oxl_engine::{
-    count, load_file, load_run, page, parse_filter, FileOptions, GridQuery, MarkState, SortKey,
-    CELL_CAP, MAX_LIMIT,
+    count, load_file, load_run, mark_suspicious, page, parse_filter, FileOptions, GridQuery,
+    MarkState, SortKey, CELL_CAP, MAX_LIMIT,
 };
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
@@ -179,13 +179,12 @@ fn numeric_sort_uses_the_typed_value() {
 
 #[test]
 fn marks_come_back_with_the_page() {
-    let (_d, case) = loaded();
+    let (_d, mut case) = loaded();
     let marked = n(
         &case,
-        "insert into ox.row_mark (row_id, mark, marked_by, marked_at) \
-         select _ox_row, 'suspicious', 'analyst:tester', '2026-01-05T00:00:00.000000Z' \
-         from evtxtriage_events where \"PayloadData1\" = 'rclone.exe' returning row_id",
+        "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'rclone.exe'",
     );
+    assert!(mark_suspicious(&mut case, &[marked], &analyst()).unwrap()[0].done);
     let p = page(&case, &events(), 50, 0).unwrap();
     let positions: Vec<usize> = p
         .marks

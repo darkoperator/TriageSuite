@@ -7,6 +7,7 @@
 //! engine writes.
 
 pub mod actor;
+pub mod annot;
 pub mod case;
 pub mod catalog;
 pub mod error;
@@ -17,6 +18,11 @@ pub mod search;
 pub mod time;
 
 pub use actor::Actor;
+pub use annot::{
+    add_note, add_tag, clear_suspicious, delete_note, history, mark_suspicious, marks, notes,
+    remove_tag, row_detail, tags, HistoryRow, MarkedRow, Note, RowDetail, RowOutcome, TagInfo,
+    AGENT_ROWS_PER_CALL, AGENT_TAG_PREFIX, MAX_NOTE, MAX_TAG,
+};
 pub use case::{Case, CaseInfo, CASE_FORMAT};
 pub use catalog::{
     columns, declare_type, relation, relations, set_primary_time, ColumnInfo, ColumnRole,

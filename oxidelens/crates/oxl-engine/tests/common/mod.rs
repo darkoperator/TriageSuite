@@ -26,6 +26,21 @@ pub fn loaded() -> (tempfile::TempDir, Case) {
     (d, case)
 }
 
+/// Copy a run tree, so a test can alter the copy and never the run the
+/// fixture built.
+pub fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
 /// The first column of the first row of `sql`, as an integer.
 pub fn n(case: &Case, sql: &str) -> i64 {
     case.scalar_i64(sql)

@@ -3,7 +3,9 @@
 mod common;
 
 use common::{analyst, loaded, n};
-use oxl_engine::{load_file, load_run, stack, EngineError, FileOptions, GridQuery, StackOrder};
+use oxl_engine::{
+    load_file, load_run, mark_suspicious, stack, EngineError, FileOptions, GridQuery, StackOrder,
+};
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
 fn q(relation: &str) -> GridQuery {
@@ -107,11 +109,13 @@ fn a_stack_respects_the_query_filter_and_paging() {
 
 #[test]
 fn marks_and_empty_values_are_counted() {
-    let (_d, case) = loaded();
-    n(
+    let (_d, mut case) = loaded();
+    let chrome = n(
         &case,
-        "insert into ox.row_mark (row_id, mark, marked_by, marked_at)          select _ox_row, 'suspicious', 'analyst:tester', '2026-01-06T00:00:00.000000Z'          from petriage_timeline where \"ExecutableName\" = 'CHROME.EXE' limit 1          returning row_id",
+        "select _ox_row from petriage_timeline where \"ExecutableName\" = 'CHROME.EXE' \
+         order by _ox_row limit 1",
     );
+    assert!(mark_suspicious(&mut case, &[chrome], &analyst()).unwrap()[0].done);
     let st = stack(
         &case,
         &q("petriage_timeline"),

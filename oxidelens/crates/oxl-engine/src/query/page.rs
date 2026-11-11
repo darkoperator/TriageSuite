@@ -12,6 +12,11 @@ pub const MAX_LIMIT: u32 = 1000;
 /// Characters of one cell's text a page carries.
 pub const CELL_CAP: usize = 2_000;
 
+/// The suspicious mark as `ox.row_mark.mark` stores it, and as the `_mark`
+/// filter spells it. Every reader and writer of a mark uses this one
+/// constant, so the spellings cannot drift apart.
+pub(crate) const MARK_SUSPICIOUS: &str = "suspicious";
+
 /// A row's mark, as `ox.row_mark` spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,10 +25,17 @@ pub enum MarkState {
 }
 
 impl MarkState {
-    fn parse(text: &str) -> Option<MarkState> {
+    pub(crate) fn parse(text: &str) -> Option<MarkState> {
         match text {
-            "suspicious" => Some(MarkState::Suspicious),
+            MARK_SUSPICIOUS => Some(MarkState::Suspicious),
             _ => None,
+        }
+    }
+
+    /// The spelling stored in `ox.row_mark.mark`.
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            MarkState::Suspicious => MARK_SUSPICIOUS,
         }
     }
 }
@@ -137,7 +149,7 @@ pub(super) fn mark_sql() -> String {
 
 /// The value `mark_sql` produced, decoded; `Invalid` for a mark the engine
 /// does not know.
-pub(super) fn read_mark(text: Option<String>) -> Result<Option<MarkState>> {
+pub(crate) fn read_mark(text: Option<String>) -> Result<Option<MarkState>> {
     text.map(|text| {
         MarkState::parse(&text)
             .ok_or_else(|| EngineError::Invalid(format!("the case holds an unknown mark {text:?}")))

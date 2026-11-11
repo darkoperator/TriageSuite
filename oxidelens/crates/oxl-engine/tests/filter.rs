@@ -4,11 +4,11 @@
 
 mod common;
 
-use common::{loaded, n};
+use common::{analyst, loaded, n};
 use oxl_engine::filter::{
     compile_filter, parse_filter, FilterNode, MAX_DEPTH, MAX_IN, MAX_LEAVES, MAX_REGEX,
 };
-use oxl_engine::{columns, Case, ColumnInfo};
+use oxl_engine::{columns, mark_suspicious, Case, ColumnInfo};
 
 const RELATION: &str = "evtxtriage_events";
 
@@ -211,14 +211,12 @@ fn parse_filter_is_total() {
 
 #[test]
 fn the_mark_pseudo_column_filters_on_marks() {
-    let (_d, case, cols) = setup();
-    // The marks API is a later task; one row written directly stands in.
-    n(
+    let (_d, mut case, cols) = setup();
+    let rclone = n(
         &case,
-        "insert into ox.row_mark (row_id, mark, marked_by, marked_at) \
-         select _ox_row, 'suspicious', 'analyst:tester', '2026-01-05T00:00:00.000000Z' \
-         from evtxtriage_events where \"PayloadData1\" = 'rclone.exe' returning row_id",
+        "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'rclone.exe'",
     );
+    assert!(mark_suspicious(&mut case, &[rclone], &analyst()).unwrap()[0].done);
     let count = |json: &str| count_in(&case, &cols, json);
     assert_eq!(
         count(r#"{"column":"_mark","op":"eq","value":"suspicious"}"#),

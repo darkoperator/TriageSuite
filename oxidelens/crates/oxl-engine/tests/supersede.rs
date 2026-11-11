@@ -1,14 +1,13 @@
 //! A second run of a host: the newer rows replace the older ones per
 //! dataset and per host, annotations follow identical rows, and a source can
-//! be removed. Marks, tags and notes are written with plain SQL here; their
-//! API arrives later.
+//! be removed. Marks, tags and notes are written through the annotation API.
 
 mod common;
 
-use common::{agent, analyst, n};
+use common::{agent, analyst, copy_tree, n};
 use oxl_engine::{
-    load_file, load_run, relation, relations, remove_source, set_primary_time, sources, Case,
-    FileOptions, LoadReport,
+    add_note, add_tag, delete_note, load_file, load_run, mark_suspicious, relation, relations,
+    remove_source, set_primary_time, sources, Case, FileOptions, LoadReport,
 };
 use std::path::{Path, PathBuf};
 
@@ -16,21 +15,6 @@ fn code<T>(result: oxl_engine::Result<T>) -> (&'static str, String) {
     match result {
         Ok(_) => ("ok", String::new()),
         Err(e) => (e.code(), e.to_string()),
-    }
-}
-
-/// Copy a run tree, so a test can alter the copy and never the run the
-/// fixture built.
-fn copy_tree(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), &target).unwrap();
-        }
     }
 }
 
@@ -58,26 +42,12 @@ fn two_hosts_again(dir: &Path) -> PathBuf {
     copy_run(&original, &dir.join("again"), "20260104000000-dddd", |_| {})
 }
 
-/// Run `sql` against the case file directly: the case is closed, written
-/// and reopened, because the marks API does not exist yet.
-fn with_sql(case: Case, sql: &str) -> Case {
-    let path = case.path().to_path_buf();
-    drop(case);
-    {
-        let conn = duckdb::Connection::open(&path).unwrap();
-        conn.execute_batch(sql)
-            .unwrap_or_else(|e| panic!("{sql}: {e}"));
-    }
-    Case::open(&path).unwrap()
-}
-
-/// SQL marking the rows `select_rows` (a SELECT of `_ox_row`) suspicious.
-fn mark(select_rows: &str) -> String {
-    format!(
-        "INSERT INTO ox.row_mark (row_id, mark, marked_by, marked_at) \
-         SELECT _ox_row, 'suspicious', 'analyst:tester', '2026-11-11T00:00:00.000000Z' \
-         FROM ({select_rows});"
-    )
+/// Mark the one row `select_row` (a SELECT of `_ox_row`) selects
+/// suspicious, as the analyst; returns its id.
+fn mark(case: &mut Case, select_row: &str) -> i64 {
+    let row = n(case, select_row);
+    assert!(mark_suspicious(case, &[row], &analyst()).unwrap()[0].done);
+    row
 }
 
 const SVCH0ST_WS01: &str = "SELECT _ox_row FROM petriage_timeline \
@@ -171,18 +141,9 @@ fn marks_follow_identical_rows_and_report_the_rest() {
         &analyst(),
     )
     .unwrap();
-    let old_row = n(&case, SVCH0ST_WS01);
-    let mut case = with_sql(
-        case,
-        &format!(
-            "{} \
-             INSERT INTO ox.tag VALUES ('lateral', 'analyst:tester', '2026-11-11T00:00:00.000000Z'); \
-             INSERT INTO ox.row_tag VALUES ({old_row}, 'lateral', 'analyst:tester', '2026-11-11T00:00:00.000000Z'); \
-             INSERT INTO ox.note VALUES (nextval('ox.note_seq'), {old_row}, 'look here', 'analyst:tester', \
-                                         '2026-11-11T00:00:00.000000Z', false);",
-            mark(SVCH0ST_WS01)
-        ),
-    );
+    let old_row = mark(&mut case, SVCH0ST_WS01);
+    assert!(add_tag(&mut case, &[old_row], "lateral", &analyst()).unwrap()[0].done);
+    add_note(&mut case, old_row, "look here", &analyst()).unwrap();
     let r = load_run(
         &mut case,
         &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
@@ -235,25 +196,18 @@ fn without_svch0st(rerun: &Path, to: &Path, run_id: &str) -> PathBuf {
 #[test]
 fn reinstating_never_doubles_a_mark_or_a_tag() {
     let (d, mut case) = setup();
-    // s1: X (SVCH0ST.EXE on WS01) gets mark M1 and tag `lateral`.
+    // s1: X (SVCH0ST.EXE on WS01) gets mark M1 (the analyst's) and tag
+    // `lateral`.
     load_run(
         &mut case,
         &oxl_fixtures::two_hosts(&d.path().join("a")),
         &analyst(),
     )
     .unwrap();
-    let s1_x = n(&case, SVCH0ST_WS01);
-    let case = with_sql(
-        case,
-        &format!(
-            "{} INSERT INTO ox.row_tag VALUES ({s1_x}, 'lateral', 'analyst:tester', \
-             '2026-11-11T00:00:00.000000Z');",
-            mark(SVCH0ST_WS01)
-        ),
-    );
+    let s1_x = mark(&mut case, SVCH0ST_WS01);
+    assert!(add_tag(&mut case, &[s1_x], "lateral", &analyst()).unwrap()[0].done);
     // s2 lacks X: M1 and the tag stay on s1's X.
     let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
-    let mut case = case;
     let s2 = load_run(
         &mut case,
         &without_svch0st(&rerun, &d.path().join("s2"), "20260102000000-bbbb"),
@@ -264,8 +218,8 @@ fn reinstating_never_doubles_a_mark_or_a_tag() {
         (s2.superseded[0].moved, s2.superseded[0].left_behind),
         (0, 2)
     );
-    // s3 has X again; s2 had nothing to move. The analyst marks s3's X M2
-    // and tags it `lateral` too.
+    // s3 has X again; s2 had nothing to move. An agent marks s3's X M2 (its
+    // owner tells it from M1) and the analyst tags it `lateral` too.
     let s3 = load_run(
         &mut case,
         &copy_run(&rerun, &d.path().join("s3"), "20260105000000-eeee", |_| {}),
@@ -274,15 +228,8 @@ fn reinstating_never_doubles_a_mark_or_a_tag() {
     .unwrap();
     assert_eq!(s3.superseded[0].old_source, s2.source_id);
     let s3_x = n(&case, SVCH0ST_WS01);
-    let mut case = with_sql(
-        case,
-        &format!(
-            "INSERT INTO ox.row_mark VALUES ({s3_x}, 'benign', 'analyst:tester', \
-             '2026-11-11T00:00:00.000000Z'); \
-             INSERT INTO ox.row_tag VALUES ({s3_x}, 'lateral', 'analyst:tester', \
-             '2026-11-11T00:00:00.000000Z');"
-        ),
-    );
+    assert!(mark_suspicious(&mut case, &[s3_x], &agent()).unwrap()[0].done);
+    assert!(add_tag(&mut case, &[s3_x], "lateral", &analyst()).unwrap()[0].done);
     // With s2 gone, removing s3 reinstates s1, whose X already carries M1
     // and `lateral`.
     remove_source(&mut case, s2.source_id, false, &analyst()).unwrap();
@@ -301,7 +248,8 @@ fn reinstating_never_doubles_a_mark_or_a_tag() {
         n(
             &case,
             &format!(
-                "select count(*) from ox.row_mark where row_id = {s1_x} and mark = 'suspicious'"
+                "select count(*) from ox.row_mark where row_id = {s1_x} \
+                 and marked_by = 'analyst:tester'"
             )
         ),
         1
@@ -309,7 +257,10 @@ fn reinstating_never_doubles_a_mark_or_a_tag() {
     assert_eq!(
         n(
             &case,
-            &format!("select count(*) from ox.row_mark where row_id = {s3_x} and mark = 'benign'")
+            &format!(
+                "select count(*) from ox.row_mark where row_id = {s3_x} \
+                 and marked_by = 'agent:claude'"
+            )
         ),
         1
     );
@@ -353,13 +304,8 @@ fn a_deleted_note_moves_with_its_row_but_is_not_counted() {
     )
     .unwrap();
     let old_row = n(&case, SVCH0ST_WS01);
-    let mut case = with_sql(
-        case,
-        &format!(
-            "INSERT INTO ox.note VALUES (nextval('ox.note_seq'), {old_row}, 'gone', \
-             'analyst:tester', '2026-11-11T00:00:00.000000Z', true);"
-        ),
-    );
+    let note = add_note(&mut case, old_row, "gone", &analyst()).unwrap();
+    delete_note(&mut case, note.id, &analyst()).unwrap();
     let r = load_run(
         &mut case,
         &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
@@ -418,8 +364,7 @@ fn a_mark_whose_row_the_rerun_lacks_stays_behind() {
         &analyst(),
     )
     .unwrap();
-    let old_row = n(&case, SVCH0ST_WS01);
-    let mut case = with_sql(case, &mark(SVCH0ST_WS01));
+    let old_row = mark(&mut case, SVCH0ST_WS01);
 
     let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
     let lacking = d.path().join("c");
@@ -461,12 +406,10 @@ fn duplicate_rows_rebind_by_occurrence() {
         &analyst(),
     )
     .unwrap();
-    let mut case = with_sql(
-        case,
-        &mark(
-            "SELECT _ox_row FROM evtxtriage_events \
-             WHERE EventId = 1102 AND _triage_host = 'WS01' AND _ox_occ = 2",
-        ),
+    mark(
+        &mut case,
+        "SELECT _ox_row FROM evtxtriage_events \
+         WHERE EventId = 1102 AND _triage_host = 'WS01' AND _ox_occ = 2",
     );
     let r = load_run(&mut case, &two_hosts_again(&d.path().join("b")), &analyst()).unwrap();
     let mut pairs = superseded_pairs(&r);
@@ -508,9 +451,9 @@ fn removing_a_source_with_annotations_needs_confirmation() {
         &analyst(),
     )
     .unwrap();
-    let mut case = with_sql(
-        case,
-        &mark("SELECT _ox_row FROM evtxtriage_events WHERE EventId = 4625"),
+    mark(
+        &mut case,
+        "SELECT _ox_row FROM evtxtriage_events WHERE EventId = 4625",
     );
 
     let (c, message) = code(remove_source(&mut case, 1, false, &analyst()));
@@ -638,16 +581,9 @@ fn removing_a_rerun_moves_marks_back_and_orphans_the_rest() {
         &analyst(),
     )
     .unwrap();
-    let mut case = with_sql(
-        case,
-        &format!(
-            "{} {}",
-            mark(SVCH0ST_WS01),
-            mark("SELECT _ox_row FROM petriage_timeline WHERE ExecutableName = 'PSEXESVC.EXE'")
-        ),
-    );
-    let psexesvc = n(
-        &case,
+    mark(&mut case, SVCH0ST_WS01);
+    let psexesvc = mark(
+        &mut case,
         "select _ox_row from petriage_timeline where ExecutableName = 'PSEXESVC.EXE'",
     );
 

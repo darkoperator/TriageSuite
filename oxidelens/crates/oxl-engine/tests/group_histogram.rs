@@ -4,8 +4,8 @@ mod common;
 
 use common::{analyst, loaded, n};
 use oxl_engine::{
-    count, group_filter, groups, histogram, load_file, parse_filter, FileOptions, GridQuery,
-    BUCKET_LADDER,
+    count, group_filter, groups, histogram, load_file, mark_suspicious, parse_filter, FileOptions,
+    GridQuery, BUCKET_LADDER,
 };
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
@@ -167,13 +167,12 @@ fn an_empty_key_is_its_own_group() {
 
 #[test]
 fn groups_count_marks() {
-    let (_d, case) = loaded();
-    n(
+    let (_d, mut case) = loaded();
+    let rclone = n(
         &case,
-        "insert into ox.row_mark (row_id, mark, marked_by, marked_at) \
-         select _ox_row, 'suspicious', 'analyst:tester', '2026-01-05T00:00:00.000000Z' \
-         from evtxtriage_events where \"PayloadData1\" = 'rclone.exe' returning row_id",
+        "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'rclone.exe'",
     );
+    assert!(mark_suspicious(&mut case, &[rclone], &analyst()).unwrap()[0].done);
     let g = groups(&case, &q(EVENTS), &s(&["Channel"]), &[], 50, 0).unwrap();
     assert_eq!(
         g.iter()

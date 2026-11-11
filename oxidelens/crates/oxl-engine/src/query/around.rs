@@ -14,6 +14,7 @@ use super::find::{cells_sql, targets, FindRequest};
 use super::group::{as_count, typed_primary_time};
 use super::page::{mark_sql, read_mark, MAX_LIMIT};
 use super::{scope, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS};
+use crate::annot::locate;
 use crate::case::Case;
 use crate::catalog::appmap::summary_for;
 use crate::catalog::{self, ColumnInfo, ColumnRole, SqlType};
@@ -57,64 +58,55 @@ pub fn around(case: &Case, host: &str, at: &str, window_seconds: u64) -> Result<
 /// row has no host or no usable time.
 pub fn anchor_of(case: &Case, row_id: i64) -> Result<(String, String)> {
     let conn = case.conn();
-    let candidates: Vec<String> = conn
-        .prepare(
-            "SELECT DISTINCT relation FROM ox.source_table \
-             WHERE ? BETWEEN first_row AND last_row ORDER BY relation",
-        )?
-        .query_map(params![row_id], |r| r.get(0))?
-        .collect::<std::result::Result<_, _>>()?;
-    for name in candidates {
-        // A table of a removed source keeps its row in ox.source_table.
-        let scope = match scope(
-            case,
-            &GridQuery {
-                relation: name,
-                ..Default::default()
-            },
-        ) {
-            Ok(scope) => scope,
-            Err(EngineError::NotFound(_)) => continue,
-            Err(e) => return Err(e),
-        };
-        let relation = &scope.relation;
-        let host = match &relation.host_column {
-            Some(h) => format!("CAST({ROW_ALIAS}.{} AS VARCHAR)", quote_ident(h)),
-            None => "CAST(NULL AS VARCHAR)".into(),
-        };
-        let time = match typed_primary_time(&relation.primary_time, &scope.columns) {
-            Some(t) => format!("strftime({ROW_ALIAS}.{}, '{ISO_FORMAT}')", quote_ident(t)),
-            None => "CAST(NULL AS VARCHAR)".into(),
-        };
-        let found: Option<(Option<String>, Option<String>)> = conn
-            .prepare(&format!(
-                "SELECT {host}, {time} FROM {} WHERE {ROW_ALIAS}._ox_row = ?",
-                scope.from_sql
-            ))?
-            .query_map(params![row_id], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .next()
-            .transpose()?;
-        let Some((host, time)) = found else {
-            continue;
-        };
-        let host = host.filter(|h| !h.is_empty()).ok_or_else(|| {
-            EngineError::Invalid(format!(
-                "row {row_id} of {} has no host to pivot on",
-                relation.name
-            ))
-        })?;
-        let time = time.ok_or_else(|| {
-            EngineError::Invalid(format!(
-                "row {row_id} of {} has no usable {} time to pivot on",
-                relation.name,
-                relation.primary_time.as_deref().unwrap_or("primary")
-            ))
-        })?;
-        return Ok((host, time));
-    }
-    Err(EngineError::NotFound(format!(
-        "no row {row_id} in the case"
-    )))
+    let not_found = || EngineError::NotFound(format!("no row {row_id} in the case"));
+    let Some((_, name, _)) = locate(conn, row_id)? else {
+        return Err(not_found());
+    };
+    // Through the view: a row of a superseded run or a removed source has
+    // nothing around it to pivot to. A removed source's relation may be gone.
+    let scope = match scope(
+        case,
+        &GridQuery {
+            relation: name,
+            ..Default::default()
+        },
+    ) {
+        Ok(scope) => scope,
+        Err(EngineError::NotFound(_)) => return Err(not_found()),
+        Err(e) => return Err(e),
+    };
+    let relation = &scope.relation;
+    let host = match &relation.host_column {
+        Some(h) => format!("CAST({ROW_ALIAS}.{} AS VARCHAR)", quote_ident(h)),
+        None => "CAST(NULL AS VARCHAR)".into(),
+    };
+    let time = match typed_primary_time(&relation.primary_time, &scope.columns) {
+        Some(t) => format!("strftime({ROW_ALIAS}.{}, '{ISO_FORMAT}')", quote_ident(t)),
+        None => "CAST(NULL AS VARCHAR)".into(),
+    };
+    let found: Option<(Option<String>, Option<String>)> = conn
+        .prepare(&format!(
+            "SELECT {host}, {time} FROM {} WHERE {ROW_ALIAS}._ox_row = ?",
+            scope.from_sql
+        ))?
+        .query_map(params![row_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .next()
+        .transpose()?;
+    let (host, time) = found.ok_or_else(not_found)?;
+    let host = host.filter(|h| !h.is_empty()).ok_or_else(|| {
+        EngineError::Invalid(format!(
+            "row {row_id} of {} has no host to pivot on",
+            relation.name
+        ))
+    })?;
+    let time = time.ok_or_else(|| {
+        EngineError::Invalid(format!(
+            "row {row_id} of {} has no usable {} time to pivot on",
+            relation.name,
+            relation.primary_time.as_deref().unwrap_or("primary")
+        ))
+    })?;
+    Ok((host, time))
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

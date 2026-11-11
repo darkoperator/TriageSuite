@@ -17,6 +17,7 @@
 use super::{check_caps, FilterNode, Leaf, Op, MARK_COLUMN};
 use crate::catalog::{ColumnInfo, SqlType};
 use crate::error::{EngineError, Result};
+use crate::query::MARK_SUSPICIOUS;
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
 use serde_json::Value;
@@ -30,8 +31,8 @@ pub struct SqlFragment {
     pub params: Vec<SqlValue>,
 }
 
-/// The values a `_mark` condition accepts.
-const MARK_SUSPICIOUS: &str = "suspicious";
+/// The value a `_mark` condition takes for the absence of any mark; the
+/// other value it accepts is the stored spelling, `MARK_SUSPICIOUS`.
 const MARK_NONE: &str = "none";
 
 /// Compile `node` against `columns`, the catalogued columns of the relation

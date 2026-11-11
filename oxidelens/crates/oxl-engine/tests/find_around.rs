@@ -4,8 +4,8 @@ mod common;
 
 use common::{analyst, loaded, n};
 use oxl_engine::{
-    anchor_of, around, find, load_file, load_run, merged_rows, set_primary_time, EngineError,
-    FileOptions, FindMode, FindRequest, MarkState, MergedSource, MAX_VALUE,
+    anchor_of, around, find, load_file, load_run, mark_suspicious, merged_rows, set_primary_time,
+    EngineError, FileOptions, FindMode, FindRequest, MarkState, MergedSource, MAX_VALUE,
 };
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
@@ -440,16 +440,9 @@ fn merged_rows_are_time_ordered_with_summaries() {
 
 #[test]
 fn merged_rows_page_and_carry_marks() {
-    let (_d, case) = loaded();
+    let (_d, mut case) = loaded();
     let row = svch0st_row(&case);
-    n(
-        &case,
-        &format!(
-            "insert into ox.row_mark (row_id, mark, marked_by, marked_at) \
-             values ({row}, 'suspicious', 'analyst:tester', '2026-01-06T00:00:00.000000Z') \
-             returning row_id"
-        ),
-    );
+    assert!(mark_suspicious(&mut case, &[row], &analyst()).unwrap()[0].done);
     let (first, truncated) = merged_rows(&case, &around_ws01(), 2, 0).unwrap();
     assert_eq!((first.len(), truncated), (2, true));
     assert_eq!(first[0].mark, Some(MarkState::Suspicious));

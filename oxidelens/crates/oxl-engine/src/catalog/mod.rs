@@ -691,7 +691,11 @@ fn source_schemas(conn: &Connection, relation: &str) -> Result<Vec<String>> {
 
 /// The column names of `schema.relation`, lowercased: DuckDB resolves
 /// identifiers case-insensitively, so that is how they collide.
-fn physical_columns(conn: &Connection, schema: &str, relation: &str) -> Result<BTreeSet<String>> {
+pub(crate) fn physical_columns(
+    conn: &Connection,
+    schema: &str,
+    relation: &str,
+) -> Result<BTreeSet<String>> {
     Ok(conn
         .prepare(
             "SELECT lower(column_name) FROM duckdb_columns() \

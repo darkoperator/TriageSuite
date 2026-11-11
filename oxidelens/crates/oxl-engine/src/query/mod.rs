@@ -27,6 +27,7 @@ pub use find::{find, FindHit, FindMode, FindRequest, FindResult, MAX_VALUE};
 pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
+pub(crate) use page::{read_mark, MARK_SUSPICIOUS};
 pub use sql::{describe, query_sql, Described, DescribedColumn, SqlResult};
 pub use stack::{stack, Stack, StackOrder, StackRow};
 
@@ -38,7 +39,7 @@ use crate::search::{compile_search, parse_search, Search, SearchOptions};
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection};
 use std::collections::BTreeSet;
-use triage_core::output::duckdb::sql::quote_ident;
+use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// One grid request: a relation and what narrows, orders and shows it.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -86,11 +87,13 @@ pub(crate) struct Scope {
 /// `strftime` format. A constant, never a value.
 pub(crate) const ISO_FORMAT: &str = "%Y-%m-%dT%H:%M:%S.%fZ";
 
-/// True for a row in scope that carries a mark.
+/// True for a row in scope that carries a mark. The mark's spelling is the
+/// engine's own constant, never outside input, so it is a quoted literal.
 pub(crate) fn marked_sql() -> String {
     format!(
         "EXISTS (SELECT 1 FROM ox.row_mark AS ox_gm \
-         WHERE ox_gm.row_id = {ROW_ALIAS}._ox_row AND ox_gm.mark = 'suspicious')"
+         WHERE ox_gm.row_id = {ROW_ALIAS}._ox_row AND ox_gm.mark = {})",
+        quote_literal(MARK_SUSPICIOUS)
     )
 }
 
