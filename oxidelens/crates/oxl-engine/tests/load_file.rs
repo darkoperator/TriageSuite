@@ -298,6 +298,42 @@ fn an_unsupported_extension_and_a_repeat_load_are_refused() {
 }
 
 #[test]
+fn text_shifted_across_a_separator_does_not_collide() {
+    // Under the old `name=value` parts joined with chr(31), both rows encode
+    // as `a=x␟b=y␟b=z`.
+    let (d, mut case) = fresh();
+    let p = d.path().join("shift.csv");
+    write_csv(
+        &p,
+        &[
+            vec![b"a".as_slice(), b"b"],
+            vec![b"x\x1fb=y", b"z"],
+            vec![b"x", b"y\x1fb=z"],
+        ],
+    );
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    assert_eq!(n(&case, "select count(*) from shift_csv"), 2);
+    assert_eq!(
+        n(&case, "select count(distinct _ox_hash) from shift_csv"),
+        2
+    );
+    assert_eq!(n(&case, "select max(_ox_occ) from shift_csv"), 1);
+}
+
+#[test]
+fn a_null_cell_and_the_old_null_marker_hash_differently() {
+    // An empty cell reads as NULL; the old encoding wrote chr(0) for NULL, so
+    // a cell holding a NUL character collided with it.
+    let (d, mut case) = fresh();
+    let p = d.path().join("nul.csv");
+    std::fs::write(&p, b"a,b\n,1\n\x00,1\n").unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    assert_eq!(n(&case, "select count(*) from nul_csv where a is null"), 1);
+    assert_eq!(n(&case, "select count(*) from nul_csv where a = chr(0)"), 1);
+    assert_eq!(n(&case, "select count(distinct _ox_hash) from nul_csv"), 2);
+}
+
+#[test]
 fn a_header_only_file_loads_with_zero_rows() {
     let (d, mut case) = fresh();
     let p = d.path().join("empty.csv");

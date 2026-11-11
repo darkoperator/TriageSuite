@@ -7,7 +7,8 @@
 //!
 //! - `_ox_row`: a case-wide unique id from `ox.row_seq`. Annotations hang off it.
 //! - `_ox_hash`: a digest of the row's content (host, identity and every
-//!   column's text), deliberately blind to the run id and the output path,
+//!   column's text, see `row_hash_sql`), deliberately blind to the run id and
+//!   the output path,
 //!   so that the same event read by a later run of the same host has the same
 //!   hash. Supersession matches rows on it.
 //! - `_ox_occ`: which occurrence of that hash the row is, so that two
@@ -70,21 +71,6 @@ pub(crate) fn materialize(
         )));
     }
 
-    // Each part names its column, so that moving a value from one column to
-    // the next changes the hash. chr(0) stands for a NULL cell, which a CSV
-    // cannot write, and chr(31) (unit separator) joins the parts. The column
-    // names are literals because a CREATE TABLE AS cannot bind parameters;
-    // quote_literal escapes them.
-    let parts: Vec<String> = hash_columns
-        .iter()
-        .map(|c| {
-            format!(
-                "{} || coalesce(CAST({} AS VARCHAR), chr(0))",
-                quote_literal(&format!("{}=", c.name)),
-                c.text_expr
-            )
-        })
-        .collect();
     let target = format!(
         "{}.{}",
         quote_ident(&source_schema(source_id)),
@@ -97,12 +83,12 @@ pub(crate) fn materialize(
          FROM (
              SELECT *,
                     nextval('ox.row_seq') AS _ox_row,
-                    sha256(concat_ws(chr(31), {parts})) AS _ox_hash
+                    {hash} AS _ox_hash
              FROM {staged}
          )
          ORDER BY _ox_row;",
         schema = quote_ident(&source_schema(source_id)),
-        parts = parts.join(", "),
+        hash = row_hash_sql(hash_columns),
     ))?;
 
     let (rows, first, last): (i64, Option<i64>, Option<i64>) = conn.query_row(
@@ -115,6 +101,31 @@ pub(crate) fn materialize(
         first.unwrap_or(0),
         last.unwrap_or(0),
     ))
+}
+
+/// The SQL expression for a row's `_ox_hash`: the SHA-256 of the JSON array
+/// `[[name, text], ...]` over `columns` in the order given, `text` being
+/// `null` for a NULL cell.
+///
+/// DuckDB writes the JSON, so every quote, backslash and control character
+/// in a cell is escaped and no cell can imitate the array's structure: text
+/// cannot shift between columns, and NULL, the empty string and any text
+/// (`"null"` and NUL included) all encode differently. Naming each column
+/// means moving a value from one column to the next changes the hash. The
+/// names are literals because a CREATE TABLE AS cannot bind parameters;
+/// quote_literal escapes them.
+fn row_hash_sql(columns: &[HashColumn]) -> String {
+    let pairs: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            format!(
+                "[{}, CAST({} AS VARCHAR)]",
+                quote_literal(&c.name),
+                c.text_expr
+            )
+        })
+        .collect();
+    format!("sha256(CAST(to_json([{}]) AS VARCHAR))", pairs.join(", "))
 }
 
 /// Recreate, for every relation in `ox.relation`, the view `main."<name>"`
@@ -245,4 +256,56 @@ fn active_arms(conn: &Connection, name: &str) -> Result<Vec<(i64, String)>> {
         arms.push((source_id, sql));
     }
     Ok(arms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The hash of one row with columns `a` and `b` whose text is given as
+    /// SQL expressions.
+    fn hash(conn: &Connection, a: &str, b: &str) -> String {
+        let columns = [
+            HashColumn {
+                name: "a".into(),
+                text_expr: "a".into(),
+            },
+            HashColumn {
+                name: "b".into(),
+                text_expr: "b".into(),
+            },
+        ];
+        conn.query_row(
+            &format!(
+                "SELECT {} FROM (SELECT {a} AS a, {b} AS b)",
+                row_hash_sql(&columns)
+            ),
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn null_empty_and_lookalike_text_hash_apart() {
+        let conn = Connection::open_in_memory().unwrap();
+        let values = [
+            "CAST(NULL AS VARCHAR)",
+            "''",
+            "'null'",
+            "chr(0)",
+            "'\"'",
+            "'\\'",
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for v in values {
+            assert!(seen.insert(hash(&conn, v, "'1'")), "{v} collided");
+        }
+        // Text moved between columns across what would be a separator.
+        assert_ne!(
+            hash(&conn, "'x\", \"b\"'", "'y'"),
+            hash(&conn, "'x'", "'\", \"b\"y'")
+        );
+        assert_ne!(hash(&conn, "'x'", "'y'"), hash(&conn, "'y'", "'x'"));
+    }
 }
