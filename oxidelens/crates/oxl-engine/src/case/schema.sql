@@ -78,6 +78,7 @@ CREATE TABLE ox.relation (
     kind VARCHAR NOT NULL,
     tool VARCHAR,
     primary_time VARCHAR,
+    primary_time_chosen BOOLEAN NOT NULL DEFAULT false,
     evidence_path_column VARCHAR,
     host_column VARCHAR
 );
@@ -86,6 +87,7 @@ COMMENT ON COLUMN ox.relation.name IS 'The view name in schema main.';
 COMMENT ON COLUMN ox.relation.kind IS 'dataset (from a run) or file (a loose file).';
 COMMENT ON COLUMN ox.relation.tool IS 'The TriageSuite tool that wrote it; NULL for a loose file.';
 COMMENT ON COLUMN ox.relation.primary_time IS 'The timestamp column the timeline uses; NULL when there is none.';
+COMMENT ON COLUMN ox.relation.primary_time_chosen IS 'True once an analyst set primary_time (none included): a later load leaves it alone instead of choosing a default.';
 COMMENT ON COLUMN ox.relation.evidence_path_column IS 'The column naming the evidence path, when the dataset has one.';
 COMMENT ON COLUMN ox.relation.host_column IS 'The column naming the host, when there is one.';
 

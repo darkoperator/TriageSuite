@@ -260,7 +260,7 @@ pub fn set_primary_time(
         }
     }
     tx.execute(
-        "UPDATE ox.relation SET primary_time = ? WHERE name = ?",
+        "UPDATE ox.relation SET primary_time = ?, primary_time_chosen = true WHERE name = ?",
         params![column, relation],
     )?;
     record(
@@ -543,19 +543,21 @@ fn sync_companions(conn: &Connection, relation: &str) -> Result<()> {
 }
 
 /// Set `relation`'s primary time when it has none and no analyst ever chose
-/// one (choosing none is a choice too): the `PRIMARY_TIME` entry if that is
-/// a catalogued timestamp, else the first catalogued timestamp.
+/// one for this relation row (choosing none is a choice too): the
+/// `PRIMARY_TIME` entry if that is a catalogued timestamp, else the first
+/// catalogued timestamp. The choice is read from the row itself, not from
+/// history, so a relation recreated after its last source was removed
+/// starts from the default again.
 fn default_primary_time(conn: &Connection, relation: &str) -> Result<()> {
     if read_relation(conn, relation)?.primary_time.is_some() {
         return Ok(());
     }
-    let chosen: i64 = conn.query_row(
-        "SELECT count(*) FROM ox.history \
-         WHERE target_kind = 'relation' AND target_id = ? AND action = 'set_primary_time'",
+    let chosen: bool = conn.query_row(
+        "SELECT primary_time_chosen FROM ox.relation WHERE name = ?",
         params![relation],
         |r| r.get(0),
     )?;
-    if chosen > 0 {
+    if chosen {
         return Ok(());
     }
     let timestamps: Vec<String> = read_columns(conn, relation)?

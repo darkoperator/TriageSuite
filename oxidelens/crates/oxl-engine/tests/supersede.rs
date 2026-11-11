@@ -7,7 +7,8 @@ mod common;
 
 use common::{agent, analyst, n};
 use oxl_engine::{
-    load_file, load_run, relations, remove_source, sources, Case, FileOptions, LoadReport,
+    load_file, load_run, relation, relations, remove_source, set_primary_time, sources, Case,
+    FileOptions, LoadReport,
 };
 use std::path::{Path, PathBuf};
 
@@ -188,7 +189,8 @@ fn marks_follow_identical_rows_and_report_the_rest() {
         &analyst(),
     )
     .unwrap();
-    assert_eq!((r.superseded[0].moved, r.superseded[0].left_behind), (1, 0));
+    // One mark, one tag and one note, each counted.
+    assert_eq!((r.superseded[0].moved, r.superseded[0].left_behind), (3, 0));
 
     let new_row = n(&case, SVCH0ST_WS01);
     assert_ne!(new_row, old_row);
@@ -206,10 +208,205 @@ fn marks_follow_identical_rows_and_report_the_rest() {
     let after = n(
         &case,
         "select count(*) from ox.history where action = 'supersede' \
-         and json_extract(after_json, '$.moved')::BIGINT = 1 \
+         and json_extract(after_json, '$.moved')::BIGINT = 3 \
          and json_extract(after_json, '$.left_behind')::BIGINT = 0",
     );
     assert_eq!(after, 1);
+}
+
+/// A copy of the run at `rerun` (a `rerun_ws01_prefetch` tree) under `to`,
+/// with run id `run_id` and without its SVCH0ST.EXE row.
+fn without_svch0st(rerun: &Path, to: &Path, run_id: &str) -> PathBuf {
+    let copy = copy_run(rerun, to, run_id, |_| {});
+    let csv = copy
+        .join("Processed-WS01-20260102000000")
+        .join("Execution")
+        .join("pf.csv");
+    let kept: String = std::fs::read_to_string(&csv)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.contains("SVCH0ST.EXE"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&csv, kept).unwrap();
+    copy
+}
+
+#[test]
+fn reinstating_never_doubles_a_mark_or_a_tag() {
+    let (d, mut case) = setup();
+    // s1: X (SVCH0ST.EXE on WS01) gets mark M1 and tag `lateral`.
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    let s1_x = n(&case, SVCH0ST_WS01);
+    let case = with_sql(
+        case,
+        &format!(
+            "{} INSERT INTO ox.row_tag VALUES ({s1_x}, 'lateral', 'analyst:tester', \
+             '2026-11-11T00:00:00.000000Z');",
+            mark(SVCH0ST_WS01)
+        ),
+    );
+    // s2 lacks X: M1 and the tag stay on s1's X.
+    let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
+    let mut case = case;
+    let s2 = load_run(
+        &mut case,
+        &without_svch0st(&rerun, &d.path().join("s2"), "20260102000000-bbbb"),
+        &analyst(),
+    )
+    .unwrap();
+    assert_eq!(
+        (s2.superseded[0].moved, s2.superseded[0].left_behind),
+        (0, 2)
+    );
+    // s3 has X again; s2 had nothing to move. The analyst marks s3's X M2
+    // and tags it `lateral` too.
+    let s3 = load_run(
+        &mut case,
+        &copy_run(&rerun, &d.path().join("s3"), "20260105000000-eeee", |_| {}),
+        &analyst(),
+    )
+    .unwrap();
+    assert_eq!(s3.superseded[0].old_source, s2.source_id);
+    let s3_x = n(&case, SVCH0ST_WS01);
+    let mut case = with_sql(
+        case,
+        &format!(
+            "INSERT INTO ox.row_mark VALUES ({s3_x}, 'benign', 'analyst:tester', \
+             '2026-11-11T00:00:00.000000Z'); \
+             INSERT INTO ox.row_tag VALUES ({s3_x}, 'lateral', 'analyst:tester', \
+             '2026-11-11T00:00:00.000000Z');"
+        ),
+    );
+    // With s2 gone, removing s3 reinstates s1, whose X already carries M1
+    // and `lateral`.
+    remove_source(&mut case, s2.source_id, false, &analyst()).unwrap();
+    let report = remove_source(&mut case, s3.source_id, true, &analyst()).unwrap();
+    assert_eq!((report.orphaned_marks, report.orphaned_tags), (1, 1));
+
+    assert_eq!(n(&case, SVCH0ST_WS01), s1_x);
+    assert_eq!(
+        n(
+            &case,
+            &format!("select count(*) from ox.row_mark where row_id = {s1_x}")
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.row_mark where row_id = {s1_x} and mark = 'suspicious'"
+            )
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!("select count(*) from ox.row_mark where row_id = {s3_x} and mark = 'benign'")
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!("select count(*) from ox.row_tag where row_id = {s1_x}")
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!("select count(*) from ox.row_tag where row_id = {s3_x} and tag = 'lateral'")
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.history where action = 'source_remove' \
+                 and target_id = '{}' \
+                 and json_extract(after_json, '$.reinstated[0].source_id')::BIGINT = 1 \
+                 and json_extract(after_json, '$.reinstated[0].moved')::BIGINT = 0 \
+                 and json_extract(after_json, '$.reinstated[0].left_behind')::BIGINT = 2",
+                s3.source_id
+            )
+        ),
+        1
+    );
+}
+
+#[test]
+fn a_deleted_note_moves_with_its_row_but_is_not_counted() {
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    let old_row = n(&case, SVCH0ST_WS01);
+    let mut case = with_sql(
+        case,
+        &format!(
+            "INSERT INTO ox.note VALUES (nextval('ox.note_seq'), {old_row}, 'gone', \
+             'analyst:tester', '2026-11-11T00:00:00.000000Z', true);"
+        ),
+    );
+    let r = load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap();
+    assert_eq!((r.superseded[0].moved, r.superseded[0].left_behind), (0, 0));
+    assert_eq!(
+        n(&case, "select row_id from ox.note"),
+        n(&case, SVCH0ST_WS01)
+    );
+}
+
+#[test]
+fn reloading_after_removal_restores_the_default_primary_time() {
+    let (d, mut case) = setup();
+    let root = oxl_fixtures::two_hosts(d.path());
+    load_run(&mut case, &root, &analyst()).unwrap();
+    set_primary_time(&mut case, "petriage_timeline", None, &analyst()).unwrap();
+    remove_source(&mut case, 1, true, &analyst()).unwrap();
+    load_run(&mut case, &root, &analyst()).unwrap();
+    assert_eq!(
+        relation(&case, "petriage_timeline").unwrap().primary_time,
+        Some("RunTime".to_string())
+    );
+}
+
+#[test]
+fn an_analysts_primary_time_survives_a_later_load() {
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    set_primary_time(&mut case, "petriage_timeline", None, &analyst()).unwrap();
+    load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap();
+    assert_eq!(
+        relation(&case, "petriage_timeline").unwrap().primary_time,
+        None
+    );
 }
 
 #[test]

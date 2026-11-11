@@ -107,9 +107,10 @@ pub(super) struct Reinstated {
     pub relation: String,
     pub host: String,
     pub source: i64,
-    /// Annotated rows of the removed run whose annotations moved back.
+    /// Annotations (marks, tags, live notes) that moved back, as `rebind`
+    /// counts them.
     pub moved: u64,
-    /// Annotated rows of the removed run with no counterpart; orphaned.
+    /// Annotations left on the removed run's rows; orphaned.
     pub left_behind: u64,
 }
 
@@ -165,9 +166,14 @@ pub(super) fn reinstate(conn: &Connection, removed_source: i64) -> Result<Vec<Re
 
 /// Repoint every mark, tag and note on an annotated row of `from_source`'s
 /// `relation` for `host` at the row of `to_source` with the same hash and
-/// occurrence. Returns how many annotated rows moved and how many had no
-/// counterpart. Supersession moves them forward to the new run; removing
+/// occurrence. Supersession moves them forward to the new run; removing
 /// that run moves them back to the run it had superseded.
+///
+/// Returns `(moved, left_behind)` counted per annotation record: each mark,
+/// each tag row and each note that is not deleted (a deleted note moves
+/// with its row but is not counted). An annotation stays where it is, and is
+/// left behind, when its row has no counterpart, or when the counterpart
+/// already has a mark (for a mark) or the same tag (for a tag).
 pub(super) fn rebind(
     conn: &Connection,
     from_source: i64,
@@ -205,17 +211,69 @@ pub(super) fn rebind(
 
     let (mut moved, mut left_behind) = (0u64, 0u64);
     for (old_row, new_row) in pairs {
+        let marks = count(conn, "ox.row_mark", old_row, "")?;
+        let tags = tags_on(conn, old_row)?;
+        let notes = count(conn, "ox.note", old_row, " AND NOT deleted")?;
         let Some(new_row) = new_row else {
-            left_behind += 1;
+            left_behind += marks + len(&tags) + notes;
             continue;
         };
-        for t in ANNOTATIONS {
-            conn.execute(
-                &format!("UPDATE {t} SET row_id = ? WHERE row_id = ?"),
-                params![new_row, old_row],
-            )?;
+        // A row carries at most one mark: one the target already has (an
+        // earlier run's, left behind when a later run lacked the row)
+        // stands, and the incoming one stays where it is.
+        if marks > 0 {
+            if count(conn, "ox.row_mark", new_row, "")? > 0 {
+                left_behind += marks;
+            } else {
+                conn.execute(
+                    "UPDATE ox.row_mark SET row_id = ? WHERE row_id = ?",
+                    params![new_row, old_row],
+                )?;
+                moved += marks;
+            }
         }
-        moved += 1;
+        // Likewise a tag the target already carries is not doubled.
+        let present = tags_on(conn, new_row)?;
+        for tag in tags {
+            if present.contains(&tag) {
+                left_behind += 1;
+            } else {
+                conn.execute(
+                    "UPDATE ox.row_tag SET row_id = ? WHERE row_id = ? AND tag = ?",
+                    params![new_row, old_row, tag],
+                )?;
+                moved += 1;
+            }
+        }
+        // Notes always move, deleted ones too; only live ones are counted.
+        conn.execute(
+            "UPDATE ox.note SET row_id = ? WHERE row_id = ?",
+            params![new_row, old_row],
+        )?;
+        moved += notes;
     }
     Ok((moved, left_behind))
+}
+
+/// The rows of annotation table `table` on `row`, with `extra` added to the
+/// WHERE clause.
+fn count(conn: &Connection, table: &str, row: i64, extra: &str) -> Result<u64> {
+    let n: i64 = conn.query_row(
+        &format!("SELECT count(*) FROM {table} WHERE row_id = ?{extra}"),
+        params![row],
+        |r| r.get(0),
+    )?;
+    Ok(u64::try_from(n).unwrap_or_default())
+}
+
+/// The tags on `row`.
+fn tags_on(conn: &Connection, row: i64) -> Result<Vec<String>> {
+    Ok(conn
+        .prepare("SELECT tag FROM ox.row_tag WHERE row_id = ? ORDER BY tag")?
+        .query_map(params![row], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?)
+}
+
+fn len(items: &[String]) -> u64 {
+    u64::try_from(items.len()).unwrap_or(u64::MAX)
 }

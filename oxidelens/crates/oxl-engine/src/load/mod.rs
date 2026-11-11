@@ -35,9 +35,11 @@ pub struct Superseded {
     pub relation: String,
     pub host: String,
     pub old_source: i64,
-    /// Annotated rows whose annotations moved to the new source's rows.
+    /// Annotations (each mark, tag and note not deleted) that moved to the
+    /// new source's identical rows.
     pub moved: u64,
-    /// Annotated rows with no counterpart in the new source.
+    /// Annotations left on the old rows: no identical row in the new
+    /// source, or one that already had a mark or the same tag.
     pub left_behind: u64,
 }
 
