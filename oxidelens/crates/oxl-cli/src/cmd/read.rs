@@ -8,7 +8,7 @@ use crate::args::{AroundArgs, FindArgs, FindModeArg, PageArgs, QueryArgs, StackO
 use crate::envelope::wrap;
 use oxl_engine::{
     EngineError, FindMode, FindRequest, GridQuery, Listing, MergedRow, MergedSource, Result,
-    SortKey, StackOrder,
+    SortKey, StackOrder, TimeSemantics,
 };
 use serde_json::{json, Value};
 
@@ -84,6 +84,12 @@ fn parse_sort(text: &str) -> Result<SortKey> {
         column: column.to_string(),
         descending,
     })
+}
+
+/// How a time is zoned, as the catalog spells it: an engine value, so it
+/// goes outside the wrapper.
+fn zoning(s: Option<TimeSemantics>) -> Option<&'static str> {
+    s.map(|s| s.as_str())
 }
 
 /// An integer then `s`, `m` or `h`, at most 24 hours, as seconds.
@@ -212,6 +218,7 @@ pub fn histogram(
         .map(|b| json!({"start": b.start, "count": b.count, "suspicious": b.suspicious}))
         .collect();
     Ok(Reply::new(json!({
+        "time_semantics": zoning(h.time_semantics),
         "bucket_seconds": h.bucket_seconds,
         "untimed": h.untimed,
         "buckets": list,
@@ -250,6 +257,7 @@ pub fn stack(
             "rows_counted": s.rows_counted,
             "rows": rows.len(),
             "cells_clipped": s.cells_clipped,
+            "time_semantics": zoning(s.time_semantics),
             "untrusted": wrap(&json!({"by": s.by, "rows": rows})),
         }),
         truncated: s.truncated,
@@ -269,6 +277,7 @@ fn merged_reply(listing: &Listing<MergedRow>) -> Reply {
         data: json!({
             "row_ids": rows.iter().map(|r| r.row_id).collect::<Vec<_>>(),
             "marks": rows.iter().map(|r| r.mark).collect::<Vec<_>>(),
+            "time_semantics": rows.iter().map(|r| zoning(r.time_semantics)).collect::<Vec<_>>(),
             "untrusted": wrap(&json!({"rows": list})),
         }),
         truncated: listing.truncated,
@@ -307,6 +316,8 @@ pub fn find(ctx: &Ctx, args: &FindArgs) -> Result<Reply> {
         .collect();
     Ok(Reply::new(json!({
         "hits": hits.len(),
+        // One per hit, in the order of the wrapped list.
+        "time_semantics": found.hits.iter().map(|h| zoning(h.time_semantics)).collect::<Vec<_>>(),
         "cancelled": found.cancelled,
         "untrusted": wrap(&json!({
             "hits": hits,
@@ -339,12 +350,15 @@ pub fn around(ctx: &Ctx, args: &AroundArgs) -> Result<Reply> {
         let rows = oxl_engine::merged_rows(&case, &source, args.page.limit, args.page.offset)?;
         return Ok(merged_reply(&rows));
     }
-    let counts: Vec<Value> = oxl_engine::around(&case, &host, &at, window_seconds)?
+    let found = oxl_engine::around(&case, &host, &at, window_seconds)?;
+    let counts: Vec<Value> = found
         .iter()
         .map(|c| json!({"relation": c.relation, "count": c.count}))
         .collect();
     Ok(Reply::new(json!({
         "counts": counts.len(),
+        // One per count, in the order of the wrapped list.
+        "time_semantics": found.iter().map(|c| zoning(c.time_semantics)).collect::<Vec<_>>(),
         "untrusted": wrap(&json!({"counts": counts})),
     })))
 }

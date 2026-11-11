@@ -11,24 +11,29 @@
 //! in SQL, so a page never holds more than it shows.
 
 use super::find::{cells_sql, targets, FindRequest};
-use super::group::{as_count, typed_primary_time};
+use super::group::{as_count, primary_time_semantics, typed_primary_time};
 use super::page::{mark_sql, read_mark};
 use super::{scope, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS};
 use crate::annot::locate;
 use crate::case::Case;
 use crate::catalog::appmap::summary_for;
-use crate::catalog::{self, ColumnInfo, ColumnRole, SqlType};
+use crate::catalog::{self, ColumnInfo, ColumnRole, SqlType, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter};
+use std::collections::BTreeMap;
 use triage_core::output::duckdb::sql::quote_ident;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AroundCount {
     pub relation: String,
     pub count: u64,
+    /// How the relation's primary time is zoned. An `unknown` time was
+    /// compared with the window as written.
+    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
+    pub time_semantics: Option<TimeSemantics>,
 }
 
 /// Rows on `host` whose primary time is within `at ± window_seconds`, per
@@ -47,6 +52,7 @@ pub fn around(case: &Case, host: &str, at: &str, window_seconds: u64) -> Result<
             |r| r.get(0),
         )?;
         out.push(AroundCount {
+            time_semantics: primary_time_semantics(&scope.relation.primary_time, &scope.columns),
             relation: scope.relation.name,
             count: as_count(n),
         });
@@ -114,8 +120,13 @@ pub fn anchor_of(case: &Case, row_id: i64) -> Result<(String, String)> {
 pub struct MergedRow {
     pub row_id: i64,
     pub relation: String,
-    /// The row's primary time, UTC; `None` when it has none.
+    /// The row's primary time, rendered with a `Z`; `None` when it has none.
+    /// Only `time_semantics` says whether it really is UTC.
     pub time: Option<String>,
+    /// How the relation's primary time is zoned; `None` without one. Rows
+    /// with an `unknown` time sort by their written value.
+    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
+    pub time_semantics: Option<TimeSemantics>,
     pub host: Option<String>,
     pub summary: String,
     pub mark: Option<MarkState>,
@@ -151,6 +162,14 @@ pub fn merged_rows(
     check_limit(limit)?;
     let mut parts = Vec::new();
     let mut params = Vec::new();
+    // Each part's relation and how its primary time is zoned.
+    let mut zoning: BTreeMap<String, Option<TimeSemantics>> = BTreeMap::new();
+    let mut note = |scope: &Scope| {
+        zoning.insert(
+            scope.relation.name.clone(),
+            primary_time_semantics(&scope.relation.primary_time, &scope.columns),
+        );
+    };
     match source {
         MergedSource::Find(req) => {
             let relations = catalog::relations(case)?;
@@ -163,6 +182,7 @@ pub fn merged_rows(
                     format!("{ROW_ALIAS}._ox_row IN (SELECT ox_c._ox_row FROM {cells} AS ox_c)");
                 parts.push(part_sql(&target.scope, &matched, &mut params));
                 params.extend(cell_params);
+                note(&target.scope);
             }
         }
         MergedSource::Around {
@@ -172,6 +192,7 @@ pub fn merged_rows(
         } => {
             for scope in around_scopes(case, host, at, *window_seconds)? {
                 parts.push(part_sql(&scope, &scope.where_sql, &mut params));
+                note(&scope);
                 params.extend(scope.params);
             }
         }
@@ -196,9 +217,11 @@ pub fn merged_rows(
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
+        let relation: String = row.get(1)?;
         out.push(MergedRow {
             row_id: row.get(0)?,
-            relation: row.get(1)?,
+            time_semantics: zoning.get(&relation).copied().flatten(),
+            relation,
             time: row.get(2)?,
             host: row.get(3)?,
             summary: row.get(4)?,

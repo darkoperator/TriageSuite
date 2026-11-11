@@ -57,6 +57,76 @@ fn assert_invalid(args: &[&str]) {
 }
 
 #[test]
+fn pivots_say_how_their_times_are_zoned() {
+    let (d, p) = loaded();
+    let fw = oxl_fixtures::loose_fw_csv(d.path());
+    assert_eq!(
+        ox(&[
+            "--case",
+            &p,
+            "load",
+            "file",
+            &fw.to_string_lossy(),
+            "--host",
+            "WS01"
+        ])
+        .0,
+        0
+    );
+    let at = [
+        "--host",
+        "WS01",
+        "--at",
+        "2026-01-05T02:15:44Z",
+        "--window",
+        "5m",
+    ];
+    let mut around = vec!["--case", p.as_str(), "around"];
+    around.extend(at);
+    let (c, v) = ox(&around);
+    assert_eq!(c, 0, "{v}");
+    let relations: Vec<String> = inner(&v["data"]["untrusted"])["counts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["relation"].as_str().unwrap().to_string())
+        .collect();
+    let zones = v["data"]["time_semantics"].as_array().unwrap().clone();
+    assert_eq!(zones.len(), relations.len());
+    let zone_of = |rel: &str| zones[relations.iter().position(|r| r == rel).unwrap()].clone();
+    assert_eq!(zone_of("fw_csv"), "unknown");
+    assert_eq!(zone_of("evtxtriage_events"), "utc");
+
+    around.push("--rows");
+    let (_, v) = ox(&around);
+    let zones = v["data"]["time_semantics"].as_array().unwrap();
+    assert_eq!(zones.len(), ids(&v).len());
+    assert!(zones.contains(&json!("unknown")) && zones.contains(&json!("utc")));
+
+    let (_, v) = ox(&["--case", &p, "find", "203.0.113.7"]);
+    let zones = v["data"]["time_semantics"].as_array().unwrap();
+    assert_eq!(zones.len() as u64, v["data"]["hits"].as_u64().unwrap());
+    assert!(zones.contains(&json!("unknown")) && zones.contains(&json!("utc")));
+    let (_, v) = ox(&["--case", &p, "find", "203.0.113.7", "--rows"]);
+    assert_eq!(
+        v["data"]["time_semantics"].as_array().unwrap().len(),
+        ids(&v).len()
+    );
+
+    let (_, v) = ox(&["--case", &p, "histogram", "fw_csv"]);
+    assert_eq!(v["data"]["time_semantics"], "unknown");
+    let (_, v) = ox(&[
+        "--case",
+        &p,
+        "stack",
+        "evtxtriage_events",
+        "--by",
+        "Channel",
+    ]);
+    assert_eq!(v["data"]["time_semantics"], "utc");
+}
+
+#[test]
 fn groups_and_stack_clip_long_keys_and_say_so() {
     let (d, p) = loaded();
     let csv = d.path().join("long.csv");

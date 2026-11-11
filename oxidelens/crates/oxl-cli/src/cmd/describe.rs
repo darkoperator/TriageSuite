@@ -66,11 +66,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "find",
-        "Find a value in every relation: find <value> [--mode exact|contains (default exact)] [--host h]... [--from <utc>] [--to <utc>] [--rows] [--limit N] [--offset N]",
+        "Find a value in every relation: find <value> [--mode exact|contains (default exact)] [--host h]... [--from <utc>] [--to <utc>] [--rows] [--limit N] [--offset N]. time_semantics says, per hit or row, whether its time is utc or unknown (compared with --from/--to as written)",
     ),
     (
         "around",
-        "What happened near a row or a moment: around (--row <id> | --host <h> --at <utc>) --window <30s|1m|5m|1h> [--rows] [--limit N] [--offset N]",
+        "What happened near a row or a moment: around (--row <id> | --host <h> --at <utc>) --window <30s|1m|5m|1h> [--rows] [--limit N] [--offset N]. time_semantics says, per count or row, whether its time is utc or unknown (written without a zone, compared as written)",
     ),
     ("row", "One row in full: row <id>"),
     (

@@ -2,11 +2,11 @@
 //! how many hosts each appears on. The frequency analysis analysts otherwise
 //! do in a spreadsheet pivot.
 
-use super::group::{as_count, first_last_sql, key_sql, MAX_BY};
+use super::group::{as_count, first_last_sql, key_sql, primary_time_semantics, MAX_BY};
 use super::page::clip_text;
 use super::{find_column, marked_sql, scope, GridQuery, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, ColumnInfo};
+use crate::catalog::{self, ColumnInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::listing::check_limit;
 use duckdb::params_from_iter;
@@ -48,6 +48,10 @@ pub struct Stack {
     /// Some value on this page was longer than `CELL_CAP` characters and
     /// was cut.
     pub cells_clipped: bool,
+    /// How the relation's primary time, which `first` and `last` show, is
+    /// zoned; `None` without one.
+    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
+    pub time_semantics: Option<TimeSemantics>,
 }
 
 /// Up to `limit` combinations from `offset` of `by` (1 to 4 columns) over
@@ -153,5 +157,6 @@ pub fn stack(
         truncated: shown < distinct,
         rows: out,
         cells_clipped,
+        time_semantics: primary_time_semantics(&scope.relation.primary_time, &all),
     })
 }

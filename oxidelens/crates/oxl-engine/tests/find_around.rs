@@ -5,7 +5,8 @@ mod common;
 use common::{analyst, loaded, n};
 use oxl_engine::{
     anchor_of, around, find, load_file, load_run, mark_suspicious, merged_rows, set_primary_time,
-    EngineError, FileOptions, FindMode, FindRequest, Listing, MarkState, MergedSource, MAX_VALUE,
+    EngineError, FileOptions, FindMode, FindRequest, Listing, MarkState, MergedSource,
+    TimeSemantics, MAX_VALUE,
 };
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
@@ -37,6 +38,125 @@ fn svch0st_row(case: &oxl_engine::Case) -> i64 {
         case,
         "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'svch0st.exe'",
     )
+}
+
+#[test]
+fn every_pivot_says_how_its_times_are_zoned() {
+    let (d, mut case) = loaded();
+    load_file(
+        &mut case,
+        &loose_fw_csv(d.path()),
+        FileOptions {
+            host: Some("WS01".into()),
+            ..FileOptions::default()
+        },
+        &analyst(),
+    )
+    .unwrap();
+    let (host, at, window) = ("WS01", "2026-01-05T02:15:44.380000Z", 300);
+    let semantics_of = |rel: &str, counts: &[oxl_engine::AroundCount]| {
+        counts
+            .iter()
+            .find(|c| c.relation == rel)
+            .unwrap()
+            .time_semantics
+    };
+    // A time written without a zone is compared as written, and labelled so.
+    let counts = around(&case, host, at, window).unwrap();
+    assert_eq!(
+        semantics_of("fw_csv", &counts),
+        Some(TimeSemantics::Unknown)
+    );
+    assert!(
+        counts
+            .iter()
+            .find(|c| c.relation == "fw_csv")
+            .unwrap()
+            .count
+            > 0
+    );
+    assert_eq!(
+        semantics_of("evtxtriage_events", &counts),
+        Some(TimeSemantics::Utc)
+    );
+
+    let source = MergedSource::Around {
+        host: host.into(),
+        at: at.into(),
+        window_seconds: window,
+    };
+    let rows = merged_rows(&case, &source, 1000, 0).unwrap().items;
+    let fw: Vec<_> = rows.iter().filter(|r| r.relation == "fw_csv").collect();
+    assert!(!fw.is_empty());
+    assert!(fw
+        .iter()
+        .all(|r| r.time_semantics == Some(TimeSemantics::Unknown)));
+    assert!(rows
+        .iter()
+        .filter(|r| r.relation == "evtxtriage_events")
+        .all(|r| r.time_semantics == Some(TimeSemantics::Utc)));
+    // Serialised as the catalog spells it.
+    assert_eq!(
+        serde_json::to_value(fw[0]).unwrap()["time_semantics"],
+        "unknown"
+    );
+
+    let found = find(&case, &req("203.0.113.7", FindMode::Exact), &mut |_, _| {
+        true
+    })
+    .unwrap();
+    let hit = |rel: &str| {
+        found
+            .hits
+            .iter()
+            .find(|h| h.relation == rel)
+            .unwrap()
+            .time_semantics
+    };
+    assert_eq!(hit("fw_csv"), Some(TimeSemantics::Unknown));
+    assert_eq!(hit("evtxtriage_events"), Some(TimeSemantics::Utc));
+
+    let q = |rel: &str| oxl_engine::GridQuery {
+        relation: rel.into(),
+        ..Default::default()
+    };
+    let h = oxl_engine::histogram(&case, &q("fw_csv"), None, 60).unwrap();
+    assert_eq!(h.time_semantics, Some(TimeSemantics::Unknown));
+    let st = oxl_engine::stack(
+        &case,
+        &q("evtxtriage_events"),
+        &s(&["Channel"]),
+        oxl_engine::StackOrder::Rarest,
+        50,
+        0,
+    )
+    .unwrap();
+    assert_eq!(st.time_semantics, Some(TimeSemantics::Utc));
+    // A relation with no primary time says nothing.
+    set_primary_time(&mut case, "fw_csv", None, &analyst()).unwrap();
+    let st = oxl_engine::stack(
+        &case,
+        &q("fw_csv"),
+        &s(&["action"]),
+        oxl_engine::StackOrder::Rarest,
+        50,
+        0,
+    )
+    .unwrap();
+    assert_eq!(st.time_semantics, None);
+    let found = find(&case, &req("203.0.113.7", FindMode::Exact), &mut |_, _| {
+        true
+    })
+    .unwrap();
+    assert_eq!(
+        found
+            .hits
+            .iter()
+            .find(|h| h.relation == "fw_csv")
+            .unwrap()
+            .time_semantics,
+        None
+    );
 }
 
 #[test]

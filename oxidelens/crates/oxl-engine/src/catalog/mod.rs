@@ -844,6 +844,18 @@ fn decode_column(row: CatalogRow) -> Result<ColumnInfo> {
     })
 }
 
+/// Serialise an optional `TimeSemantics` as the catalog spells it (`"utc"`,
+/// `"local"`, `"unknown"`) or null. The suite's type is not `Serialize`.
+pub(crate) fn serialize_semantics<S: serde::Serializer>(
+    value: &Option<TimeSemantics>,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match value {
+        Some(t) => s.serialize_str(t.as_str()),
+        None => s.serialize_none(),
+    }
+}
+
 fn parse_semantics(text: &str) -> Option<TimeSemantics> {
     [
         TimeSemantics::Utc,

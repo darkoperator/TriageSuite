@@ -14,10 +14,10 @@
 //! columns without the host column, since a hit there would only restate
 //! the host the hit is already attributed to.
 
-use super::group::{as_count, first_last_sql, typed_primary_time};
+use super::group::{as_count, first_last_sql, primary_time_semantics, typed_primary_time};
 use super::{scope, GridQuery, Scope, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, ColumnInfo, ColumnRole, RelationInfo};
+use crate::catalog::{self, ColumnInfo, ColumnRole, RelationInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::filter::{compile_filter, FilterNode, Leaf, Op};
 use crate::search::{compile_search, Search, SearchExpr, SearchOptions, Term};
@@ -60,9 +60,14 @@ pub struct FindHit {
     pub host: Option<String>,
     /// Rows whose cell in `column` matches.
     pub count: u64,
-    /// The earliest and latest primary time among those rows, UTC.
+    /// The earliest and latest primary time among those rows, rendered with
+    /// a `Z`; `time_semantics` says whether they really are UTC.
     pub first: Option<String>,
     pub last: Option<String>,
+    /// How the relation's primary time is zoned; `None` without one. An
+    /// `unknown` time was compared with `from`/`to` as written.
+    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
+    pub time_semantics: Option<TimeSemantics>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -301,6 +306,7 @@ fn relation_hits(case: &Case, req: &FindRequest, target: &Target) -> Result<Vec<
         "SELECT {ROW_ALIAS}._ox_i, {ROW_ALIAS}._ox_h, count(*), {first}, {last} \
          FROM {cells} AS {ROW_ALIAS} GROUP BY {ROW_ALIAS}._ox_i, {ROW_ALIAS}._ox_h"
     );
+    let time_semantics = primary_time_semantics(&scope.relation.primary_time, &scope.columns);
     let mut stmt = case.conn().prepare(&sql)?;
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
@@ -319,6 +325,7 @@ fn relation_hits(case: &Case, req: &FindRequest, target: &Target) -> Result<Vec<
             count: as_count(row.get(2)?),
             first: row.get(3)?,
             last: row.get(4)?,
+            time_semantics,
         });
     }
     out.sort_by(|a, b| {

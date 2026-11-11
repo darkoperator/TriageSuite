@@ -1,9 +1,9 @@
 //! The time histogram above the grid.
 
-use super::group::{as_count, typed_primary_time};
+use super::group::{as_count, primary_time_semantics, typed_primary_time};
 use super::{find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, SqlType};
+use crate::catalog::{self, SqlType, TimeSemantics};
 use crate::error::{EngineError, Result};
 use duckdb::params_from_iter;
 use triage_core::output::duckdb::sql::quote_ident;
@@ -19,6 +19,10 @@ pub struct Bucket {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Histogram {
     pub column: String,
+    /// How `column` is zoned. Buckets of an `unknown` time are aligned to
+    /// the epoch as if it were UTC.
+    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
+    pub time_semantics: Option<TimeSemantics>,
     pub bucket_seconds: u64,
     /// Non-empty buckets only, oldest first.
     pub buckets: Vec<Bucket>,
@@ -52,11 +56,13 @@ pub fn histogram(
     let scope = scope(case, q)?;
     let all = catalog::columns(case, &q.relation)?;
     let relation = &scope.relation.name;
-    let (name, typed) = match column {
+    let (name, typed, time_semantics) = match column {
         Some(name) => {
             let c = find_column(&all, relation, name)?;
             match (&c.typed_column, c.sql_type) {
-                (Some(typed), Some(SqlType::Timestamp)) => (c.name.clone(), typed.clone()),
+                (Some(typed), Some(SqlType::Timestamp)) => {
+                    (c.name.clone(), typed.clone(), c.time_semantics)
+                }
                 _ => {
                     return Err(EngineError::Invalid(format!(
                         "{relation}.{name} is not a timestamp column"
@@ -68,7 +74,11 @@ pub fn histogram(
             &scope.relation.primary_time,
             typed_primary_time(&scope.relation.primary_time, &all),
         ) {
-            (Some(name), Some(typed)) => (name.clone(), typed.to_string()),
+            (Some(name), Some(typed)) => (
+                name.clone(),
+                typed.to_string(),
+                primary_time_semantics(&scope.relation.primary_time, &all),
+            ),
             _ => {
                 return Err(EngineError::Invalid(format!(
                     "{relation} has no timestamp column to bucket"
@@ -92,6 +102,7 @@ pub fn histogram(
         })?;
     let mut out = Histogram {
         column: name,
+        time_semantics,
         bucket_seconds: BUCKET_LADDER[0],
         buckets: Vec::new(),
         untimed: as_count(untimed),

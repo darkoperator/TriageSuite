@@ -4,7 +4,7 @@
 use super::page::clip_text;
 use super::{find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, ColumnInfo};
+use crate::catalog::{self, ColumnInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::filter::{FilterNode, Leaf, Op};
 use crate::listing::{check_limit, fetch_limit, Listing};
@@ -180,6 +180,19 @@ pub(super) fn typed_primary_time<'a>(
     all.iter()
         .find(|c| c.name == name)
         .and_then(|c| c.typed_column.as_deref())
+}
+
+/// The time semantics of the relation's typed primary time: how the times
+/// a pivot compares and returns are zoned. `None` without a typed primary
+/// time. An `Unknown` time is compared as written, as if it were UTC.
+pub(super) fn primary_time_semantics(
+    primary: &Option<String>,
+    all: &[ColumnInfo],
+) -> Option<TimeSemantics> {
+    let name = primary.as_deref()?;
+    all.iter()
+        .find(|c| c.name == name && c.typed_column.is_some())
+        .and_then(|c| c.time_semantics)
 }
 
 pub(super) fn as_count(n: i64) -> u64 {

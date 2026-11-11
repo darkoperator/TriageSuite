@@ -134,6 +134,14 @@ malformed tag) is an error. `column declare --type TIMESTAMP` requires
 a zone is never guessed), and `--semantics` with any other type is `invalid`;
 local time is not supported yet.
 
+A timestamp column's `time_semantics` is `utc`, `unknown` (written without a
+zone) or `local`. An `unknown` time is compared and sorted as written, as if
+it were UTC: `around` windows, `find --from/--to`, the merged rows of
+`--rows` and histogram buckets all treat it that way, and say so. `find`,
+`around` and their `--rows` forms print one `time_semantics` per hit, count or
+row (in the order of the wrapped list); `histogram` and `stack` print one for
+the time they show. `null` means the relation has no primary time.
+
 A column the suite already typed keeps its type, so `column declare` on it is
 `invalid`. A relation's primary time must be a typed timestamp column.
 
