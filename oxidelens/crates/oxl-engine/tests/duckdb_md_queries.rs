@@ -31,6 +31,35 @@ fn the_documented_dataset_view_selects_run_against_a_case() {
     );
     assert_eq!(coverage.rows.len(), 2);
 
+    // §2, blackout gaps: verbatim, a window function through the parse and
+    // re-render. The fixture spans minutes, so no gap reaches 24 hours.
+    let gaps = run(
+        &path,
+        "WITH e AS ( \
+           SELECT Channel, TimeCreated, \
+                  lag(TimeCreated) OVER (PARTITION BY Channel ORDER BY TimeCreated) AS prev \
+           FROM evtxtriage_events \
+           WHERE Channel IN ('Security','System','Microsoft-Windows-Sysmon/Operational') \
+         ) \
+         SELECT Channel, prev AS gap_start, TimeCreated AS gap_end, \
+                date_diff('hour', prev, TimeCreated) AS gap_hours \
+         FROM e \
+         WHERE prev IS NOT NULL AND date_diff('hour', prev, TimeCreated) >= 24 \
+         ORDER BY gap_hours DESC",
+    );
+    assert_eq!((gaps.rows.len(), gaps.columns.len()), (0, 4));
+
+    // §2, explicit clearing: verbatim. WS01's two identical 1102 rows.
+    let cleared = run(
+        &path,
+        "SELECT TimeCreated, Channel, EventId, MapDescription, UserName, Computer \
+         FROM evtxtriage_events \
+         WHERE (Channel = 'Security' AND EventId = 1102) \
+            OR (Channel = 'System'   AND EventId IN (104, 1100)) \
+         ORDER BY TimeCreated",
+    );
+    assert_eq!(cleared.rows.len(), 2);
+
     // §2, did anything stop parsing: verbatim. WS01's "not-a-time" is the one
     // cast failure and SRV01's empty cell the one blank.
     let health = run(

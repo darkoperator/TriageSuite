@@ -114,21 +114,71 @@ fn everything_that_is_not_one_select_is_refused() {
 }
 
 #[test]
-fn a_file_beside_the_case_is_out_of_reach() {
+fn file_and_indirection_functions_are_refused_wherever_they_appear() {
     let (d, path) = closed();
     let beside = d.path().join("beside.csv");
     std::fs::write(&beside, "a\n1\n").unwrap();
+    let case = path.to_str().unwrap().replace('\'', "''");
     let file = beside.to_str().unwrap().replace('\'', "''");
-    let dir = d.path().to_str().unwrap().replace('\'', "''");
+    let calls = [
+        format!("read_blob('{case}')"),
+        format!("read_text('{case}.wal')"),
+        format!("read_csv('{file}')"),
+        "read_csv('x')".to_string(),
+        "glob('*')".to_string(),
+        "query('select 1')".to_string(),
+        "query_table('evtxtriage_events')".to_string(),
+    ];
+    for call in &calls {
+        // The same call with its function name in mixed case: rEaD_BlOb(...).
+        let open = call.find('(').unwrap();
+        let name: String = call[..open]
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i % 2 == 1 {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let mixed = format!("{name}{}", &call[open..]);
+        for sql in [
+            format!("select * from {call}"),
+            format!("select * from main.{call}"),
+            format!("select * from {mixed}"),
+            format!("select (select count(*) from {call}) as n"),
+            format!("select * from (select * from {call}) as t"),
+            format!("with c as (select * from {call}) select * from c"),
+        ] {
+            let e = query_sql(&path, &sql, 10, 0).unwrap_err();
+            assert_eq!(e.code(), "invalid", "{sql}: {e}");
+        }
+    }
+    // A table named by a path is a replacement scan of that file.
     for sql in [
-        format!("select * from read_csv('{file}')"),
-        format!("select * from read_text('{file}')"),
-        format!("select * from glob('{dir}/*')"),
+        format!("select * from '{case}'"),
+        format!("select * from '{file}'"),
     ] {
         let e = query_sql(&path, &sql, 10, 0).unwrap_err();
-        // Refused by the lockdown, not by a missing file or a parse error.
-        assert!(e.to_string().contains("disabled"), "{sql}: {e}");
+        assert_eq!(e.code(), "invalid", "{sql}: {e}");
     }
+    // Names that only look like those functions still run.
+    let r = query_sql(
+        &path,
+        "select count(*) as read_count, 'x' as query from evtxtriage_events",
+        10,
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        (r.columns, r.rows),
+        (
+            vec!["read_count".to_string(), "query".to_string()],
+            vec![vec![s("11"), s("x")]]
+        )
+    );
 }
 
 #[test]

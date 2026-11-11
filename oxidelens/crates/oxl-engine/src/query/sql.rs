@@ -15,17 +15,30 @@
 //!    (also one behind a comment) is refused. What runs is DuckDB's
 //!    re-rendering of that one parsed SELECT, so comments and trailing text
 //!    never reach execution.
-//! 2. **A separate, locked instance.** A second in-memory instance with
-//!    extension auto-install and auto-load off attaches the case
-//!    `READ_ONLY`, then sets `enable_external_access = false` (no file,
-//!    network or environment access) and `lock_configuration = true` (no
-//!    `SET` can undo it). The lockdown is probed before anything runs; if a
-//!    probe succeeds, nothing does.
-//! 3. **Never a writer.** The case is only ever attached read-only.
+//! 2. **No file functions.** The parse tree is walked, and refused when it
+//!    calls a function that reads a file (every `read_*` and `parquet_*`,
+//!    `glob`, `sniff_csv`), runs a statement hidden in a value (`query`,
+//!    `query_table`, `json_execute_serialized_sql`), changes the instance's
+//!    state (logging, profiling, checkpoints) or reads memory by address
+//!    (`arrow_scan*`), or when it names a table with a path character, which
+//!    DuckDB would answer with a replacement scan of that file. This layer
+//!    exists because the next one has a gap: DuckDB keeps an attached
+//!    database's own files readable with external access off, so without it
+//!    `read_blob` of the case file or its write-ahead log would return raw
+//!    pages, free blocks of deleted notes and removed sources included.
+//! 3. **A separate, locked instance.** A second in-memory instance with
+//!    extension auto-install and auto-load off and no temporary directory
+//!    (nothing spills to disk; a query needing more than `SQL_MEMORY_LIMIT`
+//!    fails) attaches the case `READ_ONLY`, then sets
+//!    `enable_external_access = false` (no file, network or environment
+//!    access) and `lock_configuration = true` (no `SET` can undo it). The
+//!    lockdown is probed before anything runs; if a probe succeeds or a
+//!    setting did not take, nothing does.
+//! 4. **Never a writer.** The case is only ever attached read-only.
 //!
-//! DuckDB keeps an attached database's own file readable with external
-//! access off, so `read_blob` of the case file's path succeeds. That reads
-//! nothing the query could not already select, and every other path fails.
+//! What a query reaches, then: the case's tables and views through the
+//! catalog, DuckDB's catalog and settings functions, and computation. No
+//! file (the case file's own bytes included), no network, no environment.
 //!
 //! The case is attached as the default database, so the relations' views
 //! are in `main`, the case tables in `ox` and loaded data in `src_<n>`, just
@@ -45,6 +58,38 @@ use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The alias the case is attached under.
 const CASE_ALIAS: &str = "ox_case";
+
+/// The most memory one query may use. Nothing spills to disk, so a query
+/// that needs more fails rather than writing a temporary file.
+const SQL_MEMORY_LIMIT: &str = "2GiB";
+
+/// What the locked instance must report for each setting, as
+/// `duckdb_settings()` spells it, checked after the lockdown.
+const LOCKED_SETTINGS: [(&str, &str); 5] = [
+    ("temp_directory", ""),
+    ("max_temp_directory_size", "0 bytes"),
+    ("memory_limit", "2.0 GiB"),
+    ("enable_external_access", "false"),
+    ("lock_configuration", "true"),
+];
+
+/// Functions a query may not call, besides every `read_*`, `parquet_*` and
+/// `arrow_scan*`: they read files, run a statement hidden in a value, or
+/// change the instance's state.
+const REFUSED_FUNCTIONS: [&str; 12] = [
+    "glob",
+    "sniff_csv",
+    "query",
+    "query_table",
+    "json_execute_serialized_sql",
+    "enable_logging",
+    "disable_logging",
+    "truncate_duckdb_logs",
+    "enable_profiling",
+    "disable_profiling",
+    "checkpoint",
+    "force_checkpoint",
+];
 
 /// The columns' DuckDB type names whose values render as R1 UTC text.
 const TIMESTAMP_TYPES: [&str; 5] = [
@@ -195,12 +240,50 @@ fn the_select(sql: &str) -> Result<String> {
             "a query is exactly one SELECT statement, not {n}"
         )));
     }
+    if let Some(why) = reaches_outside(&v["statements"][0]) {
+        return Err(EngineError::Invalid(why));
+    }
     let one = serde_json::json!({ "error": false, "statements": [v["statements"][0].clone()] });
     Ok(parser.query_row(
         "SELECT json_deserialize_sql(?::JSON)",
         params![one.to_string()],
         |r| r.get(0),
     )?)
+}
+
+/// Why the parsed statement `node` would reach outside the case, if it
+/// would: the first refused function it calls, in any case and under any
+/// schema, or the first table it names with a path character.
+fn reaches_outside(node: &Value) -> Option<String> {
+    match node {
+        Value::Object(fields) => {
+            if let Some(Value::String(name)) = fields.get("function_name") {
+                let name = name.to_ascii_lowercase();
+                if ["read_", "parquet_", "arrow_scan"]
+                    .iter()
+                    .any(|prefix| name.starts_with(prefix))
+                    || REFUSED_FUNCTIONS.contains(&name.as_str())
+                {
+                    return Some(format!(
+                        "a query may not call {name}: it reaches outside the case"
+                    ));
+                }
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("BASE_TABLE") {
+                if let Some(Value::String(table)) = fields.get("table_name") {
+                    if table.contains(['.', '/', '\\', ':']) {
+                        return Some(format!(
+                            "a query may not name the table {table:?}: \
+                             a name with a path character reads a file"
+                        ));
+                    }
+                }
+            }
+            fields.values().find_map(reaches_outside)
+        }
+        Value::Array(items) => items.iter().find_map(reaches_outside),
+        _ => None,
+    }
 }
 
 /// A fresh in-memory instance with the case at `case_path` attached
@@ -221,10 +304,16 @@ fn locked(case_path: &Path) -> Result<Connection> {
         ))
     })?;
     let conn = Connection::open_in_memory()?;
-    conn.execute_batch(
+    // DuckDB's default temporary directory is `.tmp` under the process's
+    // current directory, which may be an evidence folder, and it stays
+    // writable with external access off. With none, nothing spills.
+    conn.execute_batch(&format!(
         "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; \
-         SET allow_community_extensions = false;",
-    )?;
+         SET allow_community_extensions = false; \
+         SET temp_directory = ''; SET max_temp_directory_size = '0B'; \
+         SET memory_limit = {};",
+        quote_literal(SQL_MEMORY_LIMIT)
+    ))?;
     conn.execute_batch(&format!(
         "ATTACH {} AS {CASE_ALIAS} (READ_ONLY)",
         quote_literal(file)
@@ -258,6 +347,7 @@ fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
     let probes = [
         "SET enable_external_access = true".to_string(),
         "SET lock_configuration = false".to_string(),
+        "SET temp_directory = '.tmp'".to_string(),
         format!("SELECT * FROM read_blob({})", quote_literal(existing)),
         format!("SELECT * FROM glob({})", quote_literal(existing)),
         "SELECT getenv('PATH')".to_string(),
@@ -272,7 +362,35 @@ fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
             )));
         }
     }
+    let mut setting = conn.prepare("SELECT value FROM duckdb_settings() WHERE name = ?")?;
+    for (name, expected) in LOCKED_SETTINGS {
+        let value: Option<String> =
+            setting
+                .query_row(params![name], |r| r.get(0))
+                .or_else(|e| match e {
+                    duckdb::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other),
+                })?;
+        if value.as_deref() != Some(expected) {
+            return Err(EngineError::Invalid(format!(
+                "the query connection is not locked down ({name} is {value:?}, not {expected:?})"
+            )));
+        }
+    }
     Ok(())
+}
+
+/// DuckDB's out-of-memory failure, which here means the query needs more
+/// than `SQL_MEMORY_LIMIT`, as `Invalid`; any other error as it is.
+fn out_of_memory(e: duckdb::Error) -> EngineError {
+    if e.to_string().contains("Out of Memory Error") {
+        EngineError::Invalid(format!(
+            "the query needs more memory than a query may use here ({SQL_MEMORY_LIMIT}); \
+             narrow it or aggregate it further"
+        ))
+    } else {
+        e.into()
+    }
 }
 
 /// `select` (from `the_select`) on `conn`: up to `limit` rows from `offset`,
@@ -331,9 +449,11 @@ fn run_select(conn: &Connection, select: &str, limit: u32, offset: u64) -> Resul
         cells_clipped: false,
     };
     let width = out.columns.len();
-    let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query(params_from_iter(page_params))?;
-    while let Some(r) = rows.next()? {
+    let mut stmt = conn.prepare(&sql).map_err(out_of_memory)?;
+    let mut rows = stmt
+        .query(params_from_iter(page_params))
+        .map_err(out_of_memory)?;
+    while let Some(r) = rows.next().map_err(out_of_memory)? {
         if out.rows.len() == limit as usize {
             out.truncated = true;
             break;
@@ -372,13 +492,76 @@ mod tests {
         assert!(e.to_string().contains("read_blob"), "{e}");
     }
 
+    const NO_SPILL: &str =
+        "SET temp_directory = ''; SET max_temp_directory_size = '0B'; SET memory_limit = '2GiB';";
+    const LOCK: &str = "SET enable_external_access = false; SET lock_configuration = true;";
+
     #[test]
     fn the_probe_passes_a_locked_connection() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("SET enable_external_access = false; SET lock_configuration = true;")
-            .unwrap();
+        conn.execute_batch(NO_SPILL).unwrap();
+        conn.execute_batch(LOCK).unwrap();
         let exe = std::env::current_exe().unwrap();
         probe_lockdown(&conn, exe.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_probe_catches_a_lockdown_that_can_still_spill() {
+        // Locked, but with DuckDB's default temporary directory and limit.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(LOCK).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let e = probe_lockdown(&conn, exe.to_str().unwrap()).unwrap_err();
+        assert!(e.to_string().contains("temp_directory"), "{e}");
+        // And each spill setting on its own is checked.
+        for (keep_default, setting) in [
+            ("SET temp_directory = '';", "max_temp_directory_size"),
+            ("SET max_temp_directory_size = '0B';", "temp_directory"),
+        ] {
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(keep_default).unwrap();
+            conn.execute_batch("SET memory_limit = '2GiB';").unwrap();
+            conn.execute_batch(LOCK).unwrap();
+            let e = probe_lockdown(&conn, exe.to_str().unwrap()).unwrap_err();
+            assert!(e.to_string().contains(setting), "{e}");
+        }
+    }
+
+    #[test]
+    fn file_and_indirection_functions_are_refused_by_the_parse() {
+        for bad in [
+            "select * from read_blob('c.duckdb')",
+            "select * from READ_TEXT('c.duckdb.wal')",
+            "select * from main.read_csv('x')",
+            "select * from system.main.Read_Csv_Auto('x')",
+            "select * from parquet_metadata('x')",
+            "select * from glob('*')",
+            "select * from sniff_csv('x')",
+            "select * from query('select 1')",
+            "select * from query_table('evtxtriage_events')",
+            "select * from json_execute_serialized_sql('{}')",
+            "select * from enable_logging()",
+            "select * from enable_profiling()",
+            "select * from force_checkpoint()",
+            "select * from arrow_scan(0, 0, 0)",
+            "select * from 'c.duckdb'",
+            "select * from \"evidence/x.csv\"",
+            "select (select count(*) from read_text('x')) as n",
+            "with c as (select * from glob('*')) select * from c",
+            "select 1 where exists (select 1 from query('select 2'))",
+            "select read_blob is null from (select 1 as read_blob) t where length(read_text('x')) > 0",
+        ] {
+            let e = the_select(bad).unwrap_err();
+            assert_eq!(e.code(), "invalid", "{bad}: {e}");
+        }
+        for fine in [
+            "select 1 as read_count, 2 as query",
+            "select query from (select 'x' as query) as read_csv",
+            "select count(*) as read_count from ox.source",
+            "select * from ox.meta",
+        ] {
+            the_select(fine).unwrap_or_else(|e| panic!("{fine}: {e}"));
+        }
     }
 
     #[test]
