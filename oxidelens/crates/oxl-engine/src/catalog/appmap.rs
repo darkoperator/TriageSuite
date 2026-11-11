@@ -52,6 +52,29 @@ pub const PRIMARY_TIME: &[(&str, &str)] = &[
     ("ext_hayabusa_csv_timeline", "Timestamp"),
 ];
 
+/// The columns whose texts make a row's one-line summary in the merged row
+/// list, in order. A relation not listed here is summarised by its first
+/// four non-empty values among columns that are neither metadata nor
+/// timestamps.
+pub const SUMMARY: &[(&str, &[&str])] = &[
+    (
+        "evtxtriage_events",
+        &["Channel", "EventId", "MapDescription", "UserName"],
+    ),
+    (
+        "ext_hayabusa_csv_timeline",
+        &["Level", "RuleTitle", "Details"],
+    ),
+];
+
+/// The `SUMMARY` entry for `relation`, if it has one.
+pub(crate) fn summary_for(relation: &str) -> Option<&'static [&'static str]> {
+    SUMMARY
+        .iter()
+        .find(|(r, _)| *r == relation)
+        .map(|(_, c)| *c)
+}
+
 /// The rule the app types `relation.column` by, if it does.
 pub(crate) fn rule_for(relation: &str, column: &str) -> Option<AppRule> {
     APP_TYPES

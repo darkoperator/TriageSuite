@@ -14,11 +14,15 @@
 //! empty cells instead of failing to bind. Only one `_ox_row` is in scope,
 //! which is what the `_mark` filter's correlated subquery relies on.
 
+mod around;
+mod find;
 mod group;
 mod histogram;
 mod page;
 mod stack;
 
+pub use around::{anchor_of, around, merged_rows, AroundCount, MergedRow, MergedSource};
+pub use find::{find, FindHit, FindMode, FindRequest, FindResult, MAX_VALUE};
 pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};

@@ -29,9 +29,10 @@ pub use load::{
     LoadedRelation, RemoveReport, SourceInfo, Superseded,
 };
 pub use query::{
-    count, group_filter, groups, histogram, page, stack, Bucket, Cell, GridQuery, GroupRow,
-    Histogram, MarkState, Page, SortKey, Stack, StackOrder, StackRow, BUCKET_LADDER, CELL_CAP,
-    DEFAULT_LIMIT, MAX_LIMIT,
+    anchor_of, around, count, find, group_filter, groups, histogram, merged_rows, page, stack,
+    AroundCount, Bucket, Cell, FindHit, FindMode, FindRequest, FindResult, GridQuery, GroupRow,
+    Histogram, MarkState, MergedRow, MergedSource, Page, SortKey, Stack, StackOrder, StackRow,
+    BUCKET_LADDER, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_VALUE,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};

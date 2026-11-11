@@ -63,13 +63,7 @@ pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page>
     // Fetching one more than asked says whether the page is the last one.
     // Each text is cut a character past the cap in SQL, so a huge cell is
     // not carried whole only to be clipped here.
-    let mut select = vec![
-        format!("{ROW_ALIAS}._ox_row"),
-        format!(
-            "(SELECT max(ox_pm.mark) FROM ox.row_mark AS ox_pm \
-             WHERE ox_pm.row_id = {ROW_ALIAS}._ox_row)"
-        ),
-    ];
+    let mut select = vec![format!("{ROW_ALIAS}._ox_row"), mark_sql()];
     for c in &scope.columns {
         let text = format!("{ROW_ALIAS}.{}", quote_ident(&c.text_column));
         select.push(format!("left(CAST({text} AS VARCHAR), {})", CELL_CAP + 1));
@@ -107,13 +101,7 @@ pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page>
             break;
         }
         out.row_ids.push(row.get(0)?);
-        let mark: Option<String> = row.get(1)?;
-        out.marks.push(match mark {
-            None => None,
-            Some(text) => Some(MarkState::parse(&text).ok_or_else(|| {
-                EngineError::Invalid(format!("the case holds an unknown mark {text:?}"))
-            })?),
-        });
+        out.marks.push(read_mark(row.get(1)?)?);
         let mut cells = Vec::with_capacity(width);
         for i in 0..width {
             let text: Option<String> = row.get(2 + 2 * i)?;
@@ -136,6 +124,25 @@ pub fn count(case: &Case, q: &GridQuery) -> Result<u64> {
         .conn()
         .query_row(&sql, params_from_iter(&scope.params), |r| r.get(0))?;
     Ok(u64::try_from(n).unwrap_or_default())
+}
+
+/// SQL for the mark of the row in scope, as `ox.row_mark` spells it; NULL
+/// for an unmarked row. Read it back with `read_mark`.
+pub(super) fn mark_sql() -> String {
+    format!(
+        "(SELECT max(ox_pm.mark) FROM ox.row_mark AS ox_pm \
+         WHERE ox_pm.row_id = {ROW_ALIAS}._ox_row)"
+    )
+}
+
+/// The value `mark_sql` produced, decoded; `Invalid` for a mark the engine
+/// does not know.
+pub(super) fn read_mark(text: Option<String>) -> Result<Option<MarkState>> {
+    text.map(|text| {
+        MarkState::parse(&text)
+            .ok_or_else(|| EngineError::Invalid(format!("the case holds an unknown mark {text:?}")))
+    })
+    .transpose()
 }
 
 fn clip(text: Option<String>, failed: bool) -> Cell {
