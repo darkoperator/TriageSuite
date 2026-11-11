@@ -145,7 +145,7 @@ pub struct QueryArgs {
 #[derive(Args, Debug)]
 pub struct FindArgs {
     pub value: String,
-    #[arg(long, value_enum, default_value_t = FindModeArg::Contains)]
+    #[arg(long, value_enum, default_value_t = FindModeArg::Exact)]
     pub mode: FindModeArg,
     /// Restrict to a host; repeat for several.
     #[arg(long = "host")]

@@ -236,27 +236,27 @@ fn count_groups_histogram_and_stack() {
 fn find_summary_and_rows() {
     let (_d, p) = loaded();
     let p = p.as_str();
-    let (c, v) = ox(&["--case", p, "find", "203.0.113.7", "--mode", "exact"]);
+    let (c, v) = ox(&["--case", p, "find", "203.0.113.7"]);
     assert_eq!(c, 0);
     assert_eq!(v["data"]["hits"], 1);
     assert_eq!(v["data"]["cancelled"], false);
     let body = inner(&v["data"]["untrusted"]);
     assert_eq!(body["hits"][0]["count"], 3);
     assert_eq!(body["hits"][0]["relation"], "evtxtriage_events");
-    let (_, v) = ox(&[
-        "--case",
-        p,
-        "find",
-        "203.0.113.7",
-        "--mode",
-        "exact",
-        "--rows",
-    ]);
+    let (_, v) = ox(&["--case", p, "find", "203.0.113.7", "--rows"]);
     assert_eq!(ids(&v).len(), 3);
     assert_eq!(v["data"]["marks"].as_array().unwrap().len(), 3);
     let rows = &inner(&v["data"]["untrusted"])["rows"];
     assert_eq!(rows[0]["host"], "WS01");
     assert!(rows[0]["summary"].is_string());
+}
+
+#[test]
+fn find_contains_also_matches_inside_longer_text() {
+    let (_d, p) = loaded();
+    // RemoteHost matches exactly; the Hayabusa Details text only contains it.
+    let (_, v) = ox(&["--case", &p, "find", "203.0.113.7", "--mode", "contains"]);
+    assert_eq!(v["data"]["hits"], 2);
 }
 
 #[test]

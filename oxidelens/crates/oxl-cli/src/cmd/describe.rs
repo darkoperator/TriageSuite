@@ -65,7 +65,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "find",
-        "Find a value in every relation: find <value> [--mode exact|contains] [--host h]... [--from <utc>] [--to <utc>] [--rows] [--limit N] [--offset N]",
+        "Find a value in every relation: find <value> [--mode exact|contains (default exact)] [--host h]... [--from <utc>] [--to <utc>] [--rows] [--limit N] [--offset N]",
     ),
     (
         "around",
