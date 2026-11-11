@@ -55,6 +55,10 @@ jobs:
   # suite's job never compiles DuckDB.
   oxidelens:
     runs-on: ubuntu-latest
+    env:
+      # As in the suite's job: no evidence here, so a capture-gated test that
+      # was asked for skips instead of panicking.
+      TRIAGE_ALLOW_COMPAT_SKIP: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

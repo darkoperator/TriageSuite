@@ -274,9 +274,17 @@ fn a_moved_collection_loads_without_regenerate() {
 
 #[test]
 fn loads_a_real_run_when_one_is_provided() {
-    let p =
-        std::env::var("OXIDELENS_REAL_RUN").unwrap_or_else(|_| "<OXIDELENS_REAL_RUN unset>".into());
-    if triage_testkit::skip_if_missing(Path::new(&p), "a real TriageSuite run for OxideLens") {
+    // Opt-in: no real run is normally at hand, and an unset variable is not a
+    // missing fixture. Once a path is named it must exist; a missing one goes
+    // through the suite's gate and panics unless TRIAGE_ALLOW_COMPAT_SKIP=1.
+    let Some(p) = std::env::var_os("OXIDELENS_REAL_RUN") else {
+        eprintln!(
+            "SKIP loads_a_real_run_when_one_is_provided: set OXIDELENS_REAL_RUN to a TriageSuite run output root to run it"
+        );
+        return;
+    };
+    let p = std::path::PathBuf::from(p);
+    if triage_testkit::skip_if_missing(&p, "a real TriageSuite run for OxideLens") {
         return;
     }
     let d = tempfile::tempdir().unwrap();
