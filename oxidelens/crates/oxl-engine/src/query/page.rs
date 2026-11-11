@@ -146,23 +146,24 @@ pub(super) fn read_mark(text: Option<String>) -> Result<Option<MarkState>> {
 }
 
 fn clip(text: Option<String>, failed: bool) -> Cell {
-    let Some(text) = text else {
-        return Cell {
-            text: None,
-            failed,
-            clipped: false,
-        };
+    let (text, clipped) = clip_text(text);
+    Cell {
+        text,
+        failed,
+        clipped,
+    }
+}
+
+/// `text` cut to its first `CELL_CAP` characters, and whether it was cut.
+pub(super) fn clip_text(text: Option<String>) -> (Option<String>, bool) {
+    let Some(mut text) = text else {
+        return (None, false);
     };
     match text.char_indices().nth(CELL_CAP) {
-        Some((cut, _)) => Cell {
-            text: Some(text[..cut].to_string()),
-            failed,
-            clipped: true,
-        },
-        None => Cell {
-            text: Some(text),
-            failed,
-            clipped: false,
-        },
+        Some((cut, _)) => {
+            text.truncate(cut);
+            (Some(text), true)
+        }
+        None => (Some(text), false),
     }
 }

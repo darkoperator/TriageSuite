@@ -19,6 +19,7 @@ mod find;
 mod group;
 mod histogram;
 mod page;
+mod sql;
 mod stack;
 
 pub use around::{anchor_of, around, merged_rows, AroundCount, MergedRow, MergedSource};
@@ -26,6 +27,7 @@ pub use find::{find, FindHit, FindMode, FindRequest, FindResult, MAX_VALUE};
 pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
+pub use sql::{describe, query_sql, Described, DescribedColumn, SqlResult};
 pub use stack::{stack, Stack, StackOrder, StackRow};
 
 use crate::case::Case;

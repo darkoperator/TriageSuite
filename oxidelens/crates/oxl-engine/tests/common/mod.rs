@@ -4,6 +4,9 @@
 #![allow(dead_code)]
 
 use oxl_engine::{load_run, Actor, Case};
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
 
 pub fn analyst() -> Actor {
     Actor::Analyst("tester".into())
@@ -27,4 +30,69 @@ pub fn loaded() -> (tempfile::TempDir, Case) {
 pub fn n(case: &Case, sql: &str) -> i64 {
     case.scalar_i64(sql)
         .unwrap_or_else(|e| panic!("{sql}: {e}"))
+}
+
+/// Another process holding the case file at `path` open read-write, which
+/// is the only portable way to hold DuckDB's file lock against this one.
+pub struct Holder(Child);
+
+impl Holder {
+    /// Start `hold_case` on `path` and wait until it holds the file.
+    pub fn start(path: &Path) -> Holder {
+        let mut holder = Command::new(env!("CARGO"));
+        holder
+            .args([
+                "run",
+                "-q",
+                "-p",
+                "oxl-fixtures",
+                "--example",
+                "hold_case",
+                "--",
+            ])
+            .arg(path);
+        // Cargo gives this test process its per-package variables, and a
+        // nested cargo would pass them on to build scripts. ring's tracks
+        // CARGO_MANIFEST_DIR, so inheriting it rebuilds ring and, through it,
+        // DuckDB on every run -- and then again for the next ordinary build.
+        for (key, _) in std::env::vars_os() {
+            let key = key.to_string_lossy();
+            let per_package = [
+                "CARGO_MANIFEST_",
+                "CARGO_PKG_",
+                "CARGO_CRATE_",
+                "CARGO_BIN_",
+            ]
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+                || key == "CARGO_PRIMARY_PACKAGE"
+                || key == "CARGO_TARGET_TMPDIR";
+            if per_package {
+                holder.env_remove(key.as_ref());
+            }
+        }
+        let mut child = holder
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(
+            line.trim(),
+            "held",
+            "hold_case did not report holding the case"
+        );
+        Holder(child)
+    }
+
+    /// Let the holder close the file and exit, and check it exited cleanly.
+    pub fn release(mut self) {
+        // Closing stdin is what lets the holder exit.
+        drop(self.0.stdin.take());
+        let status = self.0.wait().unwrap();
+        assert!(status.success(), "hold_case exited with {status}");
+    }
 }

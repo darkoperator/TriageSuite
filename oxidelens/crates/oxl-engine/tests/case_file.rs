@@ -1,9 +1,10 @@
 //! The case file: creation, reopening, the refusals around both, and the
 //! primitives (actor text, timestamp text) every later write depends on.
 
+mod common;
+
+use common::Holder;
 use oxl_engine::{parse_utc_text, Actor, Case};
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
 
 fn code<T>(result: oxl_engine::Result<T>) -> &'static str {
     match result {
@@ -63,60 +64,10 @@ fn open_while_open_elsewhere_is_case_locked() {
     let p = d.path().join("held.case.duckdb");
     drop(Case::create(&p, "IR-1", &Actor::Analyst("tester".into())).unwrap());
 
-    let mut holder = Command::new(env!("CARGO"));
-    holder
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "oxl-fixtures",
-            "--example",
-            "hold_case",
-            "--",
-        ])
-        .arg(&p);
-    // Cargo gives this test process its per-package variables, and a nested
-    // cargo would pass them on to build scripts. ring's tracks
-    // CARGO_MANIFEST_DIR, so inheriting it rebuilds ring and, through it,
-    // DuckDB on every run -- and then again for the next ordinary build.
-    for (key, _) in std::env::vars_os() {
-        let key = key.to_string_lossy();
-        let per_package = [
-            "CARGO_MANIFEST_",
-            "CARGO_PKG_",
-            "CARGO_CRATE_",
-            "CARGO_BIN_",
-        ]
-        .iter()
-        .any(|prefix| key.starts_with(prefix))
-            || key == "CARGO_PRIMARY_PACKAGE"
-            || key == "CARGO_TARGET_TMPDIR";
-        if per_package {
-            holder.env_remove(key.as_ref());
-        }
-    }
-    let mut child = holder
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut line = String::new();
-    BufReader::new(child.stdout.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
-    assert_eq!(
-        line.trim(),
-        "held",
-        "hold_case did not report holding the case"
-    );
-
+    let holder = Holder::start(&p);
     let outcome = code(Case::open(&p));
-
-    // Closing stdin is what lets the holder exit.
-    drop(child.stdin.take());
-    let status = child.wait().unwrap();
+    holder.release();
     assert_eq!(outcome, "case_locked");
-    assert!(status.success(), "hold_case exited with {status}");
 }
 
 #[test]

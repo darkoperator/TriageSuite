@@ -84,19 +84,7 @@ impl Case {
             )));
         }
         let conn = connect(path)?;
-        let format = read_format(&conn, path)?;
-        if format > CASE_FORMAT {
-            return Err(EngineError::NeedsUpgrade {
-                found: format,
-                expected: CASE_FORMAT,
-            });
-        }
-        if format < CASE_FORMAT {
-            return Err(EngineError::Invalid(format!(
-                "{} declares case format {format}, which never existed",
-                path.display()
-            )));
-        }
+        check_format(&conn, path)?;
         Ok(Case {
             path: path.to_path_buf(),
             conn,
@@ -194,7 +182,7 @@ fn connect(path: &Path) -> Result<Connection> {
 /// operating system's: POSIX `fcntl` locking says "Could not set lock ...
 /// Conflicting lock is held", Windows' sharing violation says the file "is
 /// being used by another process".
-fn is_lock_conflict(e: &duckdb::Error) -> bool {
+pub(crate) fn is_lock_conflict(e: &duckdb::Error) -> bool {
     let message = e.to_string();
     [
         "Could not set lock",
@@ -206,6 +194,25 @@ fn is_lock_conflict(e: &duckdb::Error) -> bool {
     .any(|needle| message.contains(needle))
 }
 
+/// Refuse a case, at `path`, whose `ox.meta` format this build does not
+/// read. `conn`'s default database must be the case.
+pub(crate) fn check_format(conn: &Connection, path: &Path) -> Result<()> {
+    let format = read_format(conn, path)?;
+    if format > CASE_FORMAT {
+        return Err(EngineError::NeedsUpgrade {
+            found: format,
+            expected: CASE_FORMAT,
+        });
+    }
+    if format < CASE_FORMAT {
+        return Err(EngineError::Invalid(format!(
+            "{} declares case format {format}, which never existed",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 fn read_format(conn: &Connection, path: &Path) -> Result<u32> {
     let not_a_case = || {
         EngineError::Invalid(format!(
@@ -215,7 +222,8 @@ fn read_format(conn: &Connection, path: &Path) -> Result<u32> {
     };
     let has_meta: i64 = conn.query_row(
         "SELECT count(*) FROM duckdb_tables() \
-         WHERE schema_name = 'ox' AND table_name = 'meta'",
+         WHERE database_name = current_database() \
+           AND schema_name = 'ox' AND table_name = 'meta'",
         [],
         |r| r.get(0),
     )?;
