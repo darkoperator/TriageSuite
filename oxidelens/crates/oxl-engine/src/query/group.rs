@@ -12,7 +12,7 @@ use serde_json::Value;
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// Group-by columns allowed at once.
-const MAX_BY: usize = 4;
+pub(super) const MAX_BY: usize = 4;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GroupRow {
@@ -139,7 +139,7 @@ pub fn group_filter(q: &GridQuery, by: &[String], key: &[Option<String>]) -> Gri
 }
 
 /// A cell's group key: its text, with an empty cell read as NULL.
-fn key_sql(c: &ColumnInfo) -> String {
+pub(super) fn key_sql(c: &ColumnInfo) -> String {
     format!(
         "NULLIF(CAST({ROW_ALIAS}.{} AS VARCHAR), '')",
         quote_ident(&c.text_column)

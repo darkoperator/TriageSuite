@@ -29,8 +29,9 @@ pub use load::{
     LoadedRelation, RemoveReport, SourceInfo, Superseded,
 };
 pub use query::{
-    count, group_filter, groups, histogram, page, Bucket, Cell, GridQuery, GroupRow, Histogram,
-    MarkState, Page, SortKey, BUCKET_LADDER, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT,
+    count, group_filter, groups, histogram, page, stack, Bucket, Cell, GridQuery, GroupRow,
+    Histogram, MarkState, Page, SortKey, Stack, StackOrder, StackRow, BUCKET_LADDER, CELL_CAP,
+    DEFAULT_LIMIT, MAX_LIMIT,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};

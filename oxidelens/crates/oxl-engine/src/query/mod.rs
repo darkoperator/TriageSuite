@@ -17,10 +17,12 @@
 mod group;
 mod histogram;
 mod page;
+mod stack;
 
 pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
+pub use stack::{stack, Stack, StackOrder, StackRow};
 
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo, RelationInfo};
