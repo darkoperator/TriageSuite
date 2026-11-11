@@ -2,8 +2,8 @@
 //! how many hosts each appears on. The frequency analysis analysts otherwise
 //! do in a spreadsheet pivot.
 
-use super::group::{as_count, key_sql, typed_primary_time, MAX_BY};
-use super::{find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
+use super::group::{as_count, first_last_sql, key_sql, MAX_BY};
+use super::{find_column, marked_sql, scope, GridQuery, ROW_ALIAS};
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo};
 use crate::error::{EngineError, Result};
@@ -74,19 +74,7 @@ pub fn stack(
         Some(h) => format!("count(DISTINCT {ROW_ALIAS}.{})", quote_ident(h)),
         None => "CAST(0 AS BIGINT)".to_string(),
     };
-    let (first, last) = match typed_primary_time(&scope.relation.primary_time, &all) {
-        Some(t) => {
-            let t = format!("{ROW_ALIAS}.{}", quote_ident(t));
-            (
-                format!("strftime(min({t}), '{ISO_FORMAT}')"),
-                format!("strftime(max({t}), '{ISO_FORMAT}')"),
-            )
-        }
-        None => (
-            "CAST(NULL AS VARCHAR)".to_string(),
-            "CAST(NULL AS VARCHAR)".to_string(),
-        ),
-    };
+    let (first, last) = first_last_sql(&scope.relation.primary_time, &all);
     let from = &scope.from_sql;
     let where_sql = &scope.where_sql;
     let conn = case.conn();

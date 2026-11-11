@@ -210,3 +210,24 @@ fn bad_arguments_are_invalid() {
     .unwrap_err();
     assert!(matches!(e, EngineError::NotFound(_)), "{e}");
 }
+
+#[test]
+fn a_filter_that_excludes_every_row_gives_an_empty_stack() {
+    let (_d, case) = loaded();
+    let mut query = q("petriage_timeline");
+    query.hosts = vec!["NOPE".into()];
+    let st = stack(
+        &case,
+        &query,
+        &s(&["ExecutableName"]),
+        StackOrder::Rarest,
+        50,
+        0,
+    )
+    .unwrap();
+    assert!(st.rows.is_empty());
+    assert_eq!(
+        (st.distinct, st.rows_counted, st.hosts_total, st.truncated),
+        (0, 0, 0, false)
+    );
+}

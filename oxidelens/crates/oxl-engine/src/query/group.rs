@@ -63,19 +63,7 @@ pub fn groups(
             }
         }
     }
-    let (first, last) = match typed_primary_time(&scope.relation.primary_time, &all) {
-        Some(t) => {
-            let t = format!("{ROW_ALIAS}.{}", quote_ident(t));
-            (
-                format!("strftime(min({t}), '{ISO_FORMAT}')"),
-                format!("strftime(max({t}), '{ISO_FORMAT}')"),
-            )
-        }
-        None => (
-            "CAST(NULL AS VARCHAR)".to_string(),
-            "CAST(NULL AS VARCHAR)".to_string(),
-        ),
-    };
+    let (first, last) = first_last_sql(&scope.relation.primary_time, &all);
     let sql = format!(
         "SELECT {key} AS ox_key, count(*), {first}, {last}, \
          count(*) FILTER (WHERE {marked}) \
@@ -144,6 +132,24 @@ pub(super) fn key_sql(c: &ColumnInfo) -> String {
         "NULLIF(CAST({ROW_ALIAS}.{} AS VARCHAR), '')",
         quote_ident(&c.text_column)
     )
+}
+
+/// SQL for the earliest and latest primary time of a group, rendered as UTC
+/// text (ruling R1); NULL when the relation has no typed primary time.
+pub(super) fn first_last_sql(primary: &Option<String>, all: &[ColumnInfo]) -> (String, String) {
+    match typed_primary_time(primary, all) {
+        Some(t) => {
+            let t = format!("{ROW_ALIAS}.{}", quote_ident(t));
+            (
+                format!("strftime(min({t}), '{ISO_FORMAT}')"),
+                format!("strftime(max({t}), '{ISO_FORMAT}')"),
+            )
+        }
+        None => (
+            "CAST(NULL AS VARCHAR)".to_string(),
+            "CAST(NULL AS VARCHAR)".to_string(),
+        ),
+    }
 }
 
 /// The typed physical column of the relation's primary time, if it has one.
