@@ -51,7 +51,7 @@ fn report_reply(report: LoadReport) -> Reply {
 }
 
 pub fn sources(ctx: &Ctx) -> Result<Reply> {
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let list: Vec<_> = oxl_engine::sources(&case)?
         .into_iter()
         .map(|s| {

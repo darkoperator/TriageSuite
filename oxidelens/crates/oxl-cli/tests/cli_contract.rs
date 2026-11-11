@@ -158,6 +158,56 @@ fn every_successful_command_emits_the_envelope_keys() {
     assert_eq!(exercised, all, "commands with no contract call, or unknown");
 }
 
+/// The commands that change the case named by `--case`. Every other command
+/// only reads it (`case new` writes a different file; `capabilities` opens
+/// none).
+const CHANGES_THE_CASE: &[&str] = &[
+    "load run",
+    "load file",
+    "source remove",
+    "mark set",
+    "mark clear",
+    "tag add",
+    "tag remove",
+    "note add",
+    "note delete",
+    "column declare",
+    "column primary-time",
+];
+
+/// Found on the first real run: every command opened the case for writing,
+/// so of four `find` calls started together three reported `case_locked`.
+#[test]
+fn a_command_that_only_reads_runs_while_the_case_is_read_elsewhere() {
+    let (d, p) = loaded();
+    let known = oxl_cli::command_paths();
+    for path in CHANGES_THE_CASE {
+        assert!(
+            known.contains(&path.to_string()),
+            "{path} is no known command"
+        );
+    }
+    let calls = calls(&p, d.path());
+
+    // This process reads the case for as long as the commands below run.
+    let _reader = oxl_engine::Case::open_read_only(std::path::Path::new(&p)).unwrap();
+    for args in calls {
+        let mut full = vec!["--case", p.as_str()];
+        full.extend(args.iter().map(String::as_str));
+        let (code, v) = ox(&full);
+        if CHANGES_THE_CASE.contains(&path_of(&args, &known).as_str()) {
+            // A change needs the case to itself, and says so.
+            assert_eq!(
+                (code, v["error"]["code"].as_str()),
+                (5, Some("case_locked")),
+                "{args:?} -> {v}"
+            );
+        } else {
+            assert_eq!(code, 0, "{args:?} -> {v}");
+        }
+    }
+}
+
 /// The command path an argument list runs: the known path its leading words spell.
 fn path_of(args: &[String], known: &[String]) -> String {
     known

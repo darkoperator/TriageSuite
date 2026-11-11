@@ -59,13 +59,23 @@ pub fn n(case: &Case, sql: &str) -> i64 {
         .unwrap_or_else(|e| panic!("{sql}: {e}"))
 }
 
-/// Another process holding the case file at `path` open read-write, which
-/// is the only portable way to hold DuckDB's file lock against this one.
+/// Another process holding the case file at `path` open, which is the only
+/// portable way to hold DuckDB's file lock against this one.
 pub struct Holder(Child);
 
 impl Holder {
-    /// Start `hold_case` on `path` and wait until it holds the file.
+    /// Start `hold_case` on `path`, open read-write as a command that
+    /// changes the case holds it, and wait until it holds the file.
     pub fn start(path: &Path) -> Holder {
+        Holder::spawn(path, &[])
+    }
+
+    /// The same, open for reading only, as a command that only reads holds it.
+    pub fn start_reading(path: &Path) -> Holder {
+        Holder::spawn(path, &["read"])
+    }
+
+    fn spawn(path: &Path, mode: &[&str]) -> Holder {
         let mut holder = Command::new(env!("CARGO"));
         holder
             .args([
@@ -77,7 +87,8 @@ impl Holder {
                 "hold_case",
                 "--",
             ])
-            .arg(path);
+            .arg(path)
+            .args(mode);
         // Cargo gives this test process its per-package variables, and a
         // nested cargo would pass them on to build scripts. ring's tracks
         // CARGO_MANIFEST_DIR, so inheriting it rebuilds ring and, through it,

@@ -123,7 +123,7 @@ fn parse_window(text: &str) -> Result<u64> {
 
 pub fn rows(ctx: &Ctx, relation: &str, query: &QueryArgs, page: &PageArgs) -> Result<Reply> {
     let q = grid_query(relation, query)?;
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let p = oxl_engine::page(&case, &q, page.limit, page.offset)?;
     let mut failed = Vec::new();
     let mut clipped = false;
@@ -158,7 +158,7 @@ pub fn rows(ctx: &Ctx, relation: &str, query: &QueryArgs, page: &PageArgs) -> Re
 
 pub fn count(ctx: &Ctx, relation: &str, query: &QueryArgs) -> Result<Reply> {
     let q = grid_query(relation, query)?;
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     Ok(Reply::new(json!({"count": oxl_engine::count(&case, &q)?})))
 }
 
@@ -180,7 +180,7 @@ pub fn groups(
         })?,
         None => Vec::new(),
     };
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let list = oxl_engine::groups(&case, &q, by, &parent, page.limit, page.offset)?;
     let groups: Vec<_> = list
         .items
@@ -210,7 +210,7 @@ pub fn histogram(
     query: &QueryArgs,
 ) -> Result<Reply> {
     let q = grid_query(relation, query)?;
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let h = oxl_engine::histogram(&case, &q, column, buckets)?;
     let list: Vec<_> = h
         .buckets
@@ -240,7 +240,7 @@ pub fn stack(
         StackOrderArg::Rarest => StackOrder::Rarest,
         StackOrderArg::Commonest => StackOrder::Commonest,
     };
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let s = oxl_engine::stack(&case, &q, by, order, page.limit, page.offset)?;
     let rows: Vec<_> = s
         .rows
@@ -295,7 +295,7 @@ pub fn find(ctx: &Ctx, args: &FindArgs) -> Result<Reply> {
         from: args.from.clone(),
         to: args.to.clone(),
     };
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     if args.rows {
         let rows = oxl_engine::merged_rows(
             &case,
@@ -330,7 +330,7 @@ pub fn find(ctx: &Ctx, args: &FindArgs) -> Result<Reply> {
 
 pub fn around(ctx: &Ctx, args: &AroundArgs) -> Result<Reply> {
     let window_seconds = parse_window(&args.window)?;
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let (host, at) = match (args.row, &args.host, &args.at) {
         (Some(row), _, _) => oxl_engine::anchor_of(&case, row)?,
         (None, Some(host), Some(at)) => (host.clone(), at.clone()),
@@ -364,7 +364,7 @@ pub fn around(ctx: &Ctx, args: &AroundArgs) -> Result<Reply> {
 }
 
 pub fn row(ctx: &Ctx, id: i64) -> Result<Reply> {
-    let case = ctx.open_case()?;
+    let case = ctx.read_case()?;
     let d = oxl_engine::row_detail(&case, id)?;
     let fields: Vec<_> = d
         .fields

@@ -1,19 +1,30 @@
 //! Hold a case file open from a second process.
 //!
-//! Usage: `hold_case <case.duckdb>`. Opens the case, prints `held` on its own
-//! line once the file is locked, and keeps it open until stdin closes. The
-//! case-lock test needs the lock held by another *process*: DuckDB's lock is
-//! the operating system's, and a second open inside one process is not the
-//! conflict an analyst running two tools would hit.
+//! Usage: `hold_case <case.duckdb> [read]`. Opens the case (for reading only
+//! when `read` is given, as a command that only reads does), prints `held` on
+//! its own line once the file is locked, and keeps it open until stdin
+//! closes. The case-lock tests need the lock held by another *process*:
+//! DuckDB's lock is the operating system's, and a second open inside one
+//! process is not the conflict an analyst running two tools would hit.
 
 use std::io::{Read, Write};
 
 fn main() {
-    let Some(path) = std::env::args_os().nth(1) else {
-        eprintln!("usage: hold_case <case.duckdb>");
+    let mut args = std::env::args_os().skip(1);
+    let Some(path) = args.next() else {
+        eprintln!("usage: hold_case <case.duckdb> [read]");
         std::process::exit(2);
     };
-    let case = match oxl_engine::Case::open(std::path::Path::new(&path)) {
+    let path = std::path::Path::new(&path);
+    let opened = match args.next() {
+        None => oxl_engine::Case::open(path),
+        Some(mode) if mode == "read" => oxl_engine::Case::open_read_only(path),
+        Some(_) => {
+            eprintln!("usage: hold_case <case.duckdb> [read]");
+            std::process::exit(2);
+        }
+    };
+    let case = match opened {
         Ok(case) => case,
         Err(e) => {
             eprintln!("hold_case: {e}");

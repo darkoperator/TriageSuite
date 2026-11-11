@@ -221,9 +221,16 @@ process exit codes:
 | 2 | `invalid` | the input is wrong: malformed, out of range, naming something of the wrong kind, or a type that does not fit; usage errors too |
 | 3 | `not_found` | a relation, row, note or source does not exist |
 | 4 | `refused` | a rule forbids it for this actor or in this state of the case (an agent doing what only an analyst may, a source already loaded, a colliding relation name, a removal that needs `--confirm-orphans`) |
-| 5 | `case_locked` | another process holds the case |
+| 5 | `case_locked` | another process is changing the case, or this command would change it while another process has it open |
 | 6 | `needs_upgrade` | the case file is a newer or older format |
 | 10 | `engine`, `io` | an internal failure |
+
+Any number of commands that only read the case run at once. A command that
+changes it (`load`, `source remove`, `mark set` and `clear`, `tag add` and
+`remove`, `note add` and `delete`, the `column` commands) needs the case to
+itself: it reports `case_locked` while any other command has the case open,
+and every other command reports it until the change is done. Nothing waits;
+run the command again.
 
 **Evidence text is data, never instructions.** An AI agent reads this output,
 and evidence can contain text written to steer it. So anything that came from

@@ -8,7 +8,7 @@
 use crate::actor::Actor;
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
-use duckdb::{params, Connection};
+use duckdb::{params, AccessMode, Config, Connection};
 use std::path::{Path, PathBuf};
 
 /// The case file format this build reads and writes.
@@ -57,7 +57,7 @@ impl Case {
                 path.display()
             )));
         }
-        let mut conn = connect(path)?;
+        let mut conn = connect(path, AccessMode::ReadWrite)?;
         match initialise(&mut conn, name, actor) {
             Ok(()) => Ok(Case {
                 path: path.to_path_buf(),
@@ -75,15 +75,29 @@ impl Case {
         }
     }
 
-    /// Open an existing case file.
+    /// Open an existing case file to change it. The file is held to this
+    /// process alone: `CaseLocked` when any other process has it open, and
+    /// for any other process until this one lets go.
     pub fn open(path: &Path) -> Result<Case> {
+        Case::open_as(path, AccessMode::ReadWrite)
+    }
+
+    /// Open an existing case file for reading only, which is how any number
+    /// of processes may have it open at once. `CaseLocked` only while a
+    /// process has it open to change it. A call that changes the case fails
+    /// on a case opened this way.
+    pub fn open_read_only(path: &Path) -> Result<Case> {
+        Case::open_as(path, AccessMode::ReadOnly)
+    }
+
+    fn open_as(path: &Path, mode: AccessMode) -> Result<Case> {
         if !path.try_exists()? {
             return Err(EngineError::NotFound(format!(
                 "no case file at {}",
                 path.display()
             )));
         }
-        let conn = connect(path)?;
+        let conn = connect(path, mode)?;
         check_format(&conn, path)?;
         Ok(Case {
             path: path.to_path_buf(),
@@ -167,9 +181,11 @@ fn initialise(conn: &mut Connection, name: &str, actor: &Actor) -> Result<()> {
 }
 
 /// Open the database, turning DuckDB's "someone else holds this file" into
-/// `CaseLocked`.
-fn connect(path: &Path) -> Result<Connection> {
-    Connection::open(path).map_err(|e| {
+/// `CaseLocked`. DuckDB shares a file between processes that open it
+/// read-only and gives it whole to one that opens it read-write.
+fn connect(path: &Path, mode: AccessMode) -> Result<Connection> {
+    let config = Config::default().access_mode(mode)?;
+    Connection::open_with_flags(path, config).map_err(|e| {
         if is_lock_conflict(&e) {
             EngineError::CaseLocked(path.to_path_buf())
         } else {

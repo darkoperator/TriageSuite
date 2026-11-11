@@ -180,7 +180,7 @@ pub fn schema(ctx: &Ctx, relation: Option<&str>) -> Result<Reply> {
     // The case is closed before `describe`, which opens its own locked
     // connection to the same file.
     let (relations, catalog_columns) = {
-        let case = ctx.open_case()?;
+        let case = ctx.read_case()?;
         let relations = oxl_engine::relations(&case)?;
         let columns = match relation {
             Some(name) => Some(oxl_engine::columns(&case, name)?),

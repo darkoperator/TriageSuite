@@ -4,7 +4,7 @@
 mod common;
 
 use common::Holder;
-use oxl_engine::{parse_utc_text, Actor, Case};
+use oxl_engine::{load_file, parse_utc_text, query_sql, sources, Actor, Case, FileOptions};
 
 fn code<T>(result: oxl_engine::Result<T>) -> &'static str {
     match result {
@@ -68,6 +68,78 @@ fn open_while_open_elsewhere_is_case_locked() {
     let outcome = code(Case::open(&p));
     holder.release();
     assert_eq!(outcome, "case_locked");
+}
+
+/// Found on the first real run: every command opened the case for writing,
+/// so two commands that only read could not run at once.
+#[test]
+fn a_case_being_read_elsewhere_can_be_read_but_not_written() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("read.case.duckdb");
+    drop(Case::create(&p, "IR-1", &Actor::Analyst("tester".into())).unwrap());
+
+    let holder = Holder::start_reading(&p);
+    let name = Case::open_read_only(&p)
+        .and_then(|case| case.info())
+        .map(|info| info.name);
+    let query = query_sql(&p, "select 1", 10, 0).map(|_| ());
+    let write = code(Case::open(&p));
+    holder.release();
+    assert_eq!(name.unwrap(), "IR-1");
+    query.unwrap();
+    assert_eq!(write, "case_locked");
+}
+
+#[test]
+fn a_case_open_for_writing_elsewhere_cannot_be_read() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("held.case.duckdb");
+    drop(Case::create(&p, "IR-1", &Actor::Analyst("tester".into())).unwrap());
+
+    let holder = Holder::start(&p);
+    let outcome = code(Case::open_read_only(&p));
+    holder.release();
+    assert_eq!(outcome, "case_locked");
+}
+
+#[test]
+fn a_case_opened_for_reading_takes_no_write() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("ro.case.duckdb");
+    let actor = Actor::Analyst("tester".into());
+    drop(Case::create(&p, "IR-1", &actor).unwrap());
+    let fw = oxl_fixtures::loose_fw_csv(d.path());
+
+    let mut case = Case::open_read_only(&p).unwrap();
+    assert!(load_file(&mut case, &fw, FileOptions::default(), &actor).is_err());
+    drop(case);
+    assert!(sources(&Case::open(&p).unwrap()).unwrap().is_empty());
+}
+
+/// A process that died after a commit leaves its write-ahead log beside the
+/// case. Opening for reading must still show what was committed.
+#[test]
+fn a_case_left_with_a_write_ahead_log_can_be_read() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("wal.case.duckdb");
+    drop(Case::create(&p, "IR-1", &Actor::Analyst("tester".into())).unwrap());
+    {
+        let conn = duckdb::Connection::open(&p).unwrap();
+        conn.execute_batch(
+            "PRAGMA disable_checkpoint_on_shutdown; \
+             UPDATE ox.meta SET value = 'IR-2' WHERE key = 'name';",
+        )
+        .unwrap();
+    }
+    let mut wal = p.clone().into_os_string();
+    wal.push(".wal");
+    assert!(
+        std::path::Path::new(&wal).exists(),
+        "the setup left no write-ahead log to read through"
+    );
+
+    let info = Case::open_read_only(&p).unwrap().info().unwrap();
+    assert_eq!(info.name, "IR-2");
 }
 
 #[test]

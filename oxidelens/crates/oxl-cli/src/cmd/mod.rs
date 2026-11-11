@@ -35,12 +35,16 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// Open the case named by `--case` or `OXIDELENS_CASE`.
+    /// Open the case named by `--case` or `OXIDELENS_CASE` to change it,
+    /// which holds it to this process alone.
     pub fn open_case(&self) -> Result<Case> {
-        match &self.case {
-            Some(path) => Case::open(path),
-            None => Err(no_case()),
-        }
+        Case::open(self.case_path()?)
+    }
+
+    /// Open the same case for a command that only reads it, so that any
+    /// number of such commands run at once.
+    pub fn read_case(&self) -> Result<Case> {
+        Case::open_read_only(self.case_path()?)
     }
 
     /// The case file's path, for the engine calls that open their own

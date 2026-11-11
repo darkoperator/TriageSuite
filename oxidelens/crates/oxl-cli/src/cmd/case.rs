@@ -10,7 +10,7 @@ pub fn new(ctx: &Ctx, path: &Path, name: &str) -> Result<Reply> {
 }
 
 pub fn info(ctx: &Ctx) -> Result<Reply> {
-    Ok(info_reply(ctx.open_case()?.info()?))
+    Ok(info_reply(ctx.read_case()?.info()?))
 }
 
 fn info_reply(info: CaseInfo) -> Reply {
