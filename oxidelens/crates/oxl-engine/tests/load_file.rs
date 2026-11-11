@@ -5,8 +5,8 @@ mod common;
 
 use common::{analyst, n};
 use oxl_engine::{
-    columns, load_file, relation, relation_name_for_file, sources, Case, FileOptions, SqlType,
-    TimeSemantics, TypeOrigin,
+    columns, count, load_file, page, parse_filter, relation, relation_name_for_file, sources, Case,
+    FileOptions, GridQuery, SqlType, TimeSemantics, TypeOrigin,
 };
 use oxl_fixtures::{loose_fw_csv, new_case};
 use std::path::Path;
@@ -324,4 +324,41 @@ fn a_tsv_loads_with_its_tabs() {
         n(&case, "select count(*) from x_tsv where b = 'hello, world'"),
         1
     );
+}
+
+#[test]
+fn hostile_headers_page_and_filter() {
+    let (d, mut case) = fresh();
+    let p = d.path().join("hostile.csv");
+    let long = "x".repeat(600);
+    write_csv(
+        &p,
+        &[
+            vec![
+                b"a\"b".as_slice(),
+                b"line\nbreak",
+                long.as_bytes(),
+                b"dup",
+                b"dup",
+                b"_ox_row",
+                b"",
+            ],
+            vec![b"1", b"2", b"3", b"4", b"5", b"6", b"7"],
+        ],
+    );
+    let r = load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let all = GridQuery {
+        relation: r.relations[0].name.clone(),
+        ..Default::default()
+    };
+    let p = page(&case, &all, 50, 0).unwrap();
+    assert_eq!((p.row_ids.len(), p.columns.len()), (1, 7));
+    assert_eq!(p.cells[0].len(), 7);
+    let texts: Vec<_> = p.cells[0].iter().map(|c| c.text.clone().unwrap()).collect();
+    assert_eq!(texts, ["1", "2", "3", "4", "5", "6", "7"]);
+    let q = GridQuery {
+        filter: Some(parse_filter(r#"{"column":"a\"b","op":"eq","value":"1"}"#).unwrap()),
+        ..all
+    };
+    assert_eq!(count(&case, &q).unwrap(), 1);
 }

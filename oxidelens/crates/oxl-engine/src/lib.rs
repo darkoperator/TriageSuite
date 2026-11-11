@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod error;
 pub mod filter;
 pub mod load;
+pub mod query;
 pub mod search;
 pub mod time;
 
@@ -26,6 +27,9 @@ pub use filter::{compile_filter, parse_filter, FilterNode, Leaf, Op, SqlFragment
 pub use load::{
     load_file, load_run, relation_name_for_file, remove_source, sources, FileOptions, LoadReport,
     LoadedRelation, RemoveReport, SourceInfo, Superseded,
+};
+pub use query::{
+    count, page, Cell, GridQuery, MarkState, Page, SortKey, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};
