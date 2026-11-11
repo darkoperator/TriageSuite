@@ -11,7 +11,7 @@
 //! nothing to go on): `,` or tab by extension, `"` quoting with `""` as the
 //! escape, and a header row.
 
-use super::run::{canonical_path, discard};
+use super::run::{canonical_path, discard, read_path};
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::{LoadReport, LoadedRelation};
 use crate::actor::Actor;
@@ -188,8 +188,9 @@ fn load_in(
 
     // Names as DuckDB reports them (it already makes empty and repeated ones
     // distinct), then as the case will hold them.
-    let reported = describe(conn, &path, delim, ", all_varchar = true")?;
-    let detected = describe(conn, &path, delim, "")?;
+    let read = read_path(&path);
+    let reported = describe(conn, &read, delim, ", all_varchar = true")?;
+    let detected = describe(conn, &read, delim, "")?;
     if reported.len() != detected.len() {
         return Err(EngineError::Invalid(format!(
             "{path}: the header and the detected columns disagree"
@@ -221,7 +222,7 @@ fn load_in(
 
     let name_list: Vec<String> = names.iter().map(|n| quote_literal(n)).collect();
     let source = read_csv(
-        &quote_literal(&path),
+        &quote_literal(&read),
         delim,
         &format!(", all_varchar = true, names = [{}]", name_list.join(", ")),
     );

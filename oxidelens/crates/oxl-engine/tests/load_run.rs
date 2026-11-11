@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{analyst, loaded, n};
+use common::{analyst, loaded, long_dir, n};
 use oxl_engine::{load_run, sources, Case};
 use std::path::{Path, PathBuf};
 
@@ -175,6 +175,35 @@ fn records_the_source_and_the_inventory() {
              where action = 'source_load' and target_kind = 'source' and \"by\" = 'analyst:tester'"
         ),
         1
+    );
+}
+
+/// Found on the first real run: the per-channel event log files have long
+/// names, and under an ordinary output root their paths passed the limit.
+#[test]
+fn a_run_whose_csv_paths_pass_the_windows_path_limit_loads() {
+    let d = tempfile::tempdir().unwrap();
+    let root = oxl_fixtures::two_hosts(&long_dir(d.path()));
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_run(&mut case, &root, &analyst()).unwrap();
+    assert_two_hosts_counts(&case);
+
+    // What the analyst sees stays an ordinary path: the `\\?\` form is only
+    // how the files are read.
+    assert_eq!(
+        n(
+            &case,
+            r"select count(*) from evtxtriage_events
+              where starts_with(_triage_output_file, '\\?\')
+                 or length(_triage_output_file) <= 260"
+        ),
+        0
+    );
+    let s = sources(&case).unwrap();
+    assert!(
+        s[0].path.len() > 260 && !s[0].path.starts_with(r"\\?\"),
+        "{}",
+        s[0].path
     );
 }
 

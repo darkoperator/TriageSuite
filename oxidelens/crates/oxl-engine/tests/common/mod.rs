@@ -41,6 +41,18 @@ pub fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
+/// A directory under `base`, created, whose own path is already past the 260
+/// characters the classic Windows file API accepts, so that every file
+/// written below it is too.
+pub fn long_dir(base: &Path) -> std::path::PathBuf {
+    let mut dir = base.to_path_buf();
+    while dir.as_os_str().len() <= 260 {
+        dir.push("d".repeat(40));
+    }
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 /// The first column of the first row of `sql`, as an integer.
 pub fn n(case: &Case, sql: &str) -> i64 {
     case.scalar_i64(sql)

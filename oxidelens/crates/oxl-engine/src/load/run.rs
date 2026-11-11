@@ -22,7 +22,7 @@ use triage_core::output::duckdb::inventory::{
     Dataset, DatasetFile, FileIdentity, Inventory, MetadataColumns, Status,
 };
 use triage_core::output::duckdb::render::render_sql;
-use triage_core::output::duckdb::sql::quote_ident;
+use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 use triage_core::output::duckdb::types::SqlType;
 
 /// The schema the suite's views are rendered into during a load.
@@ -85,7 +85,8 @@ pub(super) fn discard(conn: &Connection, source_id: Option<i64>) {
 
 /// `out_root` made absolute with every link resolved. On Windows the
 /// verbatim `\\?\` prefix `canonicalize` adds is taken off again, because
-/// the path ends up in `read_csv` calls and in what the analyst sees.
+/// the path is what the analyst sees and what the case records. A read goes
+/// through `read_path`, which puts the prefix back where it is needed.
 pub(super) fn canonical_path(out_root: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(out_root).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -102,6 +103,76 @@ pub(super) fn canonical_path(out_root: &Path) -> Result<PathBuf> {
         return Ok(PathBuf::from(local));
     }
     Ok(canonical)
+}
+
+/// `path`, a canonical path's text, as DuckDB is told to read it.
+///
+/// DuckDB opens files through the classic Windows API, which refuses a path
+/// past `WINDOWS_PATH_LIMIT` however real the file is ("No files found").
+/// Such a path is handed over in its verbatim `\\?\` form, which has no
+/// limit. Every other path, and every path on another system, is unchanged,
+/// and so is everything the analyst sees: only the read uses this text.
+pub(super) fn read_path(path: &str) -> String {
+    if cfg!(windows) {
+        verbatim_when_long(path)
+    } else {
+        path.to_string()
+    }
+}
+
+/// The classic Windows API takes 260 characters with the terminator, and 248
+/// for a directory; the lower figure leaves room for what DuckDB appends.
+const WINDOWS_PATH_LIMIT: usize = 248;
+
+/// The Windows rule behind `read_path`, as text so it is tested on every
+/// system.
+///
+/// A path that is already verbatim (or a device path) is left alone, and so
+/// is one that is not absolute, which has no verbatim form. The verbatim
+/// form takes `/` as a character of a name, so each becomes a separator.
+fn verbatim_when_long(path: &str) -> String {
+    if path.encode_utf16().count() < WINDOWS_PATH_LIMIT
+        || path.starts_with(r"\\?\")
+        || path.starts_with(r"\\.\")
+    {
+        return path.to_string();
+    }
+    let separated = path.replace('/', r"\");
+    if let Some(share) = separated.strip_prefix(r"\\") {
+        return format!(r"\\?\UNC\{share}");
+    }
+    let drive =
+        matches!(separated.as_bytes(), [letter, b':', b'\\', ..] if letter.is_ascii_alphabetic());
+    if drive {
+        format!(r"\\?\{separated}")
+    } else {
+        path.to_string()
+    }
+}
+
+/// The suite's own view SQL for `inventory`, with every file whose path is
+/// past the Windows limit read through `read_path`. Only the path inside
+/// `read_csv([...])` changes; the `_triage_output_file` literal beside it
+/// stays the ordinary path, which is what the analyst is shown.
+fn view_sql(inventory: &Inventory) -> String {
+    let mut sql = render_sql(inventory);
+    let included = inventory
+        .datasets
+        .iter()
+        .flat_map(|d| &d.files)
+        .filter(|f| f.included_in_view);
+    for file in included {
+        // The path exactly as `render_sql` wrote it.
+        let written = inventory.out_root.join(&file.path).display().to_string();
+        let read = read_path(&written);
+        if read != written {
+            sql = sql.replace(
+                &format!("read_csv([{}]", quote_literal(&written)),
+                &format!("read_csv([{}]", quote_literal(&read)),
+            );
+        }
+    }
+    sql
 }
 
 fn read_inventory(root: &Path) -> Result<Inventory> {
@@ -190,7 +261,7 @@ fn load_in(
         "CREATE SCHEMA {stage}; SET schema = '{STAGE}';",
         stage = quote_ident(STAGE)
     ))?;
-    conn.execute_batch(&render_sql(inventory))?;
+    conn.execute_batch(&view_sql(inventory))?;
     conn.execute_batch("RESET schema;")?;
 
     let id: i64 = conn.query_row("SELECT nextval('ox.source_seq')", [], |r| r.get(0))?;
@@ -530,4 +601,67 @@ fn record_inventory(conn: &Connection, source_id: i64, inventory: &Inventory) ->
 fn to_json<T: serde::Serialize + ?Sized>(value: &T) -> Result<String> {
     serde_json::to_string(value)
         .map_err(|e| EngineError::Invalid(format!("the inventory does not serialize: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `C:\` then enough 40-character folders to pass the limit, then `tail`.
+    fn long(tail: &str) -> String {
+        format!(r"C:\{}{tail}", format!("{}\\", "d".repeat(40)).repeat(7))
+    }
+
+    #[test]
+    fn a_short_path_is_read_as_written() {
+        for path in [
+            r"C:\out\run\a.csv",
+            r"C:\out\run/mixed/a.csv",
+            r"\\srv\share\a.csv",
+        ] {
+            assert_eq!(verbatim_when_long(path), path);
+        }
+    }
+
+    #[test]
+    fn a_long_drive_path_is_read_in_verbatim_form() {
+        let path = long("a.csv");
+        assert_eq!(verbatim_when_long(&path), format!(r"\\?\{path}"));
+    }
+
+    /// The suite's inventory joins its relative paths with `/`, and the
+    /// verbatim form takes `/` as a character of a name, not a separator.
+    #[test]
+    fn a_long_path_has_its_forward_slashes_made_separators() {
+        let path = long("Processed-WS01/EventLogs/evtx.csv");
+        assert_eq!(
+            verbatim_when_long(&path),
+            format!(r"\\?\{}", long(r"Processed-WS01\EventLogs\evtx.csv"))
+        );
+    }
+
+    #[test]
+    fn a_long_share_path_is_read_in_verbatim_unc_form() {
+        let path = long("a.csv").replacen(r"C:\", r"\\srv\share\", 1);
+        assert_eq!(
+            verbatim_when_long(&path),
+            format!(r"\\?\UNC\{}", &path[2..])
+        );
+    }
+
+    #[test]
+    fn a_path_already_verbatim_or_not_absolute_is_left_alone() {
+        let verbatim = format!(r"\\?\{}", long("a/b.csv"));
+        assert_eq!(verbatim_when_long(&verbatim), verbatim);
+        let relative = long("a.csv").replacen(r"C:\", "", 1);
+        assert_eq!(verbatim_when_long(&relative), relative);
+    }
+
+    /// The limit counts UTF-16 units, as Windows does, not bytes.
+    #[test]
+    fn the_limit_counts_characters_not_bytes() {
+        let path = format!(r"C:\{}\a.csv", "é".repeat(200));
+        assert!(path.len() > WINDOWS_PATH_LIMIT);
+        assert_eq!(verbatim_when_long(&path), path);
+    }
 }

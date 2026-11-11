@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{analyst, n};
+use common::{analyst, long_dir, n};
 use oxl_engine::{
     columns, count, load_file, page, parse_filter, relation, relation_name_for_file, sources, Case,
     FileOptions, GridQuery, SqlType, TimeSemantics, TypeOrigin,
@@ -30,6 +30,26 @@ fn write_csv(path: &Path, rows: &[Vec<&[u8]>]) {
         w.write_record(row).unwrap();
     }
     w.flush().unwrap();
+}
+
+#[test]
+fn a_file_whose_path_passes_the_windows_path_limit_loads() {
+    let (d, mut case) = fresh();
+    let path = loose_fw_csv(&long_dir(d.path()));
+    let r = load_file(&mut case, &path, FileOptions::default(), &analyst()).unwrap();
+    assert_eq!(
+        (r.relations[0].name.as_str(), r.relations[0].rows),
+        ("fw_csv", 3)
+    );
+    assert_eq!(n(&case, "select count(*) from fw_csv"), 3);
+    // The source is recorded under its ordinary path, not the `\\?\` form
+    // the file is read through.
+    let s = sources(&case).unwrap();
+    assert!(
+        s[0].path.len() > 260 && !s[0].path.starts_with(r"\\?\"),
+        "{}",
+        s[0].path
+    );
 }
 
 #[test]
