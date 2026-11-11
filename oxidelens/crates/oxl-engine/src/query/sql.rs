@@ -56,7 +56,8 @@
 //!        - `src_<digits>`: loaded data, which is case data like the views
 //!          over it, superseded rows included, and is read the same way;
 //!        - `information_schema` and `pg_catalog`: DuckDB's read-only
-//!          catalog views, which describe the case and nothing else.
+//!          catalog views. They describe the case's schema, and also the
+//!          instance: `pg_catalog.pg_settings` lists every setting.
 //!
 //!      Any other qualifier is refused rather than looked up.
 //!
@@ -76,12 +77,26 @@
 //! 4. **Never a writer.** The case is only ever attached read-only.
 //!
 //! What a query reaches, then: the case's tables and views by name (in
-//! `main`, `ox` and `src_<n>`), DuckDB's read-only `information_schema` and
-//! `pg_catalog` views, scalar functions (scalars such as `current_setting`
-//! included), and the allowed table functions. No catalog table functions
+//! `main`, `ox` and `src_<n>`), scalar functions, the allowed table
+//! functions, and DuckDB's own system views and settings. That last group
+//! is wider than the case: the system views reached by bare name
+//! (`duckdb_databases` and the like are views, and the allowlist covers
+//! table functions only), the `information_schema` and
+//! `pg_catalog` views (`pg_settings` lists every setting) and scalars such
+//! as `current_setting` return the instance's configuration, which includes
+//! the case file's full path and paths under the OS user's profile (the
+//! `secret_directory` setting, for one). Whatever they return comes back
+//! inside the CLI's untrusted wrapper like every other result. Refusing
+//! them by name is left for the step that adds the agent bridge.
+//!
+//! One residual of the qualifier rule: a case file whose name spells an
+//! allowed qualifier can be read as a table from its own folder, by a
+//! replacement scan of that name.
+//!
+//! What a query does not reach: the catalog table functions
 //! (`duckdb_tables()` and the like; `describe` is how a caller learns the
-//! schema), no file (the case file's own bytes included), no network and no
-//! environment.
+//! schema), any file's contents through a reader (the case file's own bytes
+//! included), the network and the environment.
 //!
 //! The case is attached as the default database, so the relations' views
 //! are in `main`, the case tables in `ox` and loaded data in `src_<n>`, just

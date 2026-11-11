@@ -285,6 +285,16 @@ than `main`, `ox`, `src_<n>`, `information_schema` and `pg_catalog`). It returns
 time. The case is opened read-only for it, so it cannot run while another
 process has the case open for writing.
 
+What stays reachable beyond the case's own tables and views is DuckDB's own
+system views and settings: views such as `duckdb_databases` (by bare
+name), `information_schema`, `pg_catalog` (its
+`pg_settings` lists every setting) and scalars such as `current_setting`.
+They return the instance's configuration, which includes the case file's
+full path and paths under the operating system user's profile. Like every
+query result, they come back only inside the untrusted wrapper. One residual
+of the qualifier rule: a case file whose name spells an allowed qualifier
+can be read as a table from its own folder.
+
 ## Not in step 1
 
 Step 1 reads and annotates in UTC only. Still to come:
