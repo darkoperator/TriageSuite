@@ -14,8 +14,12 @@
 //! empty cells instead of failing to bind. Only one `_ox_row` is in scope,
 //! which is what the `_mark` filter's correlated subquery relies on.
 
+mod group;
+mod histogram;
 mod page;
 
+pub use group::{group_filter, groups, GroupRow};
+pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
 
 use crate::case::Case;
@@ -68,6 +72,18 @@ pub(crate) struct Scope {
     /// catalogued column.
     pub columns: Vec<ColumnInfo>,
     pub relation: RelationInfo,
+}
+
+/// UTC text of a timestamp, six fractional digits (ruling R1), as a
+/// `strftime` format. A constant, never a value.
+pub(crate) const ISO_FORMAT: &str = "%Y-%m-%dT%H:%M:%S.%fZ";
+
+/// True for a row in scope that carries a mark.
+pub(crate) fn marked_sql() -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM ox.row_mark AS ox_gm \
+         WHERE ox_gm.row_id = {ROW_ALIAS}._ox_row AND ox_gm.mark = 'suspicious')"
+    )
 }
 
 /// The alias of the projection `Scope::from_sql` reads from.
