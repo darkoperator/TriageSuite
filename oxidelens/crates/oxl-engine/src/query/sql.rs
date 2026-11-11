@@ -39,8 +39,26 @@
 //!      files or the environment, hide a statement in a value, or change the
 //!      instance's state. A scalar of one of these names is refused like the
 //!      table function.
-//!    - It names a table with a path character (`.`, `/`, `\`, `:`), which
-//!      DuckDB would answer with a replacement scan of that file.
+//!    - It names a table that is not the case's own. DuckDB answers a name
+//!      it cannot find with a replacement scan of the file that the whole
+//!      qualified name spells (`one.duckdb`, `"C:\dir\one"."duckdb"`), so:
+//!      - a path character (`.`, `/`, `\`, `:`) in any part (catalog,
+//!        schema or table) is refused;
+//!      - a catalog qualifier must be one of these, in any case:
+//!        - `ox_case`: the case itself, as it is attached;
+//!        - `system`: DuckDB's built-in, read-only catalog;
+//!        - `temp`: this instance's temporary catalog, which nothing can
+//!          write to on this path, so it is always empty.
+//!      - a schema qualifier must be one of these (or one of the catalogs
+//!        above, since `a.b` is `catalog.table` to the binder as well), in
+//!        any case:
+//!        - `main` and `ox`: the relation views and the case tables;
+//!        - `src_<digits>`: loaded data, which is case data like the views
+//!          over it, superseded rows included, and is read the same way;
+//!        - `information_schema` and `pg_catalog`: DuckDB's read-only
+//!          catalog views, which describe the case and nothing else.
+//!
+//!      Any other qualifier is refused rather than looked up.
 //!
 //!    This layer exists because the next one has a gap: DuckDB keeps an
 //!    attached database's own files readable with external access off, so
@@ -57,9 +75,10 @@
 //!    setting did not take, nothing does.
 //! 4. **Never a writer.** The case is only ever attached read-only.
 //!
-//! What a query reaches, then: the case's tables and views by name,
-//! scalar functions (scalars such as `current_setting` included), and
-//! the allowed table functions. No catalog table functions
+//! What a query reaches, then: the case's tables and views by name (in
+//! `main`, `ox` and `src_<n>`), DuckDB's read-only `information_schema` and
+//! `pg_catalog` views, scalar functions (scalars such as `current_setting`
+//! included), and the allowed table functions. No catalog table functions
 //! (`duckdb_tables()` and the like; `describe` is how a caller learns the
 //! schema), no file (the case file's own bytes included), no network and no
 //! environment.
@@ -102,6 +121,13 @@ const LOCKED_SETTINGS: [(&str, &str); 5] = [
 /// why each is safe.
 const ALLOWED_TABLE_FUNCTIONS: [&str; 4] =
     ["range", "generate_series", "unnest", "generate_subscripts"];
+
+/// The catalogs a table reference may name. The module doc says why.
+const ALLOWED_CATALOGS: [&str; 3] = [CASE_ALIAS, "system", "temp"];
+
+/// The schemas a table reference may name, besides `src_<digits>`. The
+/// module doc says why.
+const ALLOWED_SCHEMAS: [&str; 4] = ["main", "ox", "information_schema", "pg_catalog"];
 
 /// Name prefixes no call may have, in any position: file readers and the
 /// pointer-taking Arrow scans.
@@ -291,7 +317,7 @@ fn the_select(sql: &str) -> Result<String> {
 /// Why the parsed statement `node` would reach outside the case, if it
 /// would: the first table function it uses that is not allowed, the first
 /// call it makes to a refused name (both in any case and under any schema),
-/// or the first table it names with a path character.
+/// or the first table it names that is not the case's own.
 fn reaches_outside(node: &Value) -> Option<String> {
     match node {
         Value::Object(fields) => {
@@ -324,13 +350,8 @@ fn reaches_outside(node: &Value) -> Option<String> {
                 }
             }
             if fields.get("type").and_then(Value::as_str) == Some("BASE_TABLE") {
-                if let Some(Value::String(table)) = fields.get("table_name") {
-                    if table.contains(['.', '/', '\\', ':']) {
-                        return Some(format!(
-                            "a query may not name the table {table:?}: \
-                             a name with a path character reads a file"
-                        ));
-                    }
+                if let Some(why) = foreign_table(fields) {
+                    return Some(why);
                 }
             }
             fields.values().find_map(reaches_outside)
@@ -338,6 +359,59 @@ fn reaches_outside(node: &Value) -> Option<String> {
         Value::Array(items) => items.iter().find_map(reaches_outside),
         _ => None,
     }
+}
+
+/// Why the base-table reference `fields` is not one of the case's own, if
+/// it is not: a part with a path character, or a catalog or schema
+/// qualifier outside `ALLOWED_CATALOGS` and `ALLOWED_SCHEMAS`. DuckDB builds
+/// a replacement-scan path from the whole qualified name (`one.duckdb`,
+/// `"C:\dir\one"."duckdb"`), so every part is checked. A two-part name is
+/// `schema.table` or `catalog.table` to the binder, so its qualifier may be
+/// either.
+fn foreign_table(fields: &serde_json::Map<String, Value>) -> Option<String> {
+    let part = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or_default();
+    let (catalog, schema, table) = (
+        part("catalog_name"),
+        part("schema_name"),
+        part("table_name"),
+    );
+    let shown = [catalog, schema, table]
+        .iter()
+        .filter(|p| !p.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(".");
+    let refuse = |why: &str| Some(format!("a query may not name the table {shown:?}: {why}"));
+    if [catalog, schema, table]
+        .iter()
+        .any(|p| p.contains(['.', '/', '\\', ':']))
+    {
+        return refuse("a name with a path character reads a file");
+    }
+    if !catalog.is_empty() && !is_allowed_catalog(catalog) {
+        return refuse("only the case's own catalog may be named");
+    }
+    if !schema.is_empty() && !is_allowed_schema(schema) && !is_allowed_catalog(schema) {
+        return refuse("only the case's own schemas may be named");
+    }
+    None
+}
+
+/// `name` (any case) is a catalog a query may name.
+fn is_allowed_catalog(name: &str) -> bool {
+    ALLOWED_CATALOGS
+        .iter()
+        .any(|c| c.eq_ignore_ascii_case(name))
+}
+
+/// `name` (any case) is a schema a query may name: one of
+/// `ALLOWED_SCHEMAS`, or `src_` followed by digits only.
+fn is_allowed_schema(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    ALLOWED_SCHEMAS.contains(&lower.as_str())
+        || lower
+            .strip_prefix("src_")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// `name` (any case) is on `ALLOWED_TABLE_FUNCTIONS`.

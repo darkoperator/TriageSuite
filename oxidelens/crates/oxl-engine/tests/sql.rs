@@ -194,6 +194,46 @@ fn file_and_indirection_functions_are_refused_wherever_they_appear() {
 }
 
 #[test]
+fn table_references_outside_the_case_are_refused() {
+    let (_d, path) = closed();
+    // The case path split at its last dot, as a schema and a table: DuckDB
+    // would rebuild the path from both parts and scan the file.
+    let text = path.to_str().unwrap();
+    let stem = text.strip_suffix(".duckdb").unwrap().replace('"', "\"\"");
+    for sql in [
+        format!("select * from \"{stem}\".\"duckdb\""),
+        format!("select * from \"{stem}\".duckdb"),
+        "select * from one.duckdb".to_string(),
+        "select * from elsewhere.ox.source".to_string(),
+        "select * from memory.main.t".to_string(),
+        "select * from secrets.source".to_string(),
+        "select * from src_.x".to_string(),
+        "select * from src_1a.x".to_string(),
+        "select * from main.\"a/b\"".to_string(),
+        "select * from (select * from one.duckdb) as t".to_string(),
+        "with c as (select 1) select * from c, one.duckdb".to_string(),
+    ] {
+        let e = query_sql(&path, &sql, 10, 0).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{sql}: {e}");
+    }
+    for (sql, expected) in [
+        ("select count(*) from main.evtxtriage_events", "11"),
+        ("select count(*) from MAIN.evtxtriage_events", "11"),
+        ("select count(*) from ox.source", "1"),
+        ("select count(*) from ox_case.evtxtriage_events", "11"),
+        ("select count(*) from ox_case.main.evtxtriage_events", "11"),
+        ("select count(*) from Ox_Case.ox.source", "1"),
+        (
+            "select count(*) > 0 from information_schema.tables where table_schema = 'ox'",
+            "true",
+        ),
+    ] {
+        let r = query_sql(&path, sql, 10, 0).unwrap_or_else(|e| panic!("{sql}: {e}"));
+        assert_eq!(r.rows, vec![vec![s(expected)]], "{sql}");
+    }
+}
+
+#[test]
 fn the_case_is_still_writable_and_loadable_afterwards() {
     let (d, path) = closed();
     query_sql(&path, "select count(*) from evtxtriage_events", 10, 0).unwrap();
