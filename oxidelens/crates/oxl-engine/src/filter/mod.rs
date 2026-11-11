@@ -13,8 +13,8 @@
 
 mod compile;
 
-pub(crate) use compile::escape_like;
 pub use compile::{compile_filter, SqlFragment};
+pub(crate) use compile::{like_sql, null_safe, regex_sql, LikeMatch};
 
 use crate::error::{EngineError, Result};
 use serde_json::Value;

@@ -91,7 +91,55 @@ fn leaf_sql(leaf: &Leaf, columns: &[ColumnInfo], params: &mut Vec<SqlValue>) -> 
     };
     let expr = positive_sql(leaf, positive, column, params)?;
     let not = if negated { "NOT " } else { "" };
-    Ok(format!("{not}COALESCE({expr}, FALSE)"))
+    Ok(format!("{not}{}", null_safe(&expr)))
+}
+
+/// `expr` with NULL read as false, so a condition on an empty cell is false
+/// and `NOT` of it is the exact complement. Filter leaves and search terms
+/// both go through here.
+pub(crate) fn null_safe(expr: &str) -> String {
+    format!("COALESCE({expr}, FALSE)")
+}
+
+/// Where a literal `LIKE` needle must appear in the text.
+#[derive(Clone, Copy)]
+pub(crate) enum LikeMatch {
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
+/// `haystack` (SQL) tested for the literal text `needle`, with the escaped
+/// pattern pushed as a parameter: `ILIKE`, or `LIKE` when case-sensitive.
+pub(crate) fn like_sql(
+    haystack: &str,
+    needle: &str,
+    shape: LikeMatch,
+    case_sensitive: bool,
+    params: &mut Vec<SqlValue>,
+) -> String {
+    let needle = escape_like(needle);
+    let pattern = match shape {
+        LikeMatch::Contains => format!("%{needle}%"),
+        LikeMatch::StartsWith => format!("{needle}%"),
+        LikeMatch::EndsWith => format!("%{needle}"),
+    };
+    params.push(SqlValue::Text(pattern));
+    let like = if case_sensitive { "LIKE" } else { "ILIKE" };
+    format!("{haystack} {like} ? ESCAPE '\\'")
+}
+
+/// `haystack` (SQL) tested against the regex `pattern`, which is pushed as a
+/// parameter; case-insensitive unless `case_sensitive`.
+pub(crate) fn regex_sql(
+    haystack: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    params: &mut Vec<SqlValue>,
+) -> String {
+    params.push(SqlValue::Text(pattern.to_string()));
+    let flags = if case_sensitive { "" } else { ", 'i'" };
+    format!("regexp_matches({haystack}, ?{flags})")
 }
 
 /// The SQL for a non-negated operator.
@@ -121,20 +169,18 @@ fn positive_sql(
             let SqlValue::Text(needle) = string_value(leaf)? else {
                 return Err(invalid(leaf, "expects a string value"));
             };
-            let needle = escape_like(&needle);
-            let pattern = match op {
-                Op::Contains => format!("%{needle}%"),
-                Op::StartsWith => format!("{needle}%"),
-                _ => format!("%{needle}"),
+            let shape = match op {
+                Op::Contains => LikeMatch::Contains,
+                Op::StartsWith => LikeMatch::StartsWith,
+                _ => LikeMatch::EndsWith,
             };
-            params.push(SqlValue::Text(pattern));
-            let like = if leaf.case_sensitive { "LIKE" } else { "ILIKE" };
-            Ok(format!("{text} {like} ? ESCAPE '\\'"))
+            Ok(like_sql(&text, &needle, shape, leaf.case_sensitive, params))
         }
         Op::Regex => {
-            params.push(string_value(leaf)?);
-            let flags = if leaf.case_sensitive { "" } else { ", 'i'" };
-            Ok(format!("regexp_matches({text}, ?{flags})"))
+            let SqlValue::Text(pattern) = string_value(leaf)? else {
+                return Err(invalid(leaf, "expects a string value"));
+            };
+            Ok(regex_sql(&text, &pattern, leaf.case_sensitive, params))
         }
         Op::IsEmpty => {
             require_no_value(leaf)?;
@@ -193,7 +239,7 @@ fn fold(sql: &str, case_sensitive: bool) -> String {
 
 /// `%`, `_` and the escape character itself, escaped so a `LIKE` pattern
 /// built around the text matches it literally. Pair it with `ESCAPE '\'`.
-pub(crate) fn escape_like(text: &str) -> String {
+fn escape_like(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         if matches!(c, '\\' | '%' | '_') {

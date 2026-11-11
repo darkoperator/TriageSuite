@@ -84,6 +84,21 @@ fn parses_the_timeline_explorer_forms() {
 }
 
 #[test]
+fn a_scope_with_nothing_after_the_colon_is_plain_text() {
+    let (_d, _case, cols) = setup();
+    for s in ["EventId:", r#"EventId:"""#] {
+        assert_eq!(
+            parse_search(s, SearchOptions::default(), &cols).unwrap(),
+            Some(Search::Terms(SearchExpr {
+                any: vec![t("EventId:")],
+                ..Default::default()
+            })),
+            "{s}"
+        );
+    }
+}
+
+#[test]
 fn selects_the_documented_rows() {
     let (_d, case, cols) = setup();
     let hits_opts = |q: &str, opts| count_in(&case, &cols, q, opts);

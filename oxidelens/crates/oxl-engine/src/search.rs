@@ -20,7 +20,7 @@
 
 use crate::catalog::{ColumnInfo, ColumnRole};
 use crate::error::{EngineError, Result};
-use crate::filter::{escape_like, SqlFragment};
+use crate::filter::{like_sql, null_safe, regex_sql, LikeMatch, SqlFragment};
 use duckdb::types::Value as SqlValue;
 use triage_core::output::duckdb::sql::quote_ident;
 
@@ -111,7 +111,7 @@ pub fn compile_search(
         Search::Regex(pattern) => {
             check_length(pattern)?;
             check_regex(pattern, opts)?;
-            regex_sql(pattern, &searchable, opts, &mut params)
+            any_cell_regex_sql(pattern, &searchable, opts, &mut params)
         }
         Search::Terms(expr) => {
             check_terms(expr)?;
@@ -227,6 +227,9 @@ fn text_of(pieces: &[Piece]) -> String {
 }
 
 /// The term one token stands for; `None` when it has no text (`""`, `+""`).
+/// A token no scope applies to is plain text as a whole, so `EventId:` and
+/// `EventId:""` (a scope with nothing after the colon) are the unscoped
+/// term `EventId:`.
 fn term(token: &[Piece], columns: &[ColumnInfo]) -> Option<(Bucket, Term)> {
     // A `+` or `-` with nothing after it is the character itself.
     let (bucket, rest) = match token {
@@ -257,7 +260,7 @@ fn term(token: &[Piece], columns: &[ColumnInfo]) -> Option<(Bucket, Term)> {
 
 /// `Name:rest` as a term of column `Name`, when the name before the first
 /// unquoted colon is plain text naming a catalogued column and `rest` has
-/// text.
+/// text; otherwise `None`, and the caller reads the whole token as text.
 fn scoped(token: &[Piece], columns: &[ColumnInfo]) -> Option<Term> {
     let colon = token.iter().position(|p| {
         *p == Piece::Char {
@@ -290,11 +293,14 @@ fn term_sql(
     opts: SearchOptions,
     params: &mut Vec<SqlValue>,
 ) -> Result<String> {
-    let pattern = format!("%{}%", escape_like(&term.text));
-    let like = if opts.case_sensitive { "LIKE" } else { "ILIKE" };
     let mut test = |haystack: String| {
-        params.push(SqlValue::Text(pattern.clone()));
-        format!("COALESCE({haystack} {like} ? ESCAPE '\\', FALSE)")
+        null_safe(&like_sql(
+            &haystack,
+            &term.text,
+            LikeMatch::Contains,
+            opts.case_sensitive,
+            params,
+        ))
     };
     let texts = || searchable.iter().map(|c| quote_ident(&c.text_column));
     Ok(match &term.column {
@@ -325,7 +331,7 @@ fn term_sql(
 const SEPARATOR: char = '\u{1f}';
 
 /// `pattern` tested against each searchable cell on its own.
-fn regex_sql(
+fn any_cell_regex_sql(
     pattern: &str,
     searchable: &[&ColumnInfo],
     opts: SearchOptions,
@@ -334,15 +340,15 @@ fn regex_sql(
     if searchable.is_empty() {
         return "FALSE".into();
     }
-    let flags = if opts.case_sensitive { "" } else { ", 'i'" };
     let tests: Vec<String> = searchable
         .iter()
         .map(|c| {
-            params.push(SqlValue::Text(pattern.to_string()));
-            format!(
-                "COALESCE(regexp_matches({}, ?{flags}), FALSE)",
-                quote_ident(&c.text_column)
-            )
+            null_safe(&regex_sql(
+                &quote_ident(&c.text_column),
+                pattern,
+                opts.case_sensitive,
+                params,
+            ))
         })
         .collect();
     format!("({})", tests.join(" OR "))
