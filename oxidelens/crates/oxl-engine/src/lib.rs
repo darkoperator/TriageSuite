@@ -10,6 +10,7 @@ pub mod actor;
 pub mod case;
 pub mod catalog;
 pub mod error;
+pub mod filter;
 pub mod load;
 pub mod time;
 
@@ -20,6 +21,7 @@ pub use catalog::{
     RelationKind, SqlType, TimeSemantics, TypeOrigin,
 };
 pub use error::{EngineError, Result};
+pub use filter::{compile_filter, parse_filter, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN};
 pub use load::{
     load_file, load_run, relation_name_for_file, remove_source, sources, FileOptions, LoadReport,
     LoadedRelation, RemoveReport, SourceInfo, Superseded,

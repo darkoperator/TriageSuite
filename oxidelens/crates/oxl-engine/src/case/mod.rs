@@ -146,6 +146,15 @@ impl Case {
     pub fn scalar_i64(&self, sql: &str) -> Result<i64> {
         Ok(self.conn().query_row(sql, [], |r| r.get(0))?)
     }
+
+    /// `scalar_i64` with bound parameters, for integration tests that run a
+    /// compiled fragment before the query API exists to run it for them.
+    #[doc(hidden)]
+    pub fn scalar_i64_with(&self, sql: &str, params: &[duckdb::types::Value]) -> Result<i64> {
+        Ok(self
+            .conn()
+            .query_row(sql, duckdb::params_from_iter(params), |r| r.get(0))?)
+    }
 }
 
 fn initialise(conn: &mut Connection, name: &str, actor: &Actor) -> Result<()> {
