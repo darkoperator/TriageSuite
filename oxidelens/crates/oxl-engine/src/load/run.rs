@@ -19,7 +19,7 @@ use duckdb::{params, Connection};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use triage_core::output::duckdb::inventory::{
-    Dataset, DatasetFile, FileIdentity, Inventory, Status,
+    Dataset, DatasetFile, FileIdentity, Inventory, MetadataColumns, Status,
 };
 use triage_core::output::duckdb::render::render_sql;
 use triage_core::output::duckdb::sql::quote_ident;
@@ -32,8 +32,9 @@ const STAGE: &str = "ox_stage";
 ///
 /// Refused when the inventory's status is not `ok` or the run is already in
 /// the case (a removed run may be loaded again); `Invalid` when the inventory
-/// declares a SQL type the suite never writes or types a column differently
-/// from the case's catalog. For each relation and host the run has rows for,
+/// declares a SQL type the suite never writes, types a column differently
+/// from the case's catalog, or names a relation's metadata columns
+/// differently from the live sources already feeding it. For each relation and host the run has rows for,
 /// an earlier run's rows are superseded (see `supersede`). Any failure leaves
 /// the case exactly as it was.
 pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadReport> {
@@ -174,6 +175,7 @@ fn load_in(
         )));
     }
     for dataset in inventory.datasets.iter().filter(|d| loads(d)) {
+        check_metadata_columns(conn, dataset)?;
         check_typing(conn, dataset)?;
     }
 
@@ -255,6 +257,53 @@ fn load_in(
         superseded,
         warnings,
     })
+}
+
+/// Refuse `dataset` when a live source already feeding its relation named
+/// the metadata columns (run id, host, identity, output file) differently.
+/// The suite renames one (`_triage_host_1` ...) when a dataset has a column
+/// of that name; merging two namings would give the relation two host
+/// columns, so the disagreement is refused, as a typing one is. Live sources
+/// of a relation always agree, so checking against any one of them is enough.
+fn check_metadata_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
+    let recorded: Option<String> = conn
+        .query_row(
+            "SELECT i.metadata_columns_json FROM ox.inventory_dataset i \
+             JOIN ox.source s ON s.id = i.source_id \
+             WHERE i.view = ? AND NOT s.removed ORDER BY i.source_id LIMIT 1",
+            params![dataset.view],
+            |r| r.get(0),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            duckdb::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    let Some(json) = recorded else {
+        return Ok(());
+    };
+    let ours: MetadataColumns = serde_json::from_str(&json).map_err(|e| {
+        EngineError::Invalid(format!(
+            "the case's inventory record for {} is unreadable: {e}",
+            dataset.view
+        ))
+    })?;
+    let theirs = &dataset.metadata_columns;
+    for (role, ours, theirs) in [
+        ("run id", &ours.run_id, &theirs.run_id),
+        ("host", &ours.host, &theirs.host),
+        ("identity", &ours.identity, &theirs.identity),
+        ("output file", &ours.output_file, &theirs.output_file),
+    ] {
+        if ours != theirs {
+            return Err(EngineError::Invalid(format!(
+                "{}: this run names its {role} column {theirs:?}, but the case has it as \
+                 {ours:?}; a relation's metadata columns keep one name across sources",
+                dataset.view
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Whether any of `dataset`'s files is included in a view, so that loading

@@ -388,13 +388,145 @@ fn removing_one_source_keeps_the_others_rows() {
         ),
         (0, 0, 0)
     );
-    // Source 1's WS01 prefetch rows stay superseded; its SRV01 row stays.
-    assert_eq!(n(&case, "select count(*) from petriage_timeline"), 1);
+    // R12: source 1's WS01 prefetch rows come back beside its SRV01 row.
+    assert_eq!(n(&case, "select count(*) from petriage_timeline"), 5);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from petriage_timeline \
+             where _triage_host = 'WS01' and _triage_run_id = '20260101000000-aaaa'"
+        ),
+        4
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from petriage_timeline where ExecutableName = 'PSEXESVC.EXE'"
+        ),
+        0
+    );
     assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 11);
-    assert!(relations(&case)
-        .unwrap()
-        .iter()
-        .any(|r| r.name == "petriage_timeline"));
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.source_dataset \
+             where source_id = 1 and relation = 'petriage_timeline' and host = 'WS01' and active"
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'source_remove' and target_id = '2' \
+             and json_array_length(json_extract(after_json, '$.reinstated')) = 1 \
+             and json_extract_string(after_json, '$.reinstated[0].host') = 'WS01' \
+             and json_extract(after_json, '$.reinstated[0].source_id')::BIGINT = 1"
+        ),
+        1
+    );
+}
+
+#[test]
+fn removing_a_rerun_moves_marks_back_and_orphans_the_rest() {
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap();
+    let mut case = with_sql(
+        case,
+        &format!(
+            "{} {}",
+            mark(SVCH0ST_WS01),
+            mark("SELECT _ox_row FROM petriage_timeline WHERE ExecutableName = 'PSEXESVC.EXE'")
+        ),
+    );
+    let psexesvc = n(
+        &case,
+        "select _ox_row from petriage_timeline where ExecutableName = 'PSEXESVC.EXE'",
+    );
+
+    // Both marks count toward the confirmation, though one will move back.
+    let (c, message) = code(remove_source(&mut case, 2, false, &analyst()));
+    assert_eq!(c, "refused");
+    assert!(message.contains("2 marks"), "{message}");
+
+    let report = remove_source(&mut case, 2, true, &analyst()).unwrap();
+    assert_eq!(
+        (
+            report.orphaned_marks,
+            report.orphaned_tags,
+            report.orphaned_notes
+        ),
+        (1, 0, 0)
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.row_mark m join petriage_timeline p on p._ox_row = m.row_id \
+             where p.ExecutableName = 'SVCH0ST.EXE' and p._triage_run_id = '20260101000000-aaaa'"
+        ),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!("select count(*) from ox.row_mark where row_id = {psexesvc}")
+        ),
+        1
+    );
+    assert_eq!(n(&case, "select count(*) from ox.row_mark"), 2);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'source_remove' \
+             and json_extract(after_json, '$.reinstated[0].moved')::BIGINT = 1 \
+             and json_extract(after_json, '$.reinstated[0].left_behind')::BIGINT = 1 \
+             and json_extract(after_json, '$.orphaned_marks')::BIGINT = 1"
+        ),
+        1
+    );
+}
+
+#[test]
+fn removing_a_source_that_superseded_nothing_reinstates_nothing() {
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap();
+    load_run(
+        &mut case,
+        &oxl_fixtures::empty_dataset(&d.path().join("c")),
+        &analyst(),
+    )
+    .unwrap();
+    remove_source(&mut case, 1, false, &analyst()).unwrap();
+    assert!(case
+        .scalar_i64("select count(*) from petriage_timeline")
+        .is_err());
+    assert_eq!(
+        n(&case, "select count(*) from ox.source_dataset where active"),
+        1
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'source_remove' \
+             and json_array_length(json_extract(after_json, '$.reinstated')) = 0"
+        ),
+        1
+    );
 }
 
 #[test]
@@ -495,7 +627,7 @@ fn loose_files_never_supersede_and_can_be_removed() {
 }
 
 #[test]
-fn each_arm_filters_on_its_own_host_column() {
+fn a_run_that_names_a_metadata_column_differently_is_refused() {
     let (d, mut case) = setup();
     let original = oxl_fixtures::two_hosts(&d.path().join("a"));
     load_run(&mut case, &original, &analyst()).unwrap();
@@ -512,53 +644,74 @@ fn each_arm_filters_on_its_own_host_column() {
             pf["metadata_columns"]["host"] = "_triage_host_1".into();
         },
     );
-    let r = load_run(&mut case, &renamed, &analyst()).unwrap();
-    assert_eq!(r.superseded.len(), 5);
+    let (c, message) = code(load_run(&mut case, &renamed, &analyst()));
+    assert_eq!(c, "invalid");
+    assert!(
+        message.contains("petriage_timeline") && message.contains("_triage_host_1"),
+        "{message}"
+    );
+    assert_eq!(sources(&case).unwrap().len(), 1);
     assert_eq!(
         n(
             &case,
-            "select count(*) from petriage_timeline where \"_triage_host_1\" is not null"
+            "select count(*) from duckdb_schemas() where schema_name = 'src_2'"
         ),
-        5
+        0
     );
     assert_eq!(n(&case, "select count(*) from petriage_timeline"), 5);
 }
 
 #[test]
-fn two_live_arms_with_different_host_columns_each_filter_on_their_own() {
+fn the_raw_view_shows_a_column_only_a_superseded_run_had_as_null() {
     let (d, mut case) = setup();
-    load_run(
-        &mut case,
-        &oxl_fixtures::two_hosts(&d.path().join("a")),
-        &analyst(),
-    )
-    .unwrap();
-    let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
-    let renamed = copy_run(&rerun, &d.path().join("c"), "20260102000000-bbbb", |json| {
-        json["datasets"][0]["metadata_columns"]["host"] = "_triage_host_1".into();
-    });
-    let r = load_run(&mut case, &renamed, &analyst()).unwrap();
-    assert_eq!(
-        superseded_pairs(&r),
-        [("petriage_timeline".to_string(), "WS01".to_string())]
+    let original = oxl_fixtures::two_hosts(&d.path().join("a"));
+    load_run(&mut case, &original, &analyst()).unwrap();
+    // The same run again, its prefetch files without ExecutableName.
+    let copy = copy_run(
+        &original,
+        &d.path().join("b"),
+        "20260104000000-dddd",
+        |json| {
+            let datasets = json["datasets"].as_array_mut().unwrap();
+            let pf = datasets
+                .iter_mut()
+                .find(|ds| ds["view"] == "petriage_timeline")
+                .unwrap();
+            let without = |list: &mut serde_json::Value| {
+                list.as_array_mut()
+                    .unwrap()
+                    .retain(|c| c != "ExecutableName");
+            };
+            without(&mut pf["columns"]);
+            for file in pf["files"].as_array_mut().unwrap() {
+                without(&mut file["header"]);
+            }
+        },
     );
-    // Source 1's arm keeps SRV01 under _triage_host; source 2's WS01 rows
-    // carry their host under _triage_host_1.
-    assert_eq!(n(&case, "select count(*) from petriage_timeline"), 6);
+    for host in ["WS01", "SRV01"] {
+        let csv = copy
+            .join(format!("Processed-{host}-20260101000000"))
+            .join("Execution")
+            .join("pf.csv");
+        let text: String = std::fs::read_to_string(&csv)
+            .unwrap()
+            .lines()
+            .map(|l| {
+                let fields: Vec<&str> = l.split(',').collect();
+                format!("{},{}\n", fields[0], fields[2])
+            })
+            .collect();
+        std::fs::write(&csv, text).unwrap();
+    }
+    load_run(&mut case, &copy, &analyst()).unwrap();
     assert_eq!(
         n(
             &case,
-            "select count(*) from petriage_timeline where _triage_host = 'SRV01'"
-        ),
-        1
-    );
-    assert_eq!(
-        n(
-            &case,
-            "select count(*) from petriage_timeline where \"_triage_host_1\" = 'WS01'"
+            "select count(*) from raw_petriage_timeline where ExecutableName is null"
         ),
         5
     );
+    assert_eq!(n(&case, "select count(*) from raw_petriage_timeline"), 5);
 }
 
 #[test]

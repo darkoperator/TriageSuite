@@ -18,7 +18,6 @@
 
 use crate::error::{EngineError, Result};
 use duckdb::{params, Connection};
-use triage_core::output::duckdb::inventory::MetadataColumns;
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The prefix of the columns the engine adds; a loaded relation may not
@@ -160,8 +159,8 @@ pub(crate) fn rebuild_relations(conn: &Connection) -> Result<()> {
             continue;
         }
         // A catalogued column can be missing from every active arm (one only
-        // a superseded or removed source had, or a run's renamed host
-        // column); the raw view still shows it, as NULL.
+        // a superseded or removed source had); the raw view still shows it,
+        // as NULL.
         let present: Vec<String> = conn
             .prepare(&format!(
                 "SELECT lower(column_name) FROM (DESCRIBE SELECT * FROM {view})"
@@ -188,39 +187,11 @@ pub(crate) fn rebuild_relations(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// The column of source `source_id`'s table for `relation` that names each
-/// row's host, or `None` when it has none (a loose file loaded without one).
-///
-/// A run's is the host metadata column its own inventory recorded, not the
-/// relation's `host_column`: the suite renames that column (`_triage_host_1`
-/// ...) when a dataset already has one of the name, so two runs feeding one
-/// relation need not agree on it. A loose file has no inventory; its host
-/// column is the relation's.
-pub(crate) fn host_column_of(
-    conn: &Connection,
-    source_id: i64,
-    relation: &str,
-) -> Result<Option<String>> {
-    let recorded: Option<String> = conn
-        .query_row(
-            "SELECT metadata_columns_json FROM ox.inventory_dataset \
-             WHERE source_id = ? AND view = ?",
-            params![source_id, relation],
-            |r| r.get(0),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            duckdb::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other),
-        })?;
-    if let Some(json) = recorded {
-        let meta: MetadataColumns = serde_json::from_str(&json).map_err(|e| {
-            EngineError::Invalid(format!(
-                "the case's inventory of source {source_id} for {relation} is unreadable: {e}"
-            ))
-        })?;
-        return Ok(Some(meta.host));
-    }
+/// The column of `relation`'s tables that names each row's host, or `None`
+/// when it has none (a loose file loaded without one). Every live source of
+/// a relation names its metadata columns alike (a run that does not is
+/// refused), so the relation's own record holds for every table.
+pub(crate) fn host_column(conn: &Connection, relation: &str) -> Result<Option<String>> {
     Ok(conn.query_row(
         "SELECT host_column FROM ox.relation WHERE name = ?",
         params![relation],
@@ -229,9 +200,9 @@ pub(crate) fn host_column_of(
 }
 
 /// The `(source id, SELECT)` arms of relation `name`: one per non-removed
-/// source table with at least one active host, in source order, each
-/// filtered on its own source's host column.
+/// source table with at least one active host, in source order.
 fn active_arms(conn: &Connection, name: &str) -> Result<Vec<(i64, String)>> {
+    let host_column = host_column(conn, name)?;
     let tables: Vec<(i64, String)> = conn
         .prepare(
             "SELECT st.source_id, st.table_schema FROM ox.source_table st \
@@ -261,18 +232,13 @@ fn active_arms(conn: &Connection, name: &str) -> Result<Vec<(i64, String)>> {
             quote_ident(&schema),
             quote_ident(name)
         );
-        let host_column = if hosts.is_empty() {
-            None
-        } else {
-            host_column_of(conn, source_id, name)?
-        };
-        if let Some(host_column) = host_column {
+        if let Some(host_column) = host_column.as_deref().filter(|_| !hosts.is_empty()) {
             // A view cannot bind parameters, so the host values are
             // literals, escaped by quote_literal.
             let list: Vec<String> = hosts.iter().map(|h| quote_literal(h)).collect();
             sql.push_str(&format!(
                 " WHERE {} IN ({})",
-                quote_ident(&host_column),
+                quote_ident(host_column),
                 list.join(", ")
             ));
         }

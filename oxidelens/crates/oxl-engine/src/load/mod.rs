@@ -17,6 +17,7 @@ use crate::error::{EngineError, Result};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
 use stage::{rebuild_relations, source_schema};
+use supersede::reinstate;
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// One relation a load fed, and how much.
@@ -76,9 +77,12 @@ pub struct RemoveReport {
 
 /// Remove source `source_id` from the case: it is marked removed, its
 /// schema is dropped, its datasets leave every view, and a relation it was
-/// the last live source of is dropped with its catalog. Annotations on its
-/// rows are kept, orphaned; when there are any, `confirm_orphans` must be
-/// true or the removal is `Refused` with their counts. Refused for an agent
+/// the last live source of is dropped with its catalog. For each relation
+/// and host it was the active run for, the latest live run it had
+/// superseded there is reinstated, and annotations move back to that run's
+/// identical rows. Annotations with nowhere to go are kept, orphaned; when
+/// the source's rows carry any annotation, `confirm_orphans` must be true or
+/// the removal is `Refused` with their counts. Refused for an agent
 /// and for a source already removed; `NotFound` for an unknown id. A
 /// removed run may be loaded again.
 pub fn remove_source(
@@ -126,51 +130,23 @@ fn remove_in(
         .prepare("SELECT relation FROM ox.source_table WHERE source_id = ? ORDER BY relation")?
         .query_map(params![source_id], |r| r.get(0))?
         .collect::<std::result::Result<_, _>>()?;
-    let schema = source_schema(source_id);
-    let report = if relations.is_empty() {
-        RemoveReport {
-            orphaned_marks: 0,
-            orphaned_tags: 0,
-            orphaned_notes: 0,
-        }
-    } else {
-        // Every row the source holds, superseded ones included: an
-        // annotation left behind on an old row is orphaned by its removal too.
-        let rows = relations
-            .iter()
-            .map(|r| {
-                format!(
-                    "SELECT _ox_row FROM {}.{}",
-                    quote_ident(&schema),
-                    quote_ident(r)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" UNION ALL ");
-        let count = |table: &str, extra: &str| -> Result<u64> {
-            let n: i64 = conn.query_row(
-                &format!("SELECT count(*) FROM {table} WHERE row_id IN ({rows}){extra}"),
-                [],
-                |r| r.get(0),
-            )?;
-            Ok(u64::try_from(n).unwrap_or_default())
-        };
-        RemoveReport {
-            orphaned_marks: count("ox.row_mark", "")?,
-            orphaned_tags: count("ox.row_tag", "")?,
-            orphaned_notes: count("ox.note", " AND NOT deleted")?,
-        }
-    };
-    let orphans = report.orphaned_marks + report.orphaned_tags + report.orphaned_notes;
-    if orphans > 0 && !confirm_orphans {
+    // Every annotation on the source's rows counts here, even one that will
+    // move back to a reinstated run: the caller cannot know which will.
+    let annotated = annotations_on(conn, source_id, &relations)?;
+    let total = annotated.orphaned_marks + annotated.orphaned_tags + annotated.orphaned_notes;
+    if total > 0 && !confirm_orphans {
         return Err(EngineError::Refused(format!(
             "source {source_id} has annotations on its rows: {}, {}, {}; removing it \
-             orphans them (they are kept). Confirm to remove it anyway",
-            counted(report.orphaned_marks, "mark"),
-            counted(report.orphaned_tags, "tag"),
-            counted(report.orphaned_notes, "note"),
+             may orphan them (they are kept). Confirm to remove it anyway",
+            counted(annotated.orphaned_marks, "mark"),
+            counted(annotated.orphaned_tags, "tag"),
+            counted(annotated.orphaned_notes, "note"),
         )));
     }
+
+    // Before the schema goes: rebinding reads the source's rows.
+    let reinstated = reinstate(conn, source_id)?;
+    let report = annotations_on(conn, source_id, &relations)?;
 
     conn.execute(
         "UPDATE ox.source SET removed = true WHERE id = ?",
@@ -202,7 +178,7 @@ fn remove_in(
     }
     conn.execute_batch(&format!(
         "DROP SCHEMA IF EXISTS {} CASCADE;",
-        quote_ident(&schema)
+        quote_ident(&source_schema(source_id))
     ))?;
 
     let before = serde_json::json!({
@@ -211,6 +187,10 @@ fn remove_in(
     let after = serde_json::json!({
         "kind": kind, "path": path, "run_id": run_id, "removed": true,
         "relations_dropped": dropped,
+        "reinstated": reinstated.iter().map(|r| serde_json::json!({
+            "relation": r.relation, "host": r.host, "source_id": r.source,
+            "moved": r.moved, "left_behind": r.left_behind,
+        })).collect::<Vec<_>>(),
         "orphaned_marks": report.orphaned_marks,
         "orphaned_tags": report.orphaned_tags,
         "orphaned_notes": report.orphaned_notes,
@@ -228,6 +208,44 @@ fn remove_in(
         ],
     )?;
     Ok(report)
+}
+
+/// The marks, tags and (not deleted) notes on any row of `source_id`'s
+/// tables for `relations`, superseded rows included: an annotation left
+/// behind on an old row is orphaned by its removal too.
+fn annotations_on(conn: &Connection, source_id: i64, relations: &[String]) -> Result<RemoveReport> {
+    if relations.is_empty() {
+        return Ok(RemoveReport {
+            orphaned_marks: 0,
+            orphaned_tags: 0,
+            orphaned_notes: 0,
+        });
+    }
+    let schema = source_schema(source_id);
+    let rows = relations
+        .iter()
+        .map(|r| {
+            format!(
+                "SELECT _ox_row FROM {}.{}",
+                quote_ident(&schema),
+                quote_ident(r)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    let count = |table: &str, extra: &str| -> Result<u64> {
+        let n: i64 = conn.query_row(
+            &format!("SELECT count(*) FROM {table} WHERE row_id IN ({rows}){extra}"),
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(u64::try_from(n).unwrap_or_default())
+    };
+    Ok(RemoveReport {
+        orphaned_marks: count("ox.row_mark", "")?,
+        orphaned_tags: count("ox.row_tag", "")?,
+        orphaned_notes: count("ox.note", " AND NOT deleted")?,
+    })
 }
 
 /// `1 mark`, `2 marks`.
