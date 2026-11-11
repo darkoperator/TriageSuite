@@ -49,3 +49,23 @@ jobs:
       - run: cargo test -p triage-orchestrator --test zip_e2e
       - run: cargo test -p triage-orchestrator --test duckdb_e2e
       - run: cargo test -p triage-core
+
+  # OxideLens is a cargo workspace of its own, excluded from the root one
+  # because it bundles DuckDB; it gets its own job and its own cache so the
+  # suite's job never compiles DuckDB.
+  oxidelens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: oxidelens
+      - run: cargo fmt --all -- --check
+        working-directory: oxidelens
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: oxidelens
+      - run: cargo test
+        working-directory: oxidelens

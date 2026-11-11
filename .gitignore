@@ -6,6 +6,7 @@ sample_files/
 
 # Rust build artifacts
 /target
+/oxidelens/target
 **/*.rs.bk
 
 # .NET build artifacts (scripts/guid_extractor)

@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-exclude = ["spike"]
+# oxidelens/ is its own workspace: it bundles DuckDB, which this workspace
+# and its release must never build.
+exclude = ["spike", "oxidelens"]
 
 [workspace.package]
 version = "0.3.0"

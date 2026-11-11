@@ -13,6 +13,7 @@
 #   scripts/check.sh            # everything, including capture-gated tests
 #   scripts/check.sh --no-captures   # skip those (a checkout without evidence)
 #   scripts/check.sh --no-duckdb     # skip the DuckDB view assertions
+#   scripts/check.sh --no-oxidelens  # skip the oxidelens/ workspace
 #   scripts/check.sh --fast     # fmt + clippy + allow check, no tests
 set -uo pipefail
 
@@ -21,12 +22,14 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 captures=1
 tests=1
 duckdb=1
+oxidelens=1
 for arg in "$@"; do
   case "$arg" in
     --no-captures) captures=0 ;;
     --no-duckdb) duckdb=0 ;;
+    --no-oxidelens) oxidelens=0 ;;
     --fast) tests=0 ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -83,9 +86,22 @@ if [ "$tests" -eq 1 ]; then
   step "$test_label" env ${test_env[@]+"${test_env[@]}"} cargo test --workspace
 fi
 
+# OxideLens is a cargo workspace of its own (it bundles DuckDB, which the
+# suite's workspace must never build), so its steps run inside oxidelens/.
+# The subshell keeps the cd from leaking into the steps after it.
+in_oxidelens() { (cd oxidelens && "$@"); }
+if [ "$oxidelens" -eq 1 ]; then
+  step "oxidelens fmt" in_oxidelens cargo fmt --all -- --check
+  step "oxidelens clippy" in_oxidelens cargo clippy --all-targets -- -D warnings
+  if [ "$tests" -eq 1 ]; then
+    step "oxidelens test" in_oxidelens cargo test
+  fi
+fi
+
 echo
 if [ ${#failed[@]} -eq 0 ]; then
-  if [ "$tests" -eq 1 ] && [ "$captures" -eq 1 ] && [ "$duckdb" -eq 1 ]; then
+  if [ "$tests" -eq 1 ] && [ "$captures" -eq 1 ] && [ "$duckdb" -eq 1 ] \
+     && [ "$oxidelens" -eq 1 ]; then
     echo "All checks passed, capture-gated and DuckDB view assertions included."
   elif [ "$tests" -eq 0 ]; then
     echo "All checks passed (reduced run: no tests)."
@@ -93,6 +109,7 @@ if [ ${#failed[@]} -eq 0 ]; then
     reasons=()
     [ "$captures" -eq 0 ] && reasons+=("captures skipped")
     [ "$duckdb" -eq 0 ] && reasons+=("DuckDB skipped")
+    [ "$oxidelens" -eq 0 ] && reasons+=("OxideLens skipped")
     reasons_joined="$(printf '%s, ' "${reasons[@]}")"
     reasons_joined="${reasons_joined%, }"
     echo "All checks passed (reduced run: ${reasons_joined})."

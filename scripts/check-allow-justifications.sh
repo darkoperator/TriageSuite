@@ -13,6 +13,12 @@ set -euo pipefail
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$root"
 
+# oxidelens/ is a cargo workspace of its own, but the same rule binds it.
+scan_dirs=(crates)
+if [ -d oxidelens/crates ]; then
+  scan_dirs+=(oxidelens/crates)
+fi
+
 violations=0
 while IFS= read -r file; do
   # Read the file once; awk reports 1-based line numbers of offending allows.
@@ -29,7 +35,7 @@ while IFS= read -r file; do
       sub(/^[[:space:]]+/, "", line)
       if (line != "") prev = line }
   ' "$file")
-done < <(find crates -name '*.rs' -type f | sort)
+done < <(find "${scan_dirs[@]}" -name '*.rs' -type f | sort)
 
 if [ "$violations" -gt 0 ]; then
   echo

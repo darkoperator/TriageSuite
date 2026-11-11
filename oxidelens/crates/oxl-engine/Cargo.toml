@@ -1,0 +1,22 @@
+[package]
+name = "oxl-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The OxideLens case engine: a DuckDB case file over TriageSuite output"
+
+[dependencies]
+triage-core.workspace = true
+duckdb.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+# Integration tests only (files under tests/): oxl-fixtures depends on this
+# crate, and a unit test inside src/ that used it would link a second copy.
+oxl-fixtures.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

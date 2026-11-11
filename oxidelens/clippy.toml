@@ -1,0 +1,5 @@
+# The suite's threshold, repeated: at 6 the lint fires on the seven-argument
+# shape that once shipped in the orchestrator, and
+# scripts/check-allow-justifications.sh makes every remaining silence state
+# its reason.
+too-many-arguments-threshold = 6

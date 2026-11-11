@@ -1,0 +1,68 @@
+# OxideLens: a case workbench over a TriageSuite run.
+#
+# A workspace of its own, excluded from the suite's root workspace, because
+# the engine bundles DuckDB: building it is minutes of C++ the suite's own
+# crates and its 5-target release must never pay for.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Carlos (DarkOperator) Perez <carlos_perez@darkoperator.com>"]
+license = "MIT"
+
+# The suite's [workspace.lints] block, repeated verbatim so OxideLens is held
+# to the same rules (each crate opts in with `[lints] workspace = true`).
+[workspace.lints.rust]
+# The suite parses attacker-controlled evidence. There is no unsafe block in
+# the tree today and none is needed; forbid (not deny) so a crate cannot
+# re-enable it locally.
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Debugging leftovers must never reach a release binary.
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+# Decode tables are written as bit constants transcribed from an upstream
+# header; a mistyped suffix or an odd digit grouping is how a transcription
+# error hides in plain sight.
+mistyped_literal_suffixes = "deny"
+unusual_byte_groupings = "deny"
+
+[workspace.dependencies]
+oxl-engine = { path = "crates/oxl-engine" }
+oxl-fixtures = { path = "crates/oxl-fixtures" }
+triage-core = { path = "../crates/triage-core" }
+# Pinned exactly: the case file is a DuckDB database, and a storage-format
+# change between DuckDB releases is a case file the analyst can no longer open.
+duckdb = { version = "=1.10505.0", features = ["bundled", "json"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+# preserve_order keeps JSON property order = struct declaration order, the
+# same choice the suite makes.
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+# The clock only. Time values are ISO 8601 text cast inside DuckDB; nothing in
+# this workspace does date arithmetic.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+# Dependencies (above all the bundled DuckDB C++, built by libduckdb-sys'
+# build script through the `cc` crate, which reads the profile's OPT_LEVEL) are
+# optimized even in dev and test builds: an unoptimized DuckDB dominates test
+# wall time while adding nothing debuggable. Our own crates stay at opt-level 0.
+[profile.dev.package."*"]
+opt-level = 2
+# No debug info for dependencies: nothing steps into them, and with DuckDB
+# linked into every test binary it is most of target/.
+debug = false
+
+# Line tables only for our own code: panics and backtraces still show
+# file:line, at a fraction of the size of full debug info.
+[profile.dev]
+debug = "line-tables-only"

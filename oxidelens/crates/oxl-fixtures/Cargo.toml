@@ -1,0 +1,21 @@
+[package]
+name = "oxl-fixtures"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Synthetic TriageSuite run trees and loose files for OxideLens tests"
+# Test scaffolding: never published, never shipped.
+publish = false
+
+[dependencies]
+oxl-engine.workspace = true
+triage-core.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+duckdb.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
