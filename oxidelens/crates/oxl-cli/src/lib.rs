@@ -14,6 +14,29 @@ use serde_json::Value;
 use std::ffi::OsString;
 use std::io::Write;
 
+/// Every command path clap knows, nested ones as `parent child`, a command
+/// with subcommands excluded (only the leaves run). The contract tests hold
+/// this to `capabilities`, so a command cannot be added and left undescribed.
+pub fn command_paths() -> Vec<String> {
+    fn walk(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
+        for sub in cmd.get_subcommands() {
+            let path = if prefix.is_empty() {
+                sub.get_name().to_string()
+            } else {
+                format!("{prefix} {}", sub.get_name())
+            };
+            if sub.has_subcommands() {
+                walk(sub, &path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&<Cli as clap::CommandFactory>::command(), "", &mut out);
+    out
+}
+
 /// Run the CLI over `args` (the first is the program name), writing the
 /// envelope to `out`. Returns the process exit code.
 pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write) -> i32 {

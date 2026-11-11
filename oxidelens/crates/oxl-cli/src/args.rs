@@ -108,6 +108,26 @@ pub enum Command {
     Around(AroundArgs),
     /// Show one row in full.
     Row { id: i64 },
+    /// Mark rows suspicious, clear marks, or list them.
+    #[command(subcommand)]
+    Mark(MarkCmd),
+    /// Tag rows, remove tags, or list the tags.
+    #[command(subcommand)]
+    Tag(TagCmd),
+    /// Write, delete or list notes on a row.
+    #[command(subcommand)]
+    Note(NoteCmd),
+    /// Declare a column's type or a relation's primary time.
+    #[command(subcommand)]
+    Column(ColumnCmd),
+    /// List the changes made to the case, newest first.
+    History {
+        /// Only this kind of target: source, relation, row_mark, row_tag or note.
+        #[arg(long)]
+        kind: Option<String>,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// Run one SELECT over the case.
     Query {
         /// The SQL, or @file to read it from a file.
@@ -244,6 +264,110 @@ pub enum SourceCmd {
     },
 }
 
+/// The rows a batch command acts on.
+#[derive(Args, Debug)]
+pub struct RowsArg {
+    /// Row ids, comma-separated.
+    #[arg(long)]
+    pub rows: String,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MarkCmd {
+    /// Mark rows suspicious.
+    Set(RowsArg),
+    /// Clear the mark on rows.
+    Clear(RowsArg),
+    /// List marked rows.
+    List {
+        /// Only marks set by this actor (analyst:<name> or agent:<name>).
+        #[arg(long)]
+        by: Option<String>,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TagCmd {
+    /// Add a tag to rows.
+    Add {
+        #[command(flatten)]
+        rows: RowsArg,
+        #[arg(long)]
+        tag: String,
+    },
+    /// Remove a tag from rows.
+    Remove {
+        #[command(flatten)]
+        rows: RowsArg,
+        #[arg(long)]
+        tag: String,
+    },
+    /// List every tag with the rows carrying it.
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum NoteCmd {
+    /// Write a note on a row.
+    Add {
+        #[arg(long)]
+        row: i64,
+        /// The note's text, or @file to read it from a file.
+        #[arg(long)]
+        text: String,
+    },
+    /// Delete a note.
+    Delete { id: i64 },
+    /// List the notes on a row.
+    List {
+        #[arg(long)]
+        row: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ColumnCmd {
+    /// Type a column (analyst only).
+    Declare {
+        relation: String,
+        column: String,
+        #[arg(long = "type", value_enum)]
+        sql_type: SqlTypeArg,
+        /// For a TIMESTAMP: utc (the default) or unknown.
+        #[arg(long, value_enum)]
+        semantics: Option<SemanticsArg>,
+    },
+    /// Set the timestamp column a relation's timeline runs on, or clear it.
+    PrimaryTime {
+        relation: String,
+        #[arg(required_unless_present = "none", conflicts_with = "none")]
+        column: Option<String>,
+        /// Clear the primary time.
+        #[arg(long)]
+        none: bool,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum SqlTypeArg {
+    #[value(name = "TIMESTAMP", alias = "timestamp")]
+    Timestamp,
+    #[value(name = "BIGINT", alias = "bigint")]
+    BigInt,
+    #[value(name = "UBIGINT", alias = "ubigint")]
+    UBigInt,
+    #[value(name = "BOOLEAN", alias = "boolean")]
+    Boolean,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum SemanticsArg {
+    Utc,
+    Unknown,
+}
+
 impl Command {
     /// The name the envelope reports for this command.
     pub fn name(&self) -> &'static str {
@@ -265,6 +389,18 @@ impl Command {
             Command::Around(_) => "around",
             Command::Row { .. } => "row",
             Command::Query { .. } => "query",
+            Command::Mark(MarkCmd::Set(_)) => "mark set",
+            Command::Mark(MarkCmd::Clear(_)) => "mark clear",
+            Command::Mark(MarkCmd::List { .. }) => "mark list",
+            Command::Tag(TagCmd::Add { .. }) => "tag add",
+            Command::Tag(TagCmd::Remove { .. }) => "tag remove",
+            Command::Tag(TagCmd::List) => "tag list",
+            Command::Note(NoteCmd::Add { .. }) => "note add",
+            Command::Note(NoteCmd::Delete { .. }) => "note delete",
+            Command::Note(NoteCmd::List { .. }) => "note list",
+            Command::Column(ColumnCmd::Declare { .. }) => "column declare",
+            Command::Column(ColumnCmd::PrimaryTime { .. }) => "column primary-time",
+            Command::History { .. } => "history",
         }
     }
 }

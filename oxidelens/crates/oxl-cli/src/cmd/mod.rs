@@ -1,12 +1,13 @@
 //! One function per command: parsed arguments in, envelope data or an
 //! `EngineError` out. `execute` is the only place that knows every command.
 
+mod annot;
 mod case;
 mod describe;
 mod load;
 mod read;
 
-use crate::args::{CaseCmd, Cli, Command, LoadCmd, SourceCmd};
+use crate::args::{CaseCmd, Cli, ColumnCmd, Command, LoadCmd, MarkCmd, NoteCmd, SourceCmd, TagCmd};
 use oxl_engine::{Actor, Case, EngineError, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -105,6 +106,27 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
         Command::Around(args) => read::around(&ctx, args),
         Command::Row { id } => read::row(&ctx, *id),
         Command::Query { sql, page } => read::query(&ctx, sql, page),
+        Command::Mark(MarkCmd::Set(a)) => annot::mark_set(&ctx, &a.rows),
+        Command::Mark(MarkCmd::Clear(a)) => annot::mark_clear(&ctx, &a.rows),
+        Command::Mark(MarkCmd::List { by, page }) => annot::mark_list(&ctx, by.as_deref(), page),
+        Command::Tag(TagCmd::Add { rows, tag }) => annot::tag_add(&ctx, &rows.rows, tag),
+        Command::Tag(TagCmd::Remove { rows, tag }) => annot::tag_remove(&ctx, &rows.rows, tag),
+        Command::Tag(TagCmd::List) => annot::tag_list(&ctx),
+        Command::Note(NoteCmd::Add { row, text }) => annot::note_add(&ctx, *row, text),
+        Command::Note(NoteCmd::Delete { id }) => annot::note_delete(&ctx, *id),
+        Command::Note(NoteCmd::List { row }) => annot::note_list(&ctx, *row),
+        Command::Column(ColumnCmd::Declare {
+            relation,
+            column,
+            sql_type,
+            semantics,
+        }) => annot::declare(&ctx, relation, column, *sql_type, *semantics),
+        Command::Column(ColumnCmd::PrimaryTime {
+            relation,
+            column,
+            none,
+        }) => annot::primary_time(&ctx, relation, column.as_deref().filter(|_| !*none)),
+        Command::History { kind, page } => annot::history(&ctx, kind.as_deref(), page),
     }
 }
 

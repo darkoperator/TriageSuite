@@ -73,6 +73,48 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     ("row", "One row in full: row <id>"),
     (
+        "mark set",
+        "Mark rows suspicious: mark set --rows 1,2,3. An agent may mark at most 1,000 rows per call and never changes a mark that exists",
+    ),
+    (
+        "mark clear",
+        "Clear marks: mark clear --rows 1,2,3. An agent clears only marks it set",
+    ),
+    (
+        "mark list",
+        "List marked rows: mark list [--by <analyst:name | agent:name>] [--limit N] [--offset N]",
+    ),
+    (
+        "tag add",
+        "Tag rows: tag add --rows 1,2,3 --tag <tag>. An agent's tag starts ai:, an analyst's does not",
+    ),
+    (
+        "tag remove",
+        "Remove a tag: tag remove --rows 1,2,3 --tag <tag>. An agent removes only tags it applied",
+    ),
+    ("tag list", "List every tag with the rows carrying it"),
+    (
+        "note add",
+        "Write a note on a row: note add --row <id> --text <text | @file>",
+    ),
+    (
+        "note delete",
+        "Delete a note, leaving a tombstone in the history: note delete <note id>",
+    ),
+    ("note list", "List the notes on a row: note list --row <id>"),
+    (
+        "column declare",
+        "Type a column (analyst only; a column the suite typed keeps its type): column declare <relation> <column> --type TIMESTAMP|BIGINT|UBIGINT|BOOLEAN [--semantics utc|unknown (TIMESTAMP only, default utc)]",
+    ),
+    (
+        "column primary-time",
+        "Set the timestamp column a relation's timeline runs on, or clear it: column primary-time <relation> (<column> | --none)",
+    ),
+    (
+        "history",
+        "Every change made to the case, newest first: history [--kind source|relation|row_mark|row_tag|note] [--limit N] [--offset N]",
+    ),
+    (
         "query",
         "Run one SELECT over the case: query <sql | @file> [--limit N] [--offset N]",
     ),

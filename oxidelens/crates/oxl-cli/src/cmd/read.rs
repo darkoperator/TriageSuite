@@ -18,7 +18,7 @@ const MAX_WINDOW_SECONDS: u64 = 24 * 3600;
 /// `text`, or the content of the file named by `@path`. The file is read
 /// because the caller named it; a failure to read it is the caller's
 /// mistake, so it is `invalid`.
-fn text_arg(text: &str) -> Result<String> {
+pub(super) fn text_arg(text: &str) -> Result<String> {
     match text.strip_prefix('@') {
         None => Ok(text.to_string()),
         Some(path) => std::fs::read_to_string(path)

@@ -94,7 +94,9 @@ if [ "$oxidelens" -eq 1 ]; then
   step "oxidelens fmt" in_oxidelens cargo fmt --all -- --check
   step "oxidelens clippy" in_oxidelens cargo clippy --all-targets -- -D warnings
   if [ "$tests" -eq 1 ]; then
-    step "oxidelens test" in_oxidelens cargo test
+    # The same environment as the suite's tests: with --no-captures the
+    # capture-gated OxideLens test (a real run) must skip, not panic.
+    step "oxidelens test" in_oxidelens env ${test_env[@]+"${test_env[@]}"} cargo test
   fi
 fi
 
