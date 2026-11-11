@@ -4,7 +4,7 @@
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
-use crate::query::MAX_LIMIT;
+use crate::listing::{check_limit, fetch_limit, Listing};
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
 
@@ -54,19 +54,15 @@ pub(super) fn record(conn: &Connection, actor: &Actor, at: &str, change: Change<
 }
 
 /// Up to `limit` history rows from `offset`, newest first, of one target
-/// kind or of all; the flag says more follow. `Invalid` for an unknown
-/// target kind or a `limit` over `MAX_LIMIT`.
+/// kind or of all. `Invalid` for an unknown target kind or a `limit` over
+/// `MAX_LIMIT`.
 pub fn history(
     case: &Case,
     target_kind: Option<&str>,
     limit: u32,
     offset: u64,
-) -> Result<(Vec<HistoryRow>, bool)> {
-    if limit > MAX_LIMIT {
-        return Err(EngineError::Invalid(format!(
-            "a page is at most {MAX_LIMIT} rows, not {limit}"
-        )));
-    }
+) -> Result<Listing<HistoryRow>> {
+    check_limit(limit)?;
     let mut params = Vec::new();
     let filter = match target_kind {
         None => "",
@@ -81,8 +77,7 @@ pub fn history(
             )))
         }
     };
-    // Fetching one more than asked says whether the page is the last one.
-    params.push(SqlValue::BigInt(i64::from(limit) + 1));
+    params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
     let mut stmt = case.conn().prepare(&format!(
         "SELECT id, \"at\", \"by\", target_kind, target_id, action, before_json, after_json \
@@ -90,12 +85,7 @@ pub fn history(
     ))?;
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
-    let mut more = false;
     while let Some(row) = rows.next()? {
-        if out.len() == limit as usize {
-            more = true;
-            break;
-        }
         let id: i64 = row.get(0)?;
         out.push(HistoryRow {
             id,
@@ -108,7 +98,7 @@ pub fn history(
             after: json(id, row.get(7)?)?,
         });
     }
-    Ok((out, more))
+    Ok(Listing::from_fetched(out, limit))
 }
 
 fn json(id: i64, text: Option<String>) -> Result<Option<serde_json::Value>> {

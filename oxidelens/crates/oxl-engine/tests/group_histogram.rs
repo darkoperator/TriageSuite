@@ -29,7 +29,9 @@ fn pairs(g: &[oxl_engine::GroupRow]) -> Vec<(Option<String>, u64)> {
 #[test]
 fn top_level_groups_with_counts_and_spans() {
     let (_d, case) = loaded();
-    let g = groups(&case, &q(EVENTS), &s(&["Channel"]), &[], 50, 0).unwrap();
+    let g = groups(&case, &q(EVENTS), &s(&["Channel"]), &[], 50, 0)
+        .unwrap()
+        .items;
     assert_eq!(
         g.iter()
             .map(|g| (g.key.clone().unwrap(), g.count))
@@ -60,10 +62,17 @@ fn limit_and_offset_page_the_groups() {
     let by = s(&["Channel"]);
     let first = groups(&case, &q(EVENTS), &by, &[], 1, 0).unwrap();
     let second = groups(&case, &q(EVENTS), &by, &[], 1, 1).unwrap();
-    assert_eq!(first[0].key.as_deref(), Some("Security"));
-    assert_eq!(second[0].key.as_deref(), Some("Sysmon"));
+    assert_eq!(first.items[0].key.as_deref(), Some("Security"));
+    assert_eq!(second.items[0].key.as_deref(), Some("Sysmon"));
+    // The engine says whether more follow: two groups, so a first page of
+    // one is cut and the second is the last.
+    assert_eq!((first.items.len(), first.truncated), (1, true));
+    assert_eq!((second.items.len(), second.truncated), (1, false));
+    let both = groups(&case, &q(EVENTS), &by, &[], 2, 0).unwrap();
+    assert_eq!((both.items.len(), both.truncated), (2, false));
     assert!(groups(&case, &q(EVENTS), &by, &[], 1, 2)
         .unwrap()
+        .items
         .is_empty());
 }
 
@@ -78,7 +87,8 @@ fn nested_groups_under_a_parent_key() {
         50,
         0,
     )
-    .unwrap();
+    .unwrap()
+    .items;
     assert_eq!(
         g.iter()
             .map(|g| (g.key.clone().unwrap(), g.count))
@@ -94,7 +104,8 @@ fn nested_groups_under_a_parent_key() {
         50,
         0,
     )
-    .unwrap();
+    .unwrap()
+    .items;
     assert!(none.is_empty());
 }
 
@@ -106,7 +117,9 @@ fn group_filter_selects_exactly_the_group() {
     let sel = group_filter(&q(EVENTS), &by, &k);
     assert_eq!(count(&case, &sel).unwrap(), 3);
     // It matches the group's own count, and sits on top of the query's filter.
-    let g = groups(&case, &q(EVENTS), &by, &[Some("Security".into())], 50, 0).unwrap();
+    let g = groups(&case, &q(EVENTS), &by, &[Some("Security".into())], 50, 0)
+        .unwrap()
+        .items;
     assert_eq!(
         g.iter()
             .find(|g| g.key.as_deref() == Some("SRV01"))
@@ -131,7 +144,7 @@ fn group_filter_selects_exactly_the_group() {
 fn an_empty_key_is_its_own_group() {
     let (_d, case) = loaded();
     let by = s(&["RemoteHost"]);
-    let g = groups(&case, &q(EVENTS), &by, &[], 50, 0).unwrap();
+    let g = groups(&case, &q(EVENTS), &by, &[], 50, 0).unwrap().items;
     let blank = g.iter().find(|g| g.key.is_none()).unwrap();
     assert_eq!(blank.count, 5);
     // Ordered by count, so the blanks lead; the rest follow by count then key.
@@ -155,7 +168,8 @@ fn an_empty_key_is_its_own_group() {
         50,
         0,
     )
-    .unwrap();
+    .unwrap()
+    .items;
     assert_eq!(
         pairs(&nested),
         vec![
@@ -173,7 +187,9 @@ fn groups_count_marks() {
         "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'rclone.exe'",
     );
     assert!(mark_suspicious(&mut case, &[rclone], &analyst()).unwrap()[0].done);
-    let g = groups(&case, &q(EVENTS), &s(&["Channel"]), &[], 50, 0).unwrap();
+    let g = groups(&case, &q(EVENTS), &s(&["Channel"]), &[], 50, 0)
+        .unwrap()
+        .items;
     assert_eq!(
         g.iter()
             .map(|g| (g.key.clone().unwrap(), g.suspicious))
@@ -197,7 +213,9 @@ fn groups_follow_the_query_scope() {
         hosts: vec!["SRV01".into()],
         ..q(EVENTS)
     };
-    let g = groups(&case, &hosts, &s(&["Channel"]), &[], 50, 0).unwrap();
+    let g = groups(&case, &hosts, &s(&["Channel"]), &[], 50, 0)
+        .unwrap()
+        .items;
     assert_eq!(pairs(&g), vec![(Some("Security".to_string()), 3)]);
     // A loose file's typed time column is its primary time.
     let d = tempfile::tempdir().unwrap();
@@ -205,7 +223,9 @@ fn groups_follow_the_query_scope() {
     let fw = loose_fw_csv(d.path());
     let report = load_file(&mut other, &fw, FileOptions::default(), &analyst()).unwrap();
     let rel = report.relations[0].name.clone();
-    let g = groups(&other, &q(&rel), &s(&["action"]), &[], 50, 0).unwrap();
+    let g = groups(&other, &q(&rel), &s(&["action"]), &[], 50, 0)
+        .unwrap()
+        .items;
     assert_eq!(
         pairs(&g),
         vec![
@@ -292,7 +312,9 @@ fn empty_inputs_give_empty_results() {
     let root = empty_dataset(d.path());
     let mut case = new_case(d.path());
     oxl_engine::load_run(&mut case, &root, &analyst()).unwrap();
-    let g = groups(&case, &q("rbtriage_main"), &s(&["FileName"]), &[], 50, 0).unwrap();
+    let g = groups(&case, &q("rbtriage_main"), &s(&["FileName"]), &[], 50, 0)
+        .unwrap()
+        .items;
     assert!(g.is_empty());
     let h = histogram(&case, &q("rbtriage_main"), None, 60).unwrap();
     assert_eq!(h.column, "DeletedOn");
@@ -305,6 +327,7 @@ fn empty_inputs_give_empty_results() {
     };
     assert!(groups(&case, &none, &s(&["Channel"]), &[], 50, 0)
         .unwrap()
+        .items
         .is_empty());
     let h = histogram(&case, &none, None, 60).unwrap();
     assert_eq!((h.buckets.len(), h.untimed), (0, 0));
@@ -314,7 +337,7 @@ fn empty_inputs_give_empty_results() {
 #[test]
 fn bad_arguments_are_invalid() {
     let (_d, case) = loaded();
-    let code = |r: oxl_engine::Result<_>| r.map(|_: Vec<_>| ()).unwrap_err().code();
+    let code = |r: oxl_engine::Result<_>| r.map(|_: oxl_engine::Listing<_>| ()).unwrap_err().code();
     let one = s(&["Channel"]);
     assert_eq!(code(groups(&case, &q(EVENTS), &[], &[], 50, 0)), "invalid");
     let five = s(&["Channel", "Computer", "UserName", "EventId", "RemoteHost"]);

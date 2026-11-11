@@ -5,7 +5,7 @@ mod common;
 use common::{analyst, loaded, n};
 use oxl_engine::{
     anchor_of, around, find, load_file, load_run, mark_suspicious, merged_rows, set_primary_time,
-    EngineError, FileOptions, FindMode, FindRequest, MarkState, MergedSource, MAX_VALUE,
+    EngineError, FileOptions, FindMode, FindRequest, Listing, MarkState, MergedSource, MAX_VALUE,
 };
 use oxl_fixtures::{empty_dataset, loose_fw_csv, new_case};
 
@@ -263,7 +263,10 @@ fn an_empty_relation_is_searched_without_hits() {
     let r = find(&case, &req("x", FindMode::Contains), &mut |_, _| true).unwrap();
     assert!(r.hits.is_empty());
     assert_eq!(r.no_hit, s(&["rbtriage_main"]));
-    let (rows, truncated) = merged_rows(
+    let Listing {
+        items: rows,
+        truncated,
+    } = merged_rows(
         &case,
         &MergedSource::Find(req("x", FindMode::Contains)),
         50,
@@ -402,7 +405,10 @@ fn anchor_of_a_row_with_no_host_is_invalid() {
 #[test]
 fn merged_rows_are_time_ordered_with_summaries() {
     let (_d, case) = loaded();
-    let (rows, truncated) = merged_rows(&case, &around_ws01(), 50, 0).unwrap();
+    let Listing {
+        items: rows,
+        truncated,
+    } = merged_rows(&case, &around_ws01(), 50, 0).unwrap();
     assert_eq!((rows.len(), truncated), (4, false));
     assert_eq!(
         rows[0].summary,
@@ -443,11 +449,17 @@ fn merged_rows_page_and_carry_marks() {
     let (_d, mut case) = loaded();
     let row = svch0st_row(&case);
     assert!(mark_suspicious(&mut case, &[row], &analyst()).unwrap()[0].done);
-    let (first, truncated) = merged_rows(&case, &around_ws01(), 2, 0).unwrap();
+    let Listing {
+        items: first,
+        truncated,
+    } = merged_rows(&case, &around_ws01(), 2, 0).unwrap();
     assert_eq!((first.len(), truncated), (2, true));
     assert_eq!(first[0].mark, Some(MarkState::Suspicious));
     assert_eq!(first[1].mark, None);
-    let (rest, truncated) = merged_rows(&case, &around_ws01(), 2, 2).unwrap();
+    let Listing {
+        items: rest,
+        truncated,
+    } = merged_rows(&case, &around_ws01(), 2, 2).unwrap();
     assert_eq!((rest.len(), truncated), (2, false));
     assert_eq!(rest[0].relation, "petriage_timeline");
 
@@ -458,7 +470,10 @@ fn merged_rows_page_and_carry_marks() {
 #[test]
 fn merged_rows_of_a_find() {
     let (_d, case) = loaded();
-    let (rows, truncated) = merged_rows(
+    let Listing {
+        items: rows,
+        truncated,
+    } = merged_rows(
         &case,
         &MergedSource::Find(req("203.0.113.7", FindMode::Exact)),
         50,
@@ -484,7 +499,7 @@ fn merged_rows_of_a_find_put_untimed_rows_last() {
     // svc_backup on SRV01: two timed logons and one with an empty time.
     let mut q = req("svc_backup", FindMode::Exact);
     q.hosts = s(&["SRV01"]);
-    let (rows, _) = merged_rows(&case, &MergedSource::Find(q), 50, 0).unwrap();
+    let Listing { items: rows, .. } = merged_rows(&case, &MergedSource::Find(q), 50, 0).unwrap();
     assert_eq!(
         rows.iter().map(|r| r.time.is_some()).collect::<Vec<_>>(),
         [true, true, false]

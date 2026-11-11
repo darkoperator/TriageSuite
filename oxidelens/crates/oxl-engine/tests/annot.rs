@@ -7,7 +7,7 @@ mod common;
 use common::{agent, analyst, copy_tree, loaded, n};
 use oxl_engine::{
     add_note, add_tag, clear_suspicious, delete_note, history, load_run, mark_suspicious, marks,
-    notes, remove_source, remove_tag, row_detail, tags, Actor, Case, MarkState,
+    notes, remove_source, remove_tag, row_detail, tags, Actor, Case, Listing, MarkState,
     AGENT_ROWS_PER_CALL, MAX_NOTE,
 };
 use std::path::{Path, PathBuf};
@@ -36,7 +36,10 @@ fn an_analyst_marks_and_clears() {
     let analyst = analyst();
     let r = logon(&case);
     assert!(mark_suspicious(&mut case, &[r], &analyst).unwrap()[0].done);
-    let (listed, more) = marks(&case, None, 50, 0).unwrap();
+    let Listing {
+        items: listed,
+        truncated: more,
+    } = marks(&case, None, 50, 0).unwrap();
     assert!(!more);
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].marked_by, "analyst:tester");
@@ -44,9 +47,9 @@ fn an_analyst_marks_and_clears() {
     assert_eq!(listed[0].relation, "evtxtriage_events");
     assert_eq!(listed[0].host.as_deref(), Some("WS01"));
     assert_eq!(listed[0].mark, MarkState::Suspicious);
-    assert!(!listed[0].superseded);
+    assert!(listed[0].active);
     assert!(clear_suspicious(&mut case, &[r], &analyst).unwrap()[0].done);
-    assert!(marks(&case, None, 50, 0).unwrap().0.is_empty());
+    assert!(marks(&case, None, 50, 0).unwrap().items.is_empty());
     assert_eq!(
         n(
             &case,
@@ -83,13 +86,13 @@ fn ownership_between_agent_and_analyst() {
     // A different agent is a different owner.
     assert!(!clear_suspicious(&mut case, &[r], &other).unwrap()[0].done);
     assert_eq!(
-        marks(&case, None, 50, 0).unwrap().0[0].marked_by,
+        marks(&case, None, 50, 0).unwrap().items[0].marked_by,
         "agent:claude"
     );
 
     assert!(mark_suspicious(&mut case, &[r], &analyst).unwrap()[0].done);
     assert_eq!(
-        marks(&case, None, 50, 0).unwrap().0[0].marked_by,
+        marks(&case, None, 50, 0).unwrap().items[0].marked_by,
         "analyst:tester"
     );
     assert_eq!(
@@ -126,11 +129,11 @@ fn an_agent_clears_its_own_mark_and_lists_by_owner() {
     );
     mark_suspicious(&mut case, &[r], &agent).unwrap();
     mark_suspicious(&mut case, &[other], &analyst).unwrap();
-    let mine = marks(&case, Some(&agent), 50, 0).unwrap().0;
+    let mine = marks(&case, Some(&agent), 50, 0).unwrap().items;
     assert_eq!(mine.iter().map(|m| m.row_id).collect::<Vec<_>>(), [r]);
     assert!(clear_suspicious(&mut case, &[r], &agent).unwrap()[0].done);
-    assert!(marks(&case, Some(&agent), 50, 0).unwrap().0.is_empty());
-    assert_eq!(marks(&case, None, 50, 0).unwrap().0.len(), 1);
+    assert!(marks(&case, Some(&agent), 50, 0).unwrap().items.is_empty());
+    assert_eq!(marks(&case, None, 50, 0).unwrap().items.len(), 1);
 }
 
 #[test]
@@ -153,7 +156,7 @@ fn one_mark_per_row_under_every_path() {
     assert!(mark_suspicious(&mut case, &[r], &colleague).unwrap()[0].done);
     assert_eq!(mark_rows(&case, r), 1);
     assert_eq!(
-        marks(&case, None, 50, 0).unwrap().0[0].marked_by,
+        marks(&case, None, 50, 0).unwrap().items[0].marked_by,
         "analyst:tester"
     );
     assert_eq!(
@@ -240,11 +243,13 @@ fn tag_rules() {
             .code(),
         "refused"
     );
+    // The agent's namespace, refused to an analyst as the analyst's is to an
+    // agent: the same tag is fine from the other actor.
     assert_eq!(
         add_tag(&mut case, &[r], "ai:exfil", &analyst)
             .unwrap_err()
             .code(),
-        "invalid"
+        "refused"
     );
     let long = "a".repeat(65);
     for bad in ["", "Has Space", "é", long.as_str(), "a;drop"] {
@@ -278,13 +283,24 @@ fn tag_rules() {
         ),
         2
     );
-    let listed = tags(&case).unwrap();
+    let all = tags(&case, 50, 0).unwrap();
+    assert!(!all.truncated);
+    let listed = all.items;
     assert_eq!(
         listed.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
         ["a".repeat(64).as_str(), "ai:rdp", "initial-access"]
     );
     let rdp = listed.iter().find(|t| t.name == "ai:rdp").unwrap();
     assert_eq!((rdp.rows, rdp.created_by.as_str()), (1, "agent:claude"));
+    // Paged like every other list.
+    let first = tags(&case, 2, 0).unwrap();
+    assert_eq!((first.items.len(), first.truncated), (2, true));
+    let rest = tags(&case, 2, 2).unwrap();
+    assert_eq!(
+        (rest.items[0].name.as_str(), rest.truncated),
+        ("initial-access", false)
+    );
+    assert_eq!(tags(&case, 1001, 0).unwrap_err().code(), "invalid");
 
     assert!(!remove_tag(&mut case, &[r], "initial-access", &agent).unwrap()[0].done);
     assert!(remove_tag(&mut case, &[r], "initial-access", &analyst).unwrap()[0].done);
@@ -324,16 +340,24 @@ fn notes_are_added_listed_and_tombstoned() {
         (mine.row_id, mine.written_by.as_str()),
         (r, "analyst:tester")
     );
-    let listed = notes(&case, r).unwrap();
+    let listed = notes(&case, r, 50, 0).unwrap();
+    assert!(!listed.truncated);
+    let listed = listed.items;
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].text, "first logon from 203.0.113.7");
+    // Paged like every other list.
+    let first = notes(&case, r, 1, 0).unwrap();
+    assert_eq!((first.items[0].id, first.truncated), (mine.id, true));
+    let rest = notes(&case, r, 1, 1).unwrap();
+    assert_eq!((rest.items[0].id, rest.truncated), (theirs.id, false));
+    assert_eq!(notes(&case, r, 1001, 0).unwrap_err().code(), "invalid");
 
     assert_eq!(
         delete_note(&mut case, mine.id, &agent).unwrap_err().code(),
         "refused"
     );
     delete_note(&mut case, mine.id, &analyst).unwrap();
-    let listed = notes(&case, r).unwrap();
+    let listed = notes(&case, r, 50, 0).unwrap().items;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, theirs.id);
     // A tombstone: the note is kept, flagged.
@@ -349,7 +373,7 @@ fn notes_are_added_listed_and_tombstoned() {
     );
     // An agent deletes its own.
     delete_note(&mut case, theirs.id, &agent).unwrap();
-    assert!(notes(&case, r).unwrap().is_empty());
+    assert!(notes(&case, r, 50, 0).unwrap().items.is_empty());
     assert_eq!(
         delete_note(&mut case, theirs.id, &analyst)
             .unwrap_err()
@@ -462,7 +486,10 @@ fn history_is_append_only_and_newest_first() {
     add_note(&mut case, r, "seen", &agent()).unwrap();
     assert_eq!(n(&case, "select count(*) from ox.history"), base + 3);
 
-    let (rows, more) = history(&case, None, 3, 0).unwrap();
+    let Listing {
+        items: rows,
+        truncated: more,
+    } = history(&case, None, 3, 0).unwrap();
     assert!(more, "the source_load row is older still");
     assert_eq!(
         rows.iter().map(|h| h.action.as_str()).collect::<Vec<_>>(),
@@ -477,9 +504,14 @@ fn history_is_append_only_and_newest_first() {
         rows[2].after.as_ref().unwrap()["marked_by"],
         "analyst:tester"
     );
-    let (marks_only, _) = history(&case, Some("row_mark"), 50, 0).unwrap();
+    let Listing {
+        items: marks_only, ..
+    } = history(&case, Some("row_mark"), 50, 0).unwrap();
     assert_eq!(marks_only.len(), 1);
-    let (all, more) = history(&case, None, 50, 0).unwrap();
+    let Listing {
+        items: all,
+        truncated: more,
+    } = history(&case, None, 50, 0).unwrap();
     assert!(!more);
     assert_eq!(all.last().unwrap().action, "source_load");
     assert_eq!(
@@ -519,10 +551,10 @@ fn marks_on_superseded_rows_are_flagged() {
     let lacking = without_svch0st(&rerun, &d.path().join("c"));
     load_run(&mut case, &lacking, &analyst()).unwrap();
 
-    let listed = marks(&case, None, 50, 0).unwrap().0;
+    let listed = marks(&case, None, 50, 0).unwrap().items;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].row_id, old);
-    assert!(listed[0].superseded);
+    assert!(!listed[0].active);
     let detail = row_detail(&case, old).unwrap();
     assert!(!detail.active);
     assert_eq!(detail.host.as_deref(), Some("WS01"));
@@ -611,9 +643,9 @@ fn an_orphaned_mark_is_listed_as_superseded() {
     add_tag(&mut case, &[r], "lateral", &analyst()).unwrap();
     add_note(&mut case, r, "kept after removal", &agent()).unwrap();
     remove_source(&mut case, 1, true, &analyst()).unwrap();
-    let listed = marks(&case, None, 50, 0).unwrap().0;
+    let listed = marks(&case, None, 50, 0).unwrap().items;
     assert_eq!(listed.len(), 1);
-    assert!(listed[0].superseded);
+    assert!(!listed[0].active);
     assert_eq!(listed[0].relation, "evtxtriage_events");
     assert_eq!(listed[0].host, None);
 
@@ -660,7 +692,7 @@ fn hostile_tags_notes_and_row_ids_return_rather_than_panic() {
         .all(|o| !o.done));
     for id in extremes {
         assert_eq!(row_detail(&case, id).unwrap_err().code(), "not_found");
-        assert!(notes(&case, id).unwrap().is_empty());
+        assert!(notes(&case, id, 50, 0).unwrap().items.is_empty());
         let _ = delete_note(&mut case, id, &analyst());
     }
     assert_eq!(
@@ -686,9 +718,15 @@ fn marks_page() {
         })
         .collect();
     mark_suspicious(&mut case, &rows, &analyst()).unwrap();
-    let (first, more) = marks(&case, None, 2, 0).unwrap();
+    let Listing {
+        items: first,
+        truncated: more,
+    } = marks(&case, None, 2, 0).unwrap();
     assert_eq!((first.len(), more), (2, true));
-    let (rest, more) = marks(&case, None, 2, 2).unwrap();
+    let Listing {
+        items: rest,
+        truncated: more,
+    } = marks(&case, None, 2, 2).unwrap();
     assert_eq!((rest.len(), more), (1, false));
     assert_eq!(marks(&case, None, 1001, 0).unwrap_err().code(), "invalid");
 }

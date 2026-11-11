@@ -12,6 +12,7 @@ pub mod case;
 pub mod catalog;
 pub mod error;
 pub mod filter;
+pub mod listing;
 pub mod load;
 pub mod query;
 pub mod search;
@@ -30,6 +31,7 @@ pub use catalog::{
 };
 pub use error::{EngineError, Result};
 pub use filter::{compile_filter, parse_filter, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN};
+pub use listing::Listing;
 pub use load::{
     load_file, load_run, relation_name_for_file, remove_source, sources, FileOptions, LoadReport,
     LoadedRelation, RemoveReport, SourceInfo, Superseded,

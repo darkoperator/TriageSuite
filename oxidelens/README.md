@@ -103,13 +103,13 @@ command and limit and needs no case.
 | `query <sql \| @file> [--limit N] [--offset N]` | One read-only SELECT over the case |
 | `mark set --rows 1,2,3` | Mark rows suspicious |
 | `mark clear --rows 1,2,3` | Clear marks |
-| `mark list [--by <actor>] [--limit N] [--offset N]` | List marked rows |
+| `mark list [--by <actor>] [--limit N] [--offset N]` | List marked rows; `active` says whether each row is still in its relation's view |
 | `tag add --rows 1,2,3 --tag t` | Tag rows |
 | `tag remove --rows 1,2,3 --tag t` | Remove a tag from rows |
-| `tag list` | Every tag and the rows carrying it |
+| `tag list [--limit N] [--offset N]` | The tags and the rows carrying each |
 | `note add --row <id> --text <text \| @file>` | Write a note on a row |
 | `note delete <note id>` | Delete a note (the history keeps a tombstone) |
-| `note list --row <id>` | A row's notes |
+| `note list --row <id> [--limit N] [--offset N]` | A row's notes |
 | `column declare <relation> <column> --type TIMESTAMP\|BIGINT\|UBIGINT\|BOOLEAN [--semantics utc\|unknown]` | Type a column (analyst only) |
 | `column primary-time <relation> (<column> \| --none)` | Set or clear the time a relation's timeline runs on (analyst only) |
 | `history [--kind K] [--limit N] [--offset N]` | Every change, newest first; `K` is `source`, `relation`, `row_mark`, `row_tag` or `note` |
@@ -210,9 +210,9 @@ process exit codes:
 | Exit | Code | Meaning |
 |---|---|---|
 | 0 | | success |
-| 2 | `invalid` | bad arguments or input, including usage errors |
+| 2 | `invalid` | the input is wrong: malformed, out of range, naming something of the wrong kind, or a type that does not fit; usage errors too |
 | 3 | `not_found` | a relation, row, note or source does not exist |
-| 4 | `refused` | the engine's rules forbid it for this actor |
+| 4 | `refused` | a rule forbids it for this actor or in this state of the case (an agent doing what only an analyst may, a source already loaded, a colliding relation name, a removal that needs `--confirm-orphans`) |
 | 5 | `case_locked` | another process holds the case |
 | 6 | `needs_upgrade` | the case file is a newer or older format |
 | 10 | `engine`, `io` | an internal failure |

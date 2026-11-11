@@ -14,7 +14,8 @@ use super::{check_batch, find_row, no_row, unwritable, RowOutcome, Standing};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
-use crate::query::{MarkState, MAX_LIMIT};
+use crate::listing::{check_limit, fetch_limit, Listing};
+use crate::query::MarkState;
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
@@ -29,9 +30,9 @@ pub struct MarkedRow {
     pub mark: MarkState,
     pub marked_by: String,
     pub marked_at: String,
-    /// The row is out of its relation's view: a later run superseded it,
-    /// or its source was removed.
-    pub superseded: bool,
+    /// The row is in its relation's view, as `RowDetail::active` says: false
+    /// once a later run superseded it or its source was removed.
+    pub active: bool,
 }
 
 /// The mark on a row, as stored.
@@ -186,20 +187,15 @@ fn change<'a>(
 }
 
 /// Up to `limit` marked rows from `offset`, every mark or only `by`'s, in
-/// the order they were marked; the flag says more follow. A row out of the
-/// view is listed, flagged `superseded`. `Invalid` when `limit` is over
-/// `MAX_LIMIT`.
+/// the order they were marked. A row out of the view is listed, with
+/// `active` false. `Invalid` when `limit` is over `MAX_LIMIT`.
 pub fn marks(
     case: &Case,
     by: Option<&Actor>,
     limit: u32,
     offset: u64,
-) -> Result<(Vec<MarkedRow>, bool)> {
-    if limit > MAX_LIMIT {
-        return Err(EngineError::Invalid(format!(
-            "a page is at most {MAX_LIMIT} rows, not {limit}"
-        )));
-    }
+) -> Result<Listing<MarkedRow>> {
+    check_limit(limit)?;
     let conn = case.conn();
     let mut params = Vec::new();
     let filter = match by {
@@ -209,8 +205,7 @@ pub fn marks(
         }
         None => "",
     };
-    // Fetching one more than asked says whether the page is the last one.
-    params.push(SqlValue::BigInt(i64::from(limit) + 1));
+    params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
     let stored: Vec<(i64, String, String, String)> = conn
         .prepare(&format!(
@@ -221,9 +216,9 @@ pub fn marks(
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
         })?
         .collect::<std::result::Result<_, _>>()?;
-    let more = stored.len() > limit as usize;
-    let mut out = Vec::with_capacity(stored.len().min(limit as usize));
-    for (row_id, mark, marked_by, marked_at) in stored.into_iter().take(limit as usize) {
+    let stored = Listing::from_fetched(stored, limit);
+    let mut out = Vec::with_capacity(stored.items.len());
+    for (row_id, mark, marked_by, marked_at) in stored.items {
         // Removing a source keeps its rows' ranges, so every mark locates.
         let row = find_row(conn, row_id)?.ok_or_else(|| {
             EngineError::Invalid(format!(
@@ -240,8 +235,11 @@ pub fn marks(
             mark,
             marked_by,
             marked_at,
-            superseded: row.standing != Standing::Active,
+            active: row.standing == Standing::Active,
         });
     }
-    Ok((out, more))
+    Ok(Listing {
+        items: out,
+        truncated: stored.truncated,
+    })
 }

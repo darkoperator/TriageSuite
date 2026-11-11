@@ -12,9 +12,14 @@ pub type Result<T> = std::result::Result<T, EngineError>;
 pub enum EngineError {
     #[error("not found: {0}")]
     NotFound(String),
+    /// The input is wrong: malformed, out of range, naming something of the
+    /// wrong kind, or a type that does not fit. Changing it can fix it.
     #[error("invalid: {0}")]
     Invalid(String),
-    /// A rule said no; the request itself was well formed.
+    /// A rule said no to this actor or to this state of the case: an agent
+    /// doing what only an analyst may, a source already in the case, a
+    /// colliding relation, a removal that needs confirmation. The input's
+    /// shape is not the problem.
     #[error("refused: {0}")]
     Refused(String),
     #[error("the case file {} is open in another process", .0.display())]

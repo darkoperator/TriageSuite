@@ -8,7 +8,8 @@
 //! labels (never a relation or host name, which come from evidence), so they
 //! stay outside the wrapper. Everything a list returns about rows (relation
 //! and host names, note text, history targets and their before and after
-//! objects) goes inside it.
+//! objects) goes inside it; a mark list repeats its row ids and `active`
+//! flags outside, as the engine's own values.
 
 use super::read::text_arg;
 use super::{Ctx, Reply};
@@ -62,10 +63,15 @@ pub fn mark_clear(ctx: &Ctx, rows: &str) -> Result<Reply> {
 pub fn mark_list(ctx: &Ctx, by: Option<&str>, page: &PageArgs) -> Result<Reply> {
     let by = by.map(Actor::parse).transpose()?;
     let case = ctx.open_case()?;
-    let (marks, truncated) = oxl_engine::marks(&case, by.as_ref(), page.limit, page.offset)?;
+    let marks = oxl_engine::marks(&case, by.as_ref(), page.limit, page.offset)?;
     Ok(Reply {
-        data: json!({"marks": marks.len(), "untrusted": wrap(&json!({"marks": marks}))}),
-        truncated,
+        data: json!({
+            "marks": marks.items.len(),
+            "row_ids": marks.items.iter().map(|m| m.row_id).collect::<Vec<_>>(),
+            "active": marks.items.iter().map(|m| m.active).collect::<Vec<_>>(),
+            "untrusted": wrap(&json!({"marks": marks.items})),
+        }),
+        truncated: marks.truncated,
     })
 }
 
@@ -85,9 +91,13 @@ pub fn tag_remove(ctx: &Ctx, rows: &str, tag: &str) -> Result<Reply> {
     )?))
 }
 
-pub fn tag_list(ctx: &Ctx) -> Result<Reply> {
+pub fn tag_list(ctx: &Ctx, page: &PageArgs) -> Result<Reply> {
     let case = ctx.open_case()?;
-    Ok(Reply::new(json!({"tags": oxl_engine::tags(&case)?})))
+    let tags = oxl_engine::tags(&case, page.limit, page.offset)?;
+    Ok(Reply {
+        data: json!({"tags": tags.items}),
+        truncated: tags.truncated,
+    })
 }
 
 pub fn note_add(ctx: &Ctx, row: i64, text: &str) -> Result<Reply> {
@@ -103,13 +113,16 @@ pub fn note_delete(ctx: &Ctx, id: i64) -> Result<Reply> {
     Ok(Reply::new(json!({"id": id})))
 }
 
-pub fn note_list(ctx: &Ctx, row: i64) -> Result<Reply> {
+pub fn note_list(ctx: &Ctx, row: i64, page: &PageArgs) -> Result<Reply> {
     let case = ctx.open_case()?;
-    let notes = oxl_engine::notes(&case, row)?;
-    Ok(Reply::new(json!({
-        "notes": notes.len(),
-        "untrusted": wrap(&json!({"notes": notes})),
-    })))
+    let notes = oxl_engine::notes(&case, row, page.limit, page.offset)?;
+    Ok(Reply {
+        data: json!({
+            "notes": notes.items.len(),
+            "untrusted": wrap(&json!({"notes": notes.items})),
+        }),
+        truncated: notes.truncated,
+    })
 }
 
 pub fn declare(
@@ -144,9 +157,12 @@ pub fn primary_time(ctx: &Ctx, relation: &str, column: Option<&str>) -> Result<R
 
 pub fn history(ctx: &Ctx, kind: Option<&str>, page: &PageArgs) -> Result<Reply> {
     let case = ctx.open_case()?;
-    let (entries, truncated) = oxl_engine::history(&case, kind, page.limit, page.offset)?;
+    let entries = oxl_engine::history(&case, kind, page.limit, page.offset)?;
     Ok(Reply {
-        data: json!({"entries": entries.len(), "untrusted": wrap(&json!({"entries": entries}))}),
-        truncated,
+        data: json!({
+            "entries": entries.items.len(),
+            "untrusted": wrap(&json!({"entries": entries.items})),
+        }),
+        truncated: entries.truncated,
     })
 }

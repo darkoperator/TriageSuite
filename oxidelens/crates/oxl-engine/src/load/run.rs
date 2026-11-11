@@ -30,10 +30,10 @@ const STAGE: &str = "ox_stage";
 
 /// Load the run whose output root is `out_root` into `case`.
 ///
-/// Refused when the inventory's status is not `ok`, the run is already in
-/// the case (a removed run may be loaded again), or a dataset's view or its
-/// `raw_` view would take a name another relation uses (see
-/// `check_relation_names`); `Invalid` when the inventory
+/// Refused when the run is already in the case (a removed run may be loaded
+/// again) or a dataset's view or its `raw_` view would take a name another
+/// relation uses (see `check_relation_names`); `Invalid` when the
+/// inventory's status is not `ok`, when the inventory
 /// declares a SQL type the suite never writes, types a column differently
 /// from the case's catalog, or names a relation's metadata columns
 /// differently from the live sources already feeding it. For each relation and host the run has rows for,
@@ -138,7 +138,8 @@ fn check_inventory(inventory: &Inventory) -> Result<()> {
         if !inventory.warnings.is_empty() {
             message.push_str(&format!(" ({})", inventory.warnings.join("; ")));
         }
-        return Err(EngineError::Refused(message));
+        // A property of the run named, not of the actor or the case.
+        return Err(EngineError::Invalid(message));
     }
     // A type spelling is pasted into a TRY_CAST, so a tampered inventory is
     // untrusted SQL text: only the spellings the suite writes get through.

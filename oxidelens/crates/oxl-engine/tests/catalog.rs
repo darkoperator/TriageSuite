@@ -316,6 +316,40 @@ fn set_primary_time_requires_a_catalogued_timestamp_and_is_recorded() {
 }
 
 #[test]
+fn retyping_the_primary_time_as_a_non_timestamp_is_invalid() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = oxl_fixtures::new_case(d.path());
+    let fw = oxl_fixtures::loose_fw_csv(d.path());
+    load_file(&mut case, &fw, FileOptions::default(), &analyst()).unwrap();
+    let err = declare_type(
+        &mut case,
+        "fw_csv",
+        "time",
+        SqlType::BigInt,
+        None,
+        &analyst(),
+    )
+    .unwrap_err();
+    assert_eq!(err.code(), "invalid", "{err}");
+    assert_eq!(
+        columns(&case, "fw_csv")
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "time")
+            .unwrap()
+            .sql_type,
+        Some(SqlType::Timestamp)
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'declare_type'"
+        ),
+        0
+    );
+}
+
+#[test]
 fn an_agent_cannot_set_a_primary_time() {
     let (_d, mut case) = loaded();
     for column in [None, Some("TimeCreated")] {

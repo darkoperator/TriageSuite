@@ -239,7 +239,8 @@ fn declare_in(
         )));
     }
     if info.primary_time.as_deref() == Some(column) && sql_type != SqlType::Timestamp {
-        return Err(EngineError::Refused(format!(
+        // The type does not fit the column's role: the input is wrong.
+        return Err(EngineError::Invalid(format!(
             "{column} is the primary time of {relation}; choose another primary time first"
         )));
     }

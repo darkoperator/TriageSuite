@@ -12,13 +12,14 @@
 
 use super::find::{cells_sql, targets, FindRequest};
 use super::group::{as_count, typed_primary_time};
-use super::page::{mark_sql, read_mark, MAX_LIMIT};
+use super::page::{mark_sql, read_mark};
 use super::{scope, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS};
 use crate::annot::locate;
 use crate::case::Case;
 use crate::catalog::appmap::summary_for;
 use crate::catalog::{self, ColumnInfo, ColumnRole, SqlType};
 use crate::error::{EngineError, Result};
+use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter};
@@ -139,19 +140,15 @@ const FALLBACK_VALUES: usize = 4;
 
 /// Up to `limit` rows of `source` from `offset`, across every relation it
 /// covers: time ascending, untimed last, then relation name, then row id.
-/// The flag says more rows follow. `Invalid` when `limit` is over
-/// `MAX_LIMIT`, or for what `find` or `around` would refuse.
+/// `Invalid` when `limit` is over `MAX_LIMIT`, or for what `find` or
+/// `around` would refuse.
 pub fn merged_rows(
     case: &Case,
     source: &MergedSource,
     limit: u32,
     offset: u64,
-) -> Result<(Vec<MergedRow>, bool)> {
-    if limit > MAX_LIMIT {
-        return Err(EngineError::Invalid(format!(
-            "a page is at most {MAX_LIMIT} rows, not {limit}"
-        )));
-    }
+) -> Result<Listing<MergedRow>> {
+    check_limit(limit)?;
     let mut parts = Vec::new();
     let mut params = Vec::new();
     match source {
@@ -180,28 +177,25 @@ pub fn merged_rows(
         }
     }
     if parts.is_empty() {
-        return Ok((Vec::new(), false));
+        return Ok(Listing {
+            items: Vec::new(),
+            truncated: false,
+        });
     }
 
-    // Fetching one more than asked says whether the page is the last one.
     let sql = format!(
         "SELECT _ox_row, _ox_rel, strftime(_ox_t, '{ISO_FORMAT}'), _ox_h, _ox_s, _ox_m \
          FROM ({}) AS ox_merged \
          ORDER BY _ox_t ASC NULLS LAST, _ox_rel ASC, _ox_row ASC LIMIT ? OFFSET ?",
         parts.join(" UNION ALL ")
     );
-    params.push(SqlValue::BigInt(i64::from(limit) + 1));
+    params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
 
     let mut stmt = case.conn().prepare(&sql)?;
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
-    let mut truncated = false;
     while let Some(row) = rows.next()? {
-        if out.len() == limit as usize {
-            truncated = true;
-            break;
-        }
         out.push(MergedRow {
             row_id: row.get(0)?,
             relation: row.get(1)?,
@@ -211,7 +205,7 @@ pub fn merged_rows(
             mark: read_mark(row.get(5)?)?,
         });
     }
-    Ok((out, truncated))
+    Ok(Listing::from_fetched(out, limit))
 }
 
 /// One relation's part of the merged union: its rows that satisfy

@@ -269,12 +269,13 @@ fn a_file_named_like_a_datasets_raw_view_is_refused() {
 }
 
 #[test]
-fn a_status_other_than_ok_is_refused_with_the_reason() {
+fn a_status_other_than_ok_is_invalid_with_the_reason() {
     let d = tempfile::tempdir().unwrap();
     let root = edited_copy(d.path(), |json| json["status"] = "no-csv-output".into());
     let mut case = oxl_fixtures::new_case(d.path());
     let (c, message) = code(load_run(&mut case, &root, &analyst()));
-    assert_eq!(c, "refused", "{message}");
+    // The run named is what is wrong, not the actor or the case.
+    assert_eq!(c, "invalid", "{message}");
     assert!(message.contains("no-csv-output"), "{message}");
     assert!(sources(&case).unwrap().is_empty());
 }

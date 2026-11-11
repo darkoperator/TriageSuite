@@ -106,6 +106,14 @@ fn mark_tag_and_note_round_trip_through_the_cli() {
     round_trip(p, r);
     let (_, list) = ox(&["--case", p, "mark", "list"]);
     assert_eq!(list["data"]["marks"], 1);
+    // The engine's own values, outside the wrapper.
+    assert_eq!(
+        (
+            list["data"]["row_ids"].clone(),
+            list["data"]["active"].clone()
+        ),
+        (json!([r]), json!([true]))
+    );
     let marks = &inner(&list["data"]["untrusted"])["marks"][0];
     assert_eq!(
         (marks["row_id"].as_i64(), marks["relation"].as_str()),
@@ -114,9 +122,11 @@ fn mark_tag_and_note_round_trip_through_the_cli() {
     let (_, tags) = ox(&["--case", p, "tag", "list"]);
     assert_eq!(tags["data"]["tags"][0]["name"], "ai:exfil");
     assert_eq!(tags["data"]["tags"][0]["rows"], 1);
+    assert_eq!(tags["truncated"], false);
 
     let (_, note) = ox(&["--case", p, "note", "list", "--row", &r.to_string()]);
     assert_eq!(note["data"]["notes"], 1);
+    assert_eq!(note["truncated"], false);
     assert_eq!(
         inner(&note["data"]["untrusted"])["notes"][0]["text"],
         "check 1149"
@@ -359,6 +369,59 @@ fn history_lists_changes_newest_first() {
     assert_eq!(
         (page["data"]["entries"].clone(), page["truncated"].clone()),
         (json!(1), json!(true))
+    );
+}
+
+#[test]
+fn tag_and_note_lists_page() {
+    let (_d, p) = loaded();
+    let p = p.as_str();
+    let r = ws01_4624(p).to_string();
+    for tag in ["alpha", "beta"] {
+        assert_eq!(
+            ox(&["--case", p, "tag", "add", "--rows", &r, "--tag", tag]).0,
+            0
+        );
+    }
+    for text in ["one", "two"] {
+        assert_eq!(
+            ox(&["--case", p, "note", "add", "--row", &r, "--text", text]).0,
+            0
+        );
+    }
+    let (c, tags) = ox(&["--case", p, "tag", "list", "--limit", "1"]);
+    assert_eq!(c, 0, "{tags}");
+    assert_eq!(
+        (
+            tags["data"]["tags"][0]["name"].clone(),
+            tags["truncated"].clone()
+        ),
+        (json!("alpha"), json!(true))
+    );
+    let (_, tags) = ox(&["--case", p, "tag", "list", "--limit", "1", "--offset", "1"]);
+    assert_eq!(
+        (
+            tags["data"]["tags"][0]["name"].clone(),
+            tags["truncated"].clone()
+        ),
+        (json!("beta"), json!(false))
+    );
+    let (_, notes) = ox(&["--case", p, "note", "list", "--row", &r, "--limit", "1"]);
+    assert_eq!(
+        (notes["data"]["notes"].clone(), notes["truncated"].clone()),
+        (json!(1), json!(true))
+    );
+    assert_eq!(
+        inner(&notes["data"]["untrusted"])["notes"][0]["text"],
+        "one"
+    );
+    let (_, notes) = ox(&[
+        "--case", p, "note", "list", "--row", &r, "--limit", "1", "--offset", "1",
+    ]);
+    assert_eq!(notes["truncated"], false);
+    assert_eq!(
+        inner(&notes["data"]["untrusted"])["notes"][0]["text"],
+        "two"
     );
 }
 

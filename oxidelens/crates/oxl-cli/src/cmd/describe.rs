@@ -83,7 +83,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "mark list",
-        "List marked rows: mark list [--by <analyst:name | agent:name>] [--limit N] [--offset N]",
+        "List marked rows, with whether each is still active (in its relation's view): mark list [--by <analyst:name | agent:name>] [--limit N] [--offset N]",
     ),
     (
         "tag add",
@@ -93,7 +93,10 @@ const COMMANDS: &[(&str, &str)] = &[
         "tag remove",
         "Remove a tag: tag remove --rows 1,2,3 --tag <tag>. An agent removes only tags it applied",
     ),
-    ("tag list", "List every tag with the rows carrying it"),
+    (
+        "tag list",
+        "List the tags with the rows carrying each: tag list [--limit N] [--offset N]",
+    ),
     (
         "note add",
         "Write a note on a row: note add --row <id> --text <text | @file>",
@@ -102,7 +105,10 @@ const COMMANDS: &[(&str, &str)] = &[
         "note delete",
         "Delete a note, leaving a tombstone in the history: note delete <note id>",
     ),
-    ("note list", "List the notes on a row: note list --row <id>"),
+    (
+        "note list",
+        "List the notes on a row: note list --row <id> [--limit N] [--offset N]",
+    ),
     (
         "column declare",
         "Type a column (analyst only; a column the suite typed keeps its type): column declare <relation> <column> --type TIMESTAMP|BIGINT|UBIGINT|BOOLEAN [--semantics utc|unknown]. --semantics is required for TIMESTAMP and refused for any other type: a zone is never guessed",

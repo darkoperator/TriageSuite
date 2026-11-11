@@ -7,8 +7,8 @@ use super::{Ctx, Reply};
 use crate::args::{AroundArgs, FindArgs, FindModeArg, PageArgs, QueryArgs, StackOrderArg};
 use crate::envelope::wrap;
 use oxl_engine::{
-    EngineError, FindMode, FindRequest, GridQuery, MergedRow, MergedSource, Result, SortKey,
-    StackOrder, MAX_LIMIT,
+    EngineError, FindMode, FindRequest, GridQuery, Listing, MergedRow, MergedSource, Result,
+    SortKey, StackOrder,
 };
 use serde_json::{json, Value};
 
@@ -115,30 +115,6 @@ fn parse_window(text: &str) -> Result<u64> {
     Ok(seconds)
 }
 
-/// How many rows to ask a list query for so that one extra says whether the
-/// list was cut. At the engine's maximum there is no room for the extra, so
-/// the caller falls back to `len == limit`.
-fn ask_for(limit: u32) -> u32 {
-    if limit < MAX_LIMIT {
-        limit + 1
-    } else {
-        limit
-    }
-}
-
-/// Trim a list fetched with `ask_for` to `limit` and say whether it was cut.
-/// At the maximum limit a full list is reported cut, since it may be.
-fn trim<T>(list: &mut Vec<T>, limit: u32) -> bool {
-    let limit = limit as usize;
-    let cut = if limit < MAX_LIMIT as usize {
-        list.len() > limit
-    } else {
-        list.len() == limit
-    };
-    list.truncate(limit);
-    cut
-}
-
 pub fn rows(ctx: &Ctx, relation: &str, query: &QueryArgs, page: &PageArgs) -> Result<Reply> {
     let q = grid_query(relation, query)?;
     let case = ctx.open_case()?;
@@ -199,9 +175,9 @@ pub fn groups(
         None => Vec::new(),
     };
     let case = ctx.open_case()?;
-    let mut list = oxl_engine::groups(&case, &q, by, &parent, ask_for(page.limit), page.offset)?;
-    let truncated = trim(&mut list, page.limit);
+    let list = oxl_engine::groups(&case, &q, by, &parent, page.limit, page.offset)?;
     let groups: Vec<_> = list
+        .items
         .iter()
         .map(|g| {
             json!({"key": g.key, "count": g.count, "first": g.first, "last": g.last,
@@ -213,7 +189,7 @@ pub fn groups(
             "groups": groups.len(),
             "untrusted": wrap(&json!({"groups": groups})),
         }),
-        truncated,
+        truncated: list.truncated,
     })
 }
 
@@ -277,7 +253,8 @@ pub fn stack(
 }
 
 /// A merged-rows reply: ids and marks outside, the readable parts inside.
-fn merged_reply(rows: &[MergedRow], truncated: bool) -> Reply {
+fn merged_reply(listing: &Listing<MergedRow>) -> Reply {
+    let rows = &listing.items;
     let list: Vec<_> = rows
         .iter()
         .map(|r| {
@@ -290,7 +267,7 @@ fn merged_reply(rows: &[MergedRow], truncated: bool) -> Reply {
             "marks": rows.iter().map(|r| r.mark).collect::<Vec<_>>(),
             "untrusted": wrap(&json!({"rows": list})),
         }),
-        truncated,
+        truncated: listing.truncated,
     }
 }
 
@@ -307,13 +284,13 @@ pub fn find(ctx: &Ctx, args: &FindArgs) -> Result<Reply> {
     };
     let case = ctx.open_case()?;
     if args.rows {
-        let (rows, truncated) = oxl_engine::merged_rows(
+        let rows = oxl_engine::merged_rows(
             &case,
             &MergedSource::Find(req),
             args.page.limit,
             args.page.offset,
         )?;
-        return Ok(merged_reply(&rows, truncated));
+        return Ok(merged_reply(&rows));
     }
     let found = oxl_engine::find(&case, &req, &mut |_, _| true)?;
     let hits: Vec<_> = found
@@ -355,9 +332,8 @@ pub fn around(ctx: &Ctx, args: &AroundArgs) -> Result<Reply> {
             at,
             window_seconds,
         };
-        let (rows, truncated) =
-            oxl_engine::merged_rows(&case, &source, args.page.limit, args.page.offset)?;
-        return Ok(merged_reply(&rows, truncated));
+        let rows = oxl_engine::merged_rows(&case, &source, args.page.limit, args.page.offset)?;
+        return Ok(merged_reply(&rows));
     }
     let counts: Vec<Value> = oxl_engine::around(&case, &host, &at, window_seconds)?
         .iter()
@@ -455,14 +431,5 @@ mod tests {
         assert_eq!((k.column.as_str(), k.descending), ("a:b", false));
         assert!(parse_sort(":desc").is_err());
         assert!(parse_sort("").is_err());
-    }
-
-    #[test]
-    fn truncation_of_a_list_without_a_flag() {
-        let mut v = vec![1, 2, 3];
-        assert!(trim(&mut v, 2));
-        assert_eq!(v, [1, 2]);
-        let mut v = vec![1, 2];
-        assert!(!trim(&mut v, 2));
     }
 }

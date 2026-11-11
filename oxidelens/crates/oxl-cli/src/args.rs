@@ -304,8 +304,11 @@ pub enum TagCmd {
         #[arg(long)]
         tag: String,
     },
-    /// List every tag with the rows carrying it.
-    List,
+    /// List the tags with the rows carrying each.
+    List {
+        #[command(flatten)]
+        page: PageArgs,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -324,6 +327,8 @@ pub enum NoteCmd {
     List {
         #[arg(long)]
         row: i64,
+        #[command(flatten)]
+        page: PageArgs,
     },
 }
 
@@ -395,7 +400,7 @@ impl Command {
             Command::Mark(MarkCmd::List { .. }) => "mark list",
             Command::Tag(TagCmd::Add { .. }) => "tag add",
             Command::Tag(TagCmd::Remove { .. }) => "tag remove",
-            Command::Tag(TagCmd::List) => "tag list",
+            Command::Tag(TagCmd::List { .. }) => "tag list",
             Command::Note(NoteCmd::Add { .. }) => "note add",
             Command::Note(NoteCmd::Delete { .. }) => "note delete",
             Command::Note(NoteCmd::List { .. }) => "note list",

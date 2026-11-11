@@ -6,6 +6,7 @@ use crate::case::Case;
 use crate::catalog::{self, ColumnInfo};
 use crate::error::{EngineError, Result};
 use crate::filter::{FilterNode, Leaf, Op};
+use crate::listing::{check_limit, fetch_limit, Listing};
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
 use serde_json::Value;
@@ -26,9 +27,10 @@ pub struct GroupRow {
     pub suspicious: u64,
 }
 
-/// Groups of `by[parent.len()]` among rows whose earlier `by` columns equal
-/// `parent`. Ordered by count descending, then key. `Invalid` for an empty
-/// `by`, more than four columns, or a `parent` as long as `by`.
+/// Up to `limit` groups of `by[parent.len()]` from `offset`, among rows
+/// whose earlier `by` columns equal `parent`. Ordered by count descending,
+/// then key. `Invalid` for an empty `by`, more than four columns, a
+/// `parent` as long as `by`, or a `limit` over `MAX_LIMIT`.
 pub fn groups(
     case: &Case,
     q: &GridQuery,
@@ -36,7 +38,8 @@ pub fn groups(
     parent: &[Option<String>],
     limit: u32,
     offset: u64,
-) -> Result<Vec<GroupRow>> {
+) -> Result<Listing<GroupRow>> {
+    check_limit(limit)?;
     if by.is_empty() || by.len() > MAX_BY || parent.len() >= by.len() {
         return Err(EngineError::Invalid(format!(
             "group by needs 1 to {MAX_BY} columns and a parent key shorter than that list \
@@ -74,7 +77,7 @@ pub fn groups(
         from = scope.from_sql,
         where_sql = scope.where_sql,
     );
-    params.push(SqlValue::BigInt(i64::from(limit)));
+    params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
 
     let mut stmt = case.conn().prepare(&sql)?;
@@ -89,7 +92,7 @@ pub fn groups(
             suspicious: as_count(row.get(4)?),
         });
     }
-    Ok(out)
+    Ok(Listing::from_fetched(out, limit))
 }
 
 /// The filter that selects one group's rows: q's filter AND each `by[i] =

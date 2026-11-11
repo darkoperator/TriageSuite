@@ -195,7 +195,7 @@ fn marks_follow_identical_rows_and_report_the_rest() {
 fn supersede_after(case: &Case) -> serde_json::Value {
     let entries = oxl_engine::history(case, Some("source"), 1000, 0)
         .unwrap()
-        .0;
+        .items;
     let mut supersede = entries.into_iter().filter(|e| e.action == "supersede");
     let one = supersede.next().expect("a supersede row");
     assert!(supersede.next().is_none(), "more than one supersede row");
@@ -662,7 +662,7 @@ fn removing_a_rerun_moves_marks_back_and_orphans_the_rest() {
     );
     let removal = oxl_engine::history(&case, Some("source"), 1000, 0)
         .unwrap()
-        .0
+        .items
         .into_iter()
         .find(|e| e.action == "source_remove")
         .unwrap();

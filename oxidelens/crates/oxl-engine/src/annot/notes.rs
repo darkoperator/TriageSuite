@@ -6,6 +6,7 @@ use super::{find_row, inactive, no_row};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
+use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
 
@@ -140,18 +141,27 @@ fn change(
     }
 }
 
-/// The notes on row `row_id` that are not deleted, oldest first; none for
-/// an unknown row.
-pub fn notes(case: &Case, row_id: i64) -> Result<Vec<Note>> {
-    notes_on(case.conn(), row_id)
+/// Up to `limit` of the notes on row `row_id` that are not deleted, from
+/// `offset`, oldest first; none for an unknown row. `Invalid` when `limit`
+/// is over `MAX_LIMIT`.
+pub fn notes(case: &Case, row_id: i64, limit: u32, offset: u64) -> Result<Listing<Note>> {
+    check_limit(limit)?;
+    let fetched = case
+        .conn()
+        .prepare(&format!("{NOTES_ON} LIMIT ? OFFSET ?"))?
+        .query_map(params![row_id, fetch_limit(limit), offset], note_row)?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(Listing::from_fetched(fetched, limit))
 }
 
+/// Every note on `row_id` that is not deleted, for the row detail, which
+/// shows a row whole.
 pub(super) fn notes_on(conn: &Connection, row_id: i64) -> Result<Vec<Note>> {
     Ok(conn
-        .prepare(
-            "SELECT id, row_id, text, written_by, written_at FROM ox.note \
-             WHERE row_id = ? AND NOT deleted ORDER BY id",
-        )?
+        .prepare(NOTES_ON)?
         .query_map(params![row_id], note_row)?
         .collect::<std::result::Result<_, _>>()?)
 }
+
+const NOTES_ON: &str = "SELECT id, row_id, text, written_by, written_at FROM ox.note \
+                        WHERE row_id = ? AND NOT deleted ORDER BY id";

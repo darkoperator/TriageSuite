@@ -111,10 +111,10 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
         Command::Mark(MarkCmd::List { by, page }) => annot::mark_list(&ctx, by.as_deref(), page),
         Command::Tag(TagCmd::Add { rows, tag }) => annot::tag_add(&ctx, &rows.rows, tag),
         Command::Tag(TagCmd::Remove { rows, tag }) => annot::tag_remove(&ctx, &rows.rows, tag),
-        Command::Tag(TagCmd::List) => annot::tag_list(&ctx),
+        Command::Tag(TagCmd::List { page }) => annot::tag_list(&ctx, page),
         Command::Note(NoteCmd::Add { row, text }) => annot::note_add(&ctx, *row, text),
         Command::Note(NoteCmd::Delete { id }) => annot::note_delete(&ctx, *id),
-        Command::Note(NoteCmd::List { row }) => annot::note_list(&ctx, *row),
+        Command::Note(NoteCmd::List { row, page }) => annot::note_list(&ctx, *row, page),
         Command::Column(ColumnCmd::Declare {
             relation,
             column,

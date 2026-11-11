@@ -8,6 +8,7 @@ use super::{check_batch, find_row, no_row, unwritable, RowOutcome};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
+use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
 
@@ -41,7 +42,8 @@ fn normalise(text: &str) -> Result<String> {
 }
 
 /// Tag each of `rows` with `tag`, stored lower-case. An agent's tag must
-/// start `ai:` (`Refused` otherwise); an analyst's must not (`Invalid`).
+/// start `ai:` and an analyst's must not; either actor using the other's
+/// namespace is `Refused`, since the same tag is fine from the other actor.
 /// An unknown or inactive row is not done; a row already carrying the tag
 /// is done, unchanged. Whole-call problems as `mark_suspicious`'s, and
 /// `Invalid` for a malformed tag.
@@ -54,7 +56,7 @@ pub fn add_tag(case: &mut Case, rows: &[i64], tag: &str, actor: &Actor) -> Resul
         )));
     }
     if !actor.is_agent() && prefixed {
-        return Err(EngineError::Invalid(format!(
+        return Err(EngineError::Refused(format!(
             "a tag starting {AGENT_TAG_PREFIX} is an agent's; an analyst's tag may not"
         )));
     }
@@ -187,17 +189,19 @@ fn change(
     }
 }
 
-/// Every tag the case has defined, by name, with the rows carrying it (a
-/// tag stays defined when its last row loses it).
-pub fn tags(case: &Case) -> Result<Vec<TagInfo>> {
-    Ok(case
+/// Up to `limit` of the tags the case has defined, from `offset`, by name,
+/// with the rows carrying each (a tag stays defined when its last row loses
+/// it). `Invalid` when `limit` is over `MAX_LIMIT`.
+pub fn tags(case: &Case, limit: u32, offset: u64) -> Result<Listing<TagInfo>> {
+    check_limit(limit)?;
+    let fetched = case
         .conn()
         .prepare(
             "SELECT t.name, count(rt.row_id), t.created_by FROM ox.tag t \
              LEFT JOIN ox.row_tag rt ON rt.tag = t.name \
-             GROUP BY t.name, t.created_by ORDER BY t.name",
+             GROUP BY t.name, t.created_by ORDER BY t.name LIMIT ? OFFSET ?",
         )?
-        .query_map([], |r| {
+        .query_map(params![fetch_limit(limit), offset], |r| {
             let rows: i64 = r.get(1)?;
             Ok(TagInfo {
                 name: r.get(0)?,
@@ -205,5 +209,6 @@ pub fn tags(case: &Case) -> Result<Vec<TagInfo>> {
                 created_by: r.get(2)?,
             })
         })?
-        .collect::<std::result::Result<_, _>>()?)
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(Listing::from_fetched(fetched, limit))
 }
