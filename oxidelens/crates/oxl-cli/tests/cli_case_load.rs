@@ -16,6 +16,16 @@ fn setup() -> (tempfile::TempDir, String, String) {
     (d, p, run)
 }
 
+/// `needle` occurs in `raw`, and only between the wrapper lines.
+fn assert_only_inside(raw: &str, needle: &str) {
+    let start = raw.find("<untrusted_data").unwrap();
+    let end = raw.rfind("</untrusted_data").unwrap();
+    assert!(raw.contains(needle), "{needle} absent from {raw}");
+    for (at, _) in raw.match_indices(needle) {
+        assert!(at > start && at < end, "{needle} outside the wrapper");
+    }
+}
+
 #[test]
 fn case_new_info_and_load_run() {
     let (_d, p, run) = setup();
@@ -83,7 +93,13 @@ fn errors_use_the_envelope_and_exit_codes() {
     assert_eq!(v["ok"], false);
     assert_eq!(v["command"], "case info");
     assert_eq!(v["error"]["code"], "not_found");
-    assert!(v["error"]["message"].is_string());
+    assert!(v["error"]["message"].is_null());
+    assert!(inner(&v["error"]["untrusted"])["message"].is_string());
+    let (_, raw) = ox_raw(&["--case", "nope.case.duckdb", "case", "info"]);
+    assert_only_inside(&raw, "nope.case.duckdb");
+    let (code, raw) = ox_raw(&["<script>x"]);
+    assert_eq!(code, 2);
+    assert_only_inside(&raw, "<script>x");
 
     ox(&["case", "new", p, "--name", "IR-1"]);
     ox(&["--case", p, "load", "run", &run]);
@@ -101,10 +117,8 @@ fn a_locked_case_reports_case_locked() {
     let (code, v) = ox(&["--case", &p, "case", "info"]);
     assert_eq!(code, 5);
     assert_eq!(v["error"]["code"], "case_locked");
-    assert!(v["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("open in another"));
+    let message = inner(&v["error"]["untrusted"])["message"].clone();
+    assert!(message.as_str().unwrap().contains("open in another"));
 }
 
 #[test]

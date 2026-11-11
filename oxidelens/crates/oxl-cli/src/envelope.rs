@@ -32,7 +32,12 @@ pub fn ok(command: &str, data: Value, truncated: bool) -> Value {
 }
 
 pub fn err(command: &str, e: &EngineError) -> Value {
-    json!({"ok": false, "command": command, "error": {"code": e.code(), "message": e.to_string()}})
+    // The message can quote evidence (a column name, a path, a cell value) or
+    // the caller's own text, so it is data, not tool output.
+    json!({"ok": false, "command": command, "error": {
+        "code": e.code(),
+        "untrusted": wrap(&json!({"message": e.to_string()})),
+    }})
 }
 
 pub fn exit_code(e: &EngineError) -> i32 {
@@ -64,6 +69,16 @@ mod tests {
             untrusted(&json!({"a": 1}), "B"),
             "<untrusted_data boundary=B>\n{\"a\":1}\n</untrusted_data boundary=B>"
         );
+    }
+
+    #[test]
+    fn error_message_is_wrapped_and_code_is_not() {
+        let v = err("x", &EngineError::NotFound("secret-path".into()));
+        assert_eq!(v["error"]["code"], "not_found");
+        assert!(v["error"].get("message").is_none());
+        let text = v["error"]["untrusted"].as_str().unwrap();
+        assert!(text.starts_with("<untrusted_data boundary="));
+        assert!(text.contains("secret-path"));
     }
 
     #[test]
