@@ -17,12 +17,30 @@ use std::io::Write;
 /// Run the CLI over `args` (the first is the program name), writing the
 /// envelope to `out`. Returns the process exit code.
 pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write) -> i32 {
-    let cli = match Cli::try_parse_from(args) {
+    let args: Vec<OsString> = args.into_iter().collect();
+    // Help and usage errors end parsing before `--json` is known, so the
+    // output format is read from the raw arguments for them.
+    let compact = args.iter().any(|a| a == "--json");
+    let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
         Err(e) => {
-            if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
-                let _ = write!(out, "{e}");
-                return 0;
+            let help_text = e.to_string();
+            match e.kind() {
+                ErrorKind::DisplayHelp => {
+                    // Tool-generated, but it echoes argv[0] and argument
+                    // names, so it travels inside the wrapper like the rest.
+                    let data = serde_json::json!({
+                        "untrusted": envelope::wrap(&serde_json::json!({"help": help_text})),
+                    });
+                    emit(out, &envelope::ok("help", data, false), compact);
+                    return 0;
+                }
+                ErrorKind::DisplayVersion => {
+                    let data = serde_json::json!({"version": env!("CARGO_PKG_VERSION")});
+                    emit(out, &envelope::ok("version", data, false), compact);
+                    return 0;
+                }
+                _ => {}
             }
             let err = EngineError::Invalid(e.to_string().trim_end().to_string());
             // Usage errors happen before a command is known, and the flag

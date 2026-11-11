@@ -174,6 +174,39 @@ fn capabilities_needs_no_case_and_lists_limits() {
 }
 
 #[test]
+fn help_and_version_are_envelopes_that_hide_the_environment() {
+    for (args, command) in [
+        (vec!["--help"], "help"),
+        (vec!["case", "info", "--help"], "help"),
+        (vec!["--version"], "version"),
+    ] {
+        let out = assert_cmd::Command::cargo_bin("oxidelens")
+            .unwrap()
+            .env("OXIDELENS_CASE", "MARKER-IGNORE-PREVIOUS")
+            .env("OXIDELENS_ACTOR", "MARKER-ACTOR")
+            .arg("--json")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{args:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(!text.contains("MARKER"), "{args:?}: env value leaked");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            (v["ok"].as_bool(), v["command"].as_str()),
+            (Some(true), Some(command))
+        );
+        if command == "help" {
+            assert!(inner(&v["data"]["untrusted"])["help"].is_string());
+        } else {
+            assert!(v["data"]["version"].is_string());
+        }
+    }
+    let (code, v) = ox(&["help"]);
+    assert_eq!((code, v["error"]["code"].as_str()), (2, Some("invalid")));
+}
+
+#[test]
 fn without_json_the_output_is_pretty_printed() {
     let out = assert_cmd::Command::cargo_bin("oxidelens")
         .unwrap()

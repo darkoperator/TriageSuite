@@ -8,14 +8,20 @@ use std::path::PathBuf;
 #[command(
     name = "oxidelens",
     version,
+    disable_help_subcommand = true,
     about = "Work an OxideLens case: load TriageSuite output, query it, and record findings"
 )]
 pub struct Cli {
     /// The case file (required by every command except `capabilities` and `case new`).
-    #[arg(long, global = true, env = "OXIDELENS_CASE")]
+    #[arg(long, global = true, env = "OXIDELENS_CASE", hide_env_values = true)]
     pub case: Option<PathBuf>,
     /// Who is acting: analyst:<name> or agent:<name>.
-    #[arg(long = "as", global = true, env = "OXIDELENS_ACTOR")]
+    #[arg(
+        long = "as",
+        global = true,
+        env = "OXIDELENS_ACTOR",
+        hide_env_values = true
+    )]
     pub actor: Option<String>,
     /// Compact one-line JSON instead of pretty-printed.
     #[arg(long, global = true)]
