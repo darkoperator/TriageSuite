@@ -329,6 +329,27 @@ fn a_regex_duckdb_rejects_is_invalid() {
 }
 
 #[test]
+fn a_search_regex_duckdb_rejects_is_invalid() {
+    let (_d, case) = loaded();
+    // The `regex` crate accepts both; DuckDB's RE2 refuses both.
+    for pattern in ["a{1001}", "(?<n>a)"] {
+        let q = GridQuery {
+            search: Some(pattern.into()),
+            search_regex: true,
+            ..events()
+        };
+        // The probe's wording, not parse_search's, so the probe is what refused it.
+        let probe = format!("{pattern:?} is not a valid regex");
+        let (c, m) = code(page(&case, &q, 50, 0));
+        assert_eq!(c, "invalid", "{pattern}: {m}");
+        assert!(m.contains(&probe), "{pattern}: {m}");
+        let (c, m) = code(count(&case, &q));
+        assert_eq!(c, "invalid", "{pattern}: {m}");
+        assert!(m.contains(&probe), "{pattern}: {m}");
+    }
+}
+
+#[test]
 fn the_grid_query_round_trips_through_json() {
     let q: GridQuery = serde_json::from_str(r#"{"relation":"evtxtriage_events"}"#).unwrap();
     assert!(q.filter.is_none() && q.sort.is_empty() && q.columns.is_none());
