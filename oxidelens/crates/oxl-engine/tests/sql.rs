@@ -179,6 +179,18 @@ fn file_and_indirection_functions_are_refused_wherever_they_appear() {
             vec![vec![s("11"), s("x")]]
         )
     );
+    // The allowed table functions run, a lateral one included.
+    let r = query_sql(
+        &path,
+        "select count(*) from range(3) as r, lateral unnest([r.range, r.range]) as u(x)",
+        10,
+        0,
+    )
+    .unwrap();
+    assert_eq!(r.rows, vec![vec![s("6")]]);
+    // A catalog table function is not on the allowlist.
+    let e = query_sql(&path, "select * from duckdb_tables()", 10, 0).unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
 }
 
 #[test]

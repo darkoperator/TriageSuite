@@ -15,17 +15,38 @@
 //!    (also one behind a comment) is refused. What runs is DuckDB's
 //!    re-rendering of that one parsed SELECT, so comments and trailing text
 //!    never reach execution.
-//! 2. **No file functions.** The parse tree is walked, and refused when it
-//!    calls a function that reads a file (every `read_*` and `parquet_*`,
-//!    `glob`, `sniff_csv`), runs a statement hidden in a value (`query`,
-//!    `query_table`, `json_execute_serialized_sql`), changes the instance's
-//!    state (logging, profiling, checkpoints) or reads memory by address
-//!    (`arrow_scan*`), or when it names a table with a path character, which
-//!    DuckDB would answer with a replacement scan of that file. This layer
-//!    exists because the next one has a gap: DuckDB keeps an attached
-//!    database's own files readable with external access off, so without it
-//!    `read_blob` of the case file or its write-ahead log would return raw
-//!    pages, free blocks of deleted notes and removed sources included.
+//! 2. **Only computing functions.** The parse tree is walked and refused
+//!    when any of these holds:
+//!    - It reads from a table function (in FROM at any depth: top level,
+//!      subquery, CTE, lateral join) that is not on the allowlist (ruling
+//!      R17). Each allowed function computes rows from its arguments alone:
+//!      - `range` and `generate_series`: a sequence of numbers or timestamps
+//!        between two bounds;
+//!      - `unnest`: the elements of a list or struct value it is given;
+//!      - `generate_subscripts`: the indexes of a list it is given.
+//!
+//!      Everything else is refused, which includes the file readers, the
+//!      statement-in-a-value indirections (`query`, `query_table`,
+//!      `json_execute_serialized_sql`), the logging, profiling and
+//!      checkpoint controls, `arrow_scan` (raw pointers) and the catalog
+//!      functions. A table function a DuckDB upgrade adds is refused until
+//!      someone allows it.
+//!    - It calls, in any position, a name starting `read_`, `parquet_` or
+//!      `arrow_scan`, or one of `getenv`, `glob`, `sniff_csv`, `query`,
+//!      `query_table`, `json_execute_serialized_sql`, `enable_logging`,
+//!      `disable_logging`, `truncate_duckdb_logs`, `enable_profiling`,
+//!      `disable_profiling`, `checkpoint`, `force_checkpoint`. They read
+//!      files or the environment, hide a statement in a value, or change the
+//!      instance's state. A scalar of one of these names is refused like the
+//!      table function.
+//!    - It names a table with a path character (`.`, `/`, `\`, `:`), which
+//!      DuckDB would answer with a replacement scan of that file.
+//!
+//!    This layer exists because the next one has a gap: DuckDB keeps an
+//!    attached database's own files readable with external access off, so
+//!    without it `read_blob` of the case file or its write-ahead log would
+//!    return raw pages, free blocks of deleted notes and removed sources
+//!    included.
 //! 3. **A separate, locked instance.** A second in-memory instance with
 //!    extension auto-install and auto-load off and no temporary directory
 //!    (nothing spills to disk; a query needing more than `SQL_MEMORY_LIMIT`
@@ -36,9 +57,12 @@
 //!    setting did not take, nothing does.
 //! 4. **Never a writer.** The case is only ever attached read-only.
 //!
-//! What a query reaches, then: the case's tables and views through the
-//! catalog, DuckDB's catalog and settings functions, and computation. No
-//! file (the case file's own bytes included), no network, no environment.
+//! What a query reaches, then: the case's tables and views by name,
+//! scalar functions (scalars such as `current_setting` included), and
+//! the allowed table functions. No catalog table functions
+//! (`duckdb_tables()` and the like; `describe` is how a caller learns the
+//! schema), no file (the case file's own bytes included), no network and no
+//! environment.
 //!
 //! The case is attached as the default database, so the relations' views
 //! are in `main`, the case tables in `ox` and loaded data in `src_<n>`, just
@@ -73,10 +97,23 @@ const LOCKED_SETTINGS: [(&str, &str); 5] = [
     ("lock_configuration", "true"),
 ];
 
-/// Functions a query may not call, besides every `read_*`, `parquet_*` and
-/// `arrow_scan*`: they read files, run a statement hidden in a value, or
-/// change the instance's state.
-const REFUSED_FUNCTIONS: [&str; 12] = [
+/// The only table functions a query may use in a FROM position (ruling
+/// R17): each computes rows from its arguments alone. The module doc says
+/// why each is safe.
+const ALLOWED_TABLE_FUNCTIONS: [&str; 4] =
+    ["range", "generate_series", "unnest", "generate_subscripts"];
+
+/// Name prefixes no call may have, in any position: file readers and the
+/// pointer-taking Arrow scans.
+const REFUSED_PREFIXES: [&str; 3] = ["read_", "parquet_", "arrow_scan"];
+
+/// Functions no call may name, in any position, besides `REFUSED_PREFIXES`:
+/// they read files or the environment, run a statement hidden in a value,
+/// or change the instance's state. A table function is already refused by
+/// the allowlist; these are refused by name as well so that a scalar of the
+/// same name, now or after an upgrade, is refused too.
+const REFUSED_FUNCTIONS: [&str; 13] = [
+    "getenv",
     "glob",
     "sniff_csv",
     "query",
@@ -252,21 +289,38 @@ fn the_select(sql: &str) -> Result<String> {
 }
 
 /// Why the parsed statement `node` would reach outside the case, if it
-/// would: the first refused function it calls, in any case and under any
-/// schema, or the first table it names with a path character.
+/// would: the first table function it uses that is not allowed, the first
+/// call it makes to a refused name (both in any case and under any schema),
+/// or the first table it names with a path character.
 fn reaches_outside(node: &Value) -> Option<String> {
     match node {
         Value::Object(fields) => {
             if let Some(Value::String(name)) = fields.get("function_name") {
-                let name = name.to_ascii_lowercase();
-                if ["read_", "parquet_", "arrow_scan"]
-                    .iter()
-                    .any(|prefix| name.starts_with(prefix))
-                    || REFUSED_FUNCTIONS.contains(&name.as_str())
-                {
+                if is_refused_call(name) {
                     return Some(format!(
-                        "a query may not call {name}: it reaches outside the case"
+                        "a query may not call {}: it reaches outside the case",
+                        name.to_ascii_lowercase()
                     ));
+                }
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("TABLE_FUNCTION") {
+                // Fail closed on a table function whose name the parse does
+                // not spell out where it is expected.
+                let name = fields
+                    .get("function")
+                    .and_then(|f| f.get("function_name"))
+                    .and_then(Value::as_str);
+                match name {
+                    Some(name) if is_allowed_table_function(name) => {}
+                    Some(name) => {
+                        return Some(format!(
+                            "a query may not read from the table function {}; \
+                             only {} are allowed",
+                            name.to_ascii_lowercase(),
+                            ALLOWED_TABLE_FUNCTIONS.join(", ")
+                        ))
+                    }
+                    None => return Some("a query may not use that table function".to_string()),
                 }
             }
             if fields.get("type").and_then(Value::as_str) == Some("BASE_TABLE") {
@@ -284,6 +338,21 @@ fn reaches_outside(node: &Value) -> Option<String> {
         Value::Array(items) => items.iter().find_map(reaches_outside),
         _ => None,
     }
+}
+
+/// `name` (any case) is on `ALLOWED_TABLE_FUNCTIONS`.
+fn is_allowed_table_function(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ALLOWED_TABLE_FUNCTIONS.contains(&name.as_str())
+}
+
+/// `name` (any case) is refused wherever it is called.
+fn is_refused_call(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    REFUSED_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || REFUSED_FUNCTIONS.contains(&name.as_str())
 }
 
 /// A fresh in-memory instance with the case at `case_path` attached
@@ -350,7 +419,6 @@ fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
         "SET temp_directory = '.tmp'".to_string(),
         format!("SELECT * FROM read_blob({})", quote_literal(existing)),
         format!("SELECT * FROM glob({})", quote_literal(existing)),
-        "SELECT getenv('PATH')".to_string(),
         format!("ATTACH {} AS ox_probe", quote_literal(&probe_path)),
     ];
     for probe in &probes {
@@ -525,6 +593,156 @@ mod tests {
             let e = probe_lockdown(&conn, exe.to_str().unwrap()).unwrap_err();
             assert!(e.to_string().contains(setting), "{e}");
         }
+    }
+
+    /// Every table function and table macro the pinned DuckDB has, as
+    /// `duckdb_functions()` lists them. An upgrade that adds or removes one
+    /// fails `every_table_function_is_classified` until this list, and the
+    /// allowlist if the new one computes from its arguments alone, are
+    /// brought up to date.
+    const KNOWN_TABLE_FUNCTIONS: &[&str] = &[
+        "arrow_scan",
+        "arrow_scan_dumb",
+        "checkpoint",
+        "disable_logging",
+        "disable_profiling",
+        "duckdb_approx_database_count",
+        "duckdb_columns",
+        "duckdb_connection_count",
+        "duckdb_constraints",
+        "duckdb_coordinate_systems",
+        "duckdb_databases",
+        "duckdb_dependencies",
+        "duckdb_extensions",
+        "duckdb_external_file_cache",
+        "duckdb_functions",
+        "duckdb_indexes",
+        "duckdb_keywords",
+        "duckdb_log_contexts",
+        "duckdb_logs",
+        "duckdb_logs_parsed",
+        "duckdb_memory",
+        "duckdb_optimizers",
+        "duckdb_prepared_statements",
+        "duckdb_profiling_settings",
+        "duckdb_schemas",
+        "duckdb_secret_types",
+        "duckdb_secrets",
+        "duckdb_sequences",
+        "duckdb_settings",
+        "duckdb_table_sample",
+        "duckdb_tables",
+        "duckdb_temporary_files",
+        "duckdb_types",
+        "duckdb_variables",
+        "duckdb_views",
+        "enable_logging",
+        "enable_profiling",
+        "force_checkpoint",
+        "generate_series",
+        "glob",
+        "histogram",
+        "histogram_values",
+        "json_each",
+        "json_execute_serialized_sql",
+        "json_tree",
+        "pragma_collations",
+        "pragma_database_size",
+        "pragma_metadata_info",
+        "pragma_platform",
+        "pragma_show",
+        "pragma_storage_info",
+        "pragma_table_info",
+        "pragma_user_agent",
+        "pragma_version",
+        "query",
+        "query_table",
+        "range",
+        "read_blob",
+        "read_csv",
+        "read_csv_auto",
+        "read_duckdb",
+        "read_json",
+        "read_json_auto",
+        "read_json_objects",
+        "read_json_objects_auto",
+        "read_ndjson",
+        "read_ndjson_auto",
+        "read_ndjson_objects",
+        "read_text",
+        "repeat",
+        "repeat_row",
+        "seq_scan",
+        "sniff_csv",
+        "summary",
+        "test_all_types",
+        "test_vector_types",
+        "truncate_duckdb_logs",
+        "unnest",
+        "which_secret",
+    ];
+
+    #[test]
+    fn every_table_function_is_classified() {
+        let conn = Connection::open_in_memory().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT function_name FROM duckdb_functions() \
+                 WHERE function_type IN ('table', 'table_macro') ORDER BY 1",
+            )
+            .unwrap();
+        let present: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            present, KNOWN_TABLE_FUNCTIONS,
+            "the pinned DuckDB's table functions changed: classify the difference"
+        );
+        // Through the gate itself, not its helpers: the parser does not
+        // check arity, so an empty argument list stands for any call.
+        for name in &present {
+            let sql = format!("SELECT * FROM {}()", quote_ident(name));
+            let outcome = the_select(&sql);
+            if is_allowed_table_function(name) {
+                outcome.unwrap_or_else(|e| panic!("{sql}: {e}"));
+            } else {
+                assert_eq!(outcome.map_err(|e| e.code()), Err("invalid"), "{sql}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_allowed_table_functions_run_anywhere_and_others_nowhere() {
+        for fine in [
+            "select * from range(3)",
+            "select * from Generate_Series(1, 3) as g(n)",
+            "select * from (select * from range(3)) as t",
+            "with c as (select * from unnest([1, 2])) select * from c",
+            "select * from range(2) as r, lateral unnest([r.range]) as u(x)",
+        ] {
+            the_select(fine).unwrap_or_else(|e| panic!("{fine}: {e}"));
+        }
+        for bad in [
+            "select * from duckdb_tables()",
+            "select * from main.duckdb_settings()",
+            "select * from (select * from json_each('[1]')) as t",
+            "with c as (select * from repeat_row(1, num_rows := 2)) select * from c",
+            "select * from range(2) as r, lateral summary(r) as s",
+            "select * from range(2) where 1 in (select 1 from pragma_version())",
+        ] {
+            assert_eq!(
+                the_select(bad).map_err(|e| e.code()),
+                Err("invalid"),
+                "{bad}"
+            );
+        }
+        // A scalar of a refused name is refused too.
+        assert_eq!(
+            the_select("select getenv('PATH')").map_err(|e| e.code()),
+            Err("invalid")
+        );
     }
 
     #[test]
