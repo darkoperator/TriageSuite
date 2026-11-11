@@ -411,7 +411,7 @@ fn row_detail_gathers_everything() {
     );
     assert_eq!(d.row_id, r);
     assert_eq!(d.source_id, 1);
-    assert_eq!(d.hash.len(), 64);
+    assert_eq!(d.hash.as_deref().map(str::len), Some(64));
     assert_eq!(
         d.evidence_path.as_deref(),
         Some(r"C:\Windows\System32\winevt\Logs\Security.evtx")
@@ -526,6 +526,7 @@ fn marks_on_superseded_rows_are_flagged() {
     let detail = row_detail(&case, old).unwrap();
     assert!(!detail.active);
     assert_eq!(detail.host.as_deref(), Some("WS01"));
+    assert!(detail.hash.is_some());
     assert_eq!(
         detail
             .fields
@@ -583,7 +584,23 @@ fn rows_of_a_removed_source_take_no_annotation() {
     let e = add_note(&mut case, r, "x", &analyst()).unwrap_err();
     assert_eq!(e.code(), "refused");
     assert!(e.to_string().contains("removed source"), "{e}");
-    assert_eq!(row_detail(&case, r).unwrap_err().code(), "not_found");
+    // The row still opens: its data is gone, nothing else is.
+    let d = row_detail(&case, r).unwrap();
+    assert_eq!(
+        (d.row_id, d.relation.as_str(), d.source_id, d.active),
+        (r, "evtxtriage_events", 1, false)
+    );
+    assert!(d.fields.is_empty());
+    assert_eq!(
+        (d.host, d.hash, d.evidence_path, d.output_file),
+        (None, None, None, None)
+    );
+    assert_eq!((d.mark, d.marked_by), (None, None));
+    assert!(d.tags.is_empty() && d.notes.is_empty());
+    assert_eq!(
+        row_detail(&case, 999_999_999).unwrap_err().code(),
+        "not_found"
+    );
 }
 
 #[test]
@@ -591,12 +608,27 @@ fn an_orphaned_mark_is_listed_as_superseded() {
     let (_d, mut case) = loaded();
     let r = logon(&case);
     mark_suspicious(&mut case, &[r], &analyst()).unwrap();
+    add_tag(&mut case, &[r], "lateral", &analyst()).unwrap();
+    add_note(&mut case, r, "kept after removal", &agent()).unwrap();
     remove_source(&mut case, 1, true, &analyst()).unwrap();
     let listed = marks(&case, None, 50, 0).unwrap().0;
     assert_eq!(listed.len(), 1);
     assert!(listed[0].superseded);
     assert_eq!(listed[0].relation, "evtxtriage_events");
     assert_eq!(listed[0].host, None);
+
+    // The row marks() lists opens, with what was left on it.
+    let d = row_detail(&case, listed[0].row_id).unwrap();
+    assert!(!d.active);
+    assert!(d.fields.is_empty() && d.hash.is_none());
+    assert_eq!((d.relation.as_str(), d.source_id), ("evtxtriage_events", 1));
+    assert_eq!(d.mark, Some(MarkState::Suspicious));
+    assert_eq!(d.marked_by.as_deref(), Some("analyst:tester"));
+    assert_eq!(d.tags, ["lateral"]);
+    assert_eq!(
+        d.notes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(),
+        ["kept after removal"]
+    );
 }
 
 #[test]
