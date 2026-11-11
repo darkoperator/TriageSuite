@@ -205,7 +205,7 @@ fn declare_in(
     // Past the suite check, a typed column is always a companion: one this
     // column already has is replaced under the same name; otherwise a new
     // one is named.
-    let typed = match &before.typed_column {
+    let reuse = match &before.typed_column {
         Some(companion) => {
             for schema in source_schemas(conn, relation)? {
                 if physical_columns(conn, &schema, relation)?.contains(&companion.to_lowercase()) {
@@ -216,22 +216,17 @@ fn declare_in(
                     ))?;
                 }
             }
-            companion.clone()
+            Some(companion.clone())
         }
-        _ => allocate_companion(conn, relation, column)?,
+        _ => None,
     };
-    conn.execute(
-        "UPDATE ox.column_catalog \
-         SET typed_column = ?, sql_type = ?, time_semantics = ?, origin = ? \
-         WHERE relation = ? AND name = ?",
-        params![
-            typed,
-            sql_type.sql(),
-            semantics.map(|s| s.as_str()),
-            TypeOrigin::Analyst.as_str(),
-            relation,
-            column
-        ],
+    set_typing(
+        conn,
+        relation,
+        column,
+        reuse,
+        (sql_type, semantics),
+        TypeOrigin::Analyst,
     )?;
     sync_companions(conn, relation)?;
     let after = read_column(conn, relation, column)?;
@@ -329,19 +324,13 @@ pub(crate) fn catalog_file(
         let Some((sql_type, semantics)) = column.sniffed else {
             continue;
         };
-        let typed = allocate_companion(conn, relation, &column.name)?;
-        conn.execute(
-            "UPDATE ox.column_catalog \
-             SET typed_column = ?, sql_type = ?, time_semantics = ?, origin = ? \
-             WHERE relation = ? AND name = ?",
-            params![
-                typed,
-                sql_type.sql(),
-                semantics.map(|s| s.as_str()),
-                TypeOrigin::Sniffed.as_str(),
-                relation,
-                column.name
-            ],
+        set_typing(
+            conn,
+            relation,
+            &column.name,
+            None,
+            (sql_type, semantics),
+            TypeOrigin::Sniffed,
         )?;
     }
     sync_companions(conn, relation)?;
@@ -431,19 +420,13 @@ fn apply_app_types(conn: &Connection, relation: &str) -> Result<()> {
         if !untyped {
             continue;
         }
-        let typed = allocate_companion(conn, relation, app.column)?;
-        conn.execute(
-            "UPDATE ox.column_catalog \
-             SET typed_column = ?, sql_type = ?, time_semantics = ?, origin = ? \
-             WHERE relation = ? AND name = ?",
-            params![
-                typed,
-                app.sql_type.sql(),
-                app.rule.time_semantics().map(|s| s.as_str()),
-                TypeOrigin::AppMap.as_str(),
-                relation,
-                app.column
-            ],
+        set_typing(
+            conn,
+            relation,
+            app.column,
+            None,
+            (app.sql_type, app.rule.time_semantics()),
+            TypeOrigin::AppMap,
         )?;
     }
     Ok(())
@@ -525,6 +508,37 @@ fn default_primary_time(conn: &Connection, relation: &str) -> Result<()> {
             params![column, relation],
         )?;
     }
+    Ok(())
+}
+
+/// Record `column`'s typing in the catalog: its companion is `reuse` (the
+/// name it already has) or a newly allocated one. The physical companion is
+/// filled afterwards by `sync_companions`.
+fn set_typing(
+    conn: &Connection,
+    relation: &str,
+    column: &str,
+    reuse: Option<String>,
+    (sql_type, semantics): (SqlType, Option<TimeSemantics>),
+    origin: TypeOrigin,
+) -> Result<()> {
+    let typed = match reuse {
+        Some(name) => name,
+        None => allocate_companion(conn, relation, column)?,
+    };
+    conn.execute(
+        "UPDATE ox.column_catalog \
+         SET typed_column = ?, sql_type = ?, time_semantics = ?, origin = ? \
+         WHERE relation = ? AND name = ?",
+        params![
+            typed,
+            sql_type.sql(),
+            semantics.map(|s| s.as_str()),
+            origin.as_str(),
+            relation,
+            column
+        ],
+    )?;
     Ok(())
 }
 

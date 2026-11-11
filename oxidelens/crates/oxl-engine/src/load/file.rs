@@ -122,22 +122,30 @@ fn extension(path: &Path) -> Option<String> {
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
 }
 
-/// DuckDB's `read_csv` over `path` with the dialect stated outright.
-fn read_csv(path: &str, delim: char, tail: &str) -> String {
+/// DuckDB's `read_csv` with the dialect stated outright. `path_sql` is the
+/// SQL for the path: `?` in a query, so the path is a bound parameter, or a
+/// quoted literal inside the CREATE TABLE AS, which cannot bind.
+fn read_csv(path_sql: &str, delim: char, tail: &str) -> String {
     format!(
-        "read_csv({}, delim = {}, quote = '\"', escape = '\"', header = true{tail})",
-        quote_literal(path),
+        "read_csv({path_sql}, delim = {}, quote = '\"', escape = '\"', header = true{tail})",
         quote_literal(&delim.to_string())
     )
 }
 
-/// `(name, type)` of every column `source` (a table expression) yields.
-fn describe(conn: &Connection, source: &str) -> Result<Vec<(String, String)>> {
+/// `(name, type)` of every column `read_csv` yields for `path`, which is
+/// bound as a parameter.
+fn describe(
+    conn: &Connection,
+    path: &str,
+    delim: char,
+    tail: &str,
+) -> Result<Vec<(String, String)>> {
+    let source = read_csv("?", delim, tail);
     Ok(conn
         .prepare(&format!(
             "SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM {source})"
         ))?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .query_map(params![path], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?)
 }
 
@@ -180,8 +188,8 @@ fn load_in(
 
     // Names as DuckDB reports them (it already makes empty and repeated ones
     // distinct), then as the case will hold them.
-    let reported = describe(conn, &read_csv(&path, delim, ", all_varchar = true"))?;
-    let detected = describe(conn, &read_csv(&path, delim, ""))?;
+    let reported = describe(conn, &path, delim, ", all_varchar = true")?;
+    let detected = describe(conn, &path, delim, "")?;
     if reported.len() != detected.len() {
         return Err(EngineError::Invalid(format!(
             "{path}: the header and the detected columns disagree"
@@ -213,7 +221,7 @@ fn load_in(
 
     let name_list: Vec<String> = names.iter().map(|n| quote_literal(n)).collect();
     let source = read_csv(
-        &path,
+        &quote_literal(&path),
         delim,
         &format!(", all_varchar = true, names = [{}]", name_list.join(", ")),
     );
@@ -278,10 +286,19 @@ fn load_in(
     let mut columns: Vec<FileColumn> = Vec::new();
     for ((_, detected_type), name) in detected.iter().zip(&names) {
         let sniffed = match sniffed_type(detected_type) {
-            Some(SqlType::Timestamp) => Some((
-                SqlType::Timestamp,
-                Some(time_semantics(conn, id, &relation, name)?),
-            )),
+            Some(SqlType::Timestamp) => {
+                let semantics = time_semantics(conn, id, &relation, name)?;
+                // DuckDB detects a value ending in `Z` as a zoned timestamp
+                // too. Such a column is typed only when every value is UTC;
+                // an offset such as +02:00 would be applied by the cast, and
+                // step 1 shows times as written, so that column stays text.
+                let zoned = detected_type.contains("TIME ZONE") || detected_type == "TIMESTAMPTZ";
+                if zoned && semantics != TimeSemantics::Utc {
+                    None
+                } else {
+                    Some((SqlType::Timestamp, Some(semantics)))
+                }
+            }
             Some(t) => Some((t, None)),
             None => None,
         };

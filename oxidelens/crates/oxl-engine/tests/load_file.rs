@@ -100,7 +100,8 @@ fn a_sniffed_timestamp_is_utc_only_when_every_value_ends_in_z() {
     let p = d.path().join("z.csv");
     std::fs::write(
         &p,
-        "t,u\n2026-01-05T02:14:00Z,2026-01-05T02:14:00Z\n2026-01-05T02:15:00Z,2026-01-05T02:15:00\n,\n",
+        "t,u,m\n2026-01-05T02:14:00Z,2026-01-05T02:14:00,2026-01-05T02:14:00Z\n\
+         2026-01-05T02:15:00Z,2026-01-05T02:15:00,2026-01-05T02:15:00\n,,\n",
     )
     .unwrap();
     load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
@@ -108,6 +109,36 @@ fn a_sniffed_timestamp_is_utc_only_when_every_value_ends_in_z() {
     let sem = |name: &str| cols.iter().find(|c| c.name == name).unwrap().time_semantics;
     assert_eq!(sem("t"), Some(TimeSemantics::Utc));
     assert_eq!(sem("u"), Some(TimeSemantics::Unknown));
+    // Zoned text that is not all UTC stays text.
+    assert_eq!(
+        cols.iter().find(|c| c.name == "m").unwrap().typed_column,
+        None
+    );
+}
+
+#[test]
+fn a_zoned_timestamp_column_stays_text_as_written() {
+    let (d, mut case) = fresh();
+    let p = d.path().join("zoned.csv");
+    std::fs::write(
+        &p,
+        "t,n\n2026-01-05 02:14:00+02:00,1\n2026-01-05 02:15:00+02:00,2\n",
+    )
+    .unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let cols = columns(&case, "zoned_csv").unwrap();
+    let t = cols.iter().find(|c| c.name == "t").unwrap();
+    assert_eq!((t.typed_column.as_deref(), t.origin), (None, None));
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from zoned_csv where t = '2026-01-05 02:14:00+02:00'"
+        ),
+        1
+    );
+    assert!(cols
+        .iter()
+        .any(|c| c.name == "n" && c.typed_column.is_some()));
 }
 
 #[test]
@@ -139,7 +170,7 @@ fn a_host_can_be_assigned() {
 }
 
 #[test]
-fn hostile_headers_load_and_filter() {
+fn hostile_headers_load_page_and_filter() {
     let (d, mut case) = fresh();
     let p = d.path().join("hostile.csv");
     let long = "x".repeat(600);
