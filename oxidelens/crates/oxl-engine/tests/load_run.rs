@@ -191,6 +191,83 @@ fn the_same_run_twice_is_refused() {
     assert_two_hosts_counts(&case);
 }
 
+/// Load `fw.csv` under the relation name `name`.
+fn load_fw_as(case: &mut Case, dir: &Path, name: &str) -> oxl_engine::Result<()> {
+    let fw = oxl_fixtures::loose_fw_csv(dir);
+    oxl_engine::load_file(
+        case,
+        &fw,
+        oxl_engine::FileOptions {
+            name: Some(name.into()),
+            ..Default::default()
+        },
+        &analyst(),
+    )
+    .map(|_| ())
+}
+
+/// The case still holds only the file loaded as `name`, and its view works.
+fn assert_only_the_file(case: &Case, name: &str) {
+    assert_eq!(sources(case).unwrap().len(), 1);
+    assert_eq!(n(case, &format!("select count(*) from \"{name}\"")), 3);
+    assert_eq!(n(case, "select count(*) from ox.relation"), 1);
+    assert_eq!(n(case, "select count(*) from ox.history"), 1);
+    assert_eq!(
+        n(
+            case,
+            "select count(*) from duckdb_schemas() where schema_name like 'src_%' \
+             or schema_name = 'ox_stage'"
+        ),
+        1
+    );
+}
+
+#[test]
+fn a_dataset_whose_raw_view_a_file_has_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let root = oxl_fixtures::two_hosts(&d.path().join("run"));
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_fw_as(&mut case, d.path(), "raw_evtxtriage_events").unwrap();
+    let (c, message) = code(load_run(&mut case, &root, &analyst()));
+    assert_eq!(c, "refused", "{message}");
+    assert!(
+        message.contains("evtxtriage_events") && message.contains("raw_evtxtriage_events"),
+        "{message}"
+    );
+    assert_only_the_file(&case, "raw_evtxtriage_events");
+}
+
+#[test]
+fn a_dataset_named_like_a_files_raw_view_is_refused_whatever_its_case() {
+    let d = tempfile::tempdir().unwrap();
+    let root = edited_copy(&d.path().join("run"), |json| {
+        for dataset in json["datasets"].as_array_mut().unwrap() {
+            if dataset["view"] == "petriage_timeline" {
+                dataset["view"] = "RAW_FW".into();
+            }
+        }
+    });
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_fw_as(&mut case, d.path(), "fw").unwrap();
+    let (c, message) = code(load_run(&mut case, &root, &analyst()));
+    assert_eq!(c, "refused", "{message}");
+    assert!(
+        message.contains("RAW_FW") && message.contains("fw"),
+        "{message}"
+    );
+    assert_only_the_file(&case, "fw");
+}
+
+#[test]
+fn a_file_named_like_a_datasets_raw_view_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let (_run, mut case) = loaded();
+    let (c, message) = code(load_fw_as(&mut case, d.path(), "raw_evtxtriage_events"));
+    assert_eq!(c, "refused", "{message}");
+    assert_eq!(sources(&case).unwrap().len(), 1);
+    assert_two_hosts_counts(&case);
+}
+
 #[test]
 fn a_status_other_than_ok_is_refused_with_the_reason() {
     let d = tempfile::tempdir().unwrap();

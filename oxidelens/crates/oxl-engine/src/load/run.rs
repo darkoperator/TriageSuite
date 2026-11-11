@@ -30,8 +30,10 @@ const STAGE: &str = "ox_stage";
 
 /// Load the run whose output root is `out_root` into `case`.
 ///
-/// Refused when the inventory's status is not `ok` or the run is already in
-/// the case (a removed run may be loaded again); `Invalid` when the inventory
+/// Refused when the inventory's status is not `ok`, the run is already in
+/// the case (a removed run may be loaded again), or a dataset's view or its
+/// `raw_` view would take a name another relation uses (see
+/// `check_relation_names`); `Invalid` when the inventory
 /// declares a SQL type the suite never writes, types a column differently
 /// from the case's catalog, or names a relation's metadata columns
 /// differently from the live sources already feeding it. For each relation and host the run has rows for,
@@ -306,6 +308,35 @@ fn check_metadata_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
     Ok(())
 }
 
+/// Refuse dataset `view` when it, or the `raw_<view>` view it brings, would
+/// take a name the case's relations already use: a relation's own name or
+/// its `raw_` view's, compared without regard to case, as DuckDB resolves
+/// names. `rebuild_relations` would otherwise replace one view with the
+/// other without a word. The one allowed match is the dataset relation of
+/// exactly this name, which a later run of the same tool feeds. Datasets
+/// loaded earlier in the same run are relations by now and are checked too.
+fn check_relation_names(conn: &Connection, view: &str) -> Result<()> {
+    let existing: Vec<(String, String)> = conn
+        .prepare("SELECT name, kind FROM ox.relation ORDER BY name")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    let ours = [view.to_lowercase(), format!("raw_{view}").to_lowercase()];
+    for (name, kind) in existing {
+        if name == view && kind == "dataset" {
+            continue;
+        }
+        let theirs = [name.to_lowercase(), format!("raw_{name}").to_lowercase()];
+        if ours.iter().any(|o| theirs.contains(o)) {
+            return Err(EngineError::Refused(format!(
+                "dataset {view} (and its view raw_{view}) would take a name the case's \
+                 {kind} relation {name} (and its view raw_{name}) already uses; remove that \
+                 source or load the file under another name"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Whether any of `dataset`'s files is included in a view, so that loading
 /// it adds rows.
 fn loads(dataset: &Dataset) -> bool {
@@ -320,23 +351,7 @@ fn load_dataset(
     dataset: &Dataset,
     included: &[&DatasetFile],
 ) -> Result<LoadedRelation> {
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT kind FROM ox.relation WHERE name = ?",
-            params![dataset.view],
-            |r| r.get(0),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            duckdb::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other),
-        })?;
-    if let Some(kind) = existing.filter(|k| k != "dataset") {
-        return Err(EngineError::Refused(format!(
-            "the case already has a {kind} relation named {}",
-            dataset.view
-        )));
-    }
+    check_relation_names(conn, &dataset.view)?;
 
     let meta = &dataset.metadata_columns;
     // Host and identity, then every column by name, each read as its text.
