@@ -295,9 +295,9 @@ fn empty_inputs_give_empty_results() {
     oxl_engine::load_run(&mut case, &root, &analyst()).unwrap();
     let g = groups(&case, &q("rbtriage_main"), &s(&["FileName"]), &[], 50, 0).unwrap();
     assert!(g.is_empty());
-    // The empty dataset has no typed time column, so there is nothing to bucket.
-    let err = histogram(&case, &q("rbtriage_main"), None, 60).unwrap_err();
-    assert_eq!(err.code(), "invalid");
+    let h = histogram(&case, &q("rbtriage_main"), None, 60).unwrap();
+    assert_eq!(h.column, "DeletedOn");
+    assert_eq!((h.buckets.len(), h.untimed), (0, 0));
 
     let (_d, case) = loaded();
     let none = GridQuery {
@@ -358,9 +358,21 @@ fn bad_arguments_are_invalid() {
     // A relation with no timestamp column.
     let d = tempfile::tempdir().unwrap();
     let mut other = new_case(d.path());
-    let root = empty_dataset(d.path());
-    oxl_engine::load_run(&mut other, &root, &analyst()).unwrap();
-    let err = histogram(&other, &q("rbtriage_main"), None, 60).unwrap_err();
+    let text_only = d.path().join("names.csv");
+    std::fs::write(
+        &text_only,
+        "name,owner
+alpha,WS01
+beta,SRV01
+",
+    )
+    .unwrap();
+    let rel = load_file(&mut other, &text_only, FileOptions::default(), &analyst())
+        .unwrap()
+        .relations[0]
+        .name
+        .clone();
+    let err = histogram(&other, &q(&rel), None, 60).unwrap_err();
     assert_eq!(err.code(), "invalid");
     assert!(err.to_string().contains("no timestamp column"), "{err}");
 }

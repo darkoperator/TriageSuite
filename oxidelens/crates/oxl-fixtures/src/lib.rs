@@ -221,7 +221,7 @@ pub fn empty_dataset(dir: &Path) -> PathBuf {
             view: "rbtriage_main",
             source: "internal",
             evidence_path_column: None,
-            typed: &[],
+            typed: &[("DeletedOn", SqlType::Timestamp, Some(TimeSemantics::Utc))],
             files: vec![FileSpec {
                 host: "WS01",
                 path: "Processed-WS01-20260103000000/FileSystem/recyclebin.csv",
