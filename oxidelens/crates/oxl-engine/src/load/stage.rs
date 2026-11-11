@@ -18,6 +18,7 @@
 
 use crate::error::{EngineError, Result};
 use duckdb::{params, Connection};
+use triage_core::output::duckdb::inventory::MetadataColumns;
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The prefix of the columns the engine adds; a loaded relation may not
@@ -125,13 +126,13 @@ pub(crate) fn materialize(
 /// hosts that are active for it in `ox.source_dataset`; a removed source
 /// contributes no arm. A relation with no active arm gets no views.
 pub(crate) fn rebuild_relations(conn: &Connection) -> Result<()> {
-    let relations: Vec<(String, Option<String>)> = conn
-        .prepare("SELECT name, host_column FROM ox.relation ORDER BY name")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+    let relations: Vec<String> = conn
+        .prepare("SELECT name FROM ox.relation ORDER BY name")?
+        .query_map([], |r| r.get(0))?
         .collect::<std::result::Result<_, _>>()?;
 
-    for (name, host_column) in relations {
-        let arms = active_arms(conn, &name, host_column.as_deref())?;
+    for name in relations {
+        let arms = active_arms(conn, &name)?;
         let view = format!("main.{}", quote_ident(&name));
         let raw_view = format!("main.{}", quote_ident(&format!("raw_{name}")));
         if arms.is_empty() {
@@ -158,9 +159,25 @@ pub(crate) fn rebuild_relations(conn: &Connection) -> Result<()> {
             conn.execute_batch(&format!("DROP VIEW IF EXISTS {raw_view};"))?;
             continue;
         }
+        // A catalogued column can be missing from every active arm (one only
+        // a superseded or removed source had, or a run's renamed host
+        // column); the raw view still shows it, as NULL.
+        let present: Vec<String> = conn
+            .prepare(&format!(
+                "SELECT lower(column_name) FROM (DESCRIBE SELECT * FROM {view})"
+            ))?
+            .query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
         let mut select: Vec<String> = columns
             .iter()
-            .map(|(name, text)| format!("{} AS {}", quote_ident(text), quote_ident(name)))
+            .map(|(name, text)| {
+                let source = if present.contains(&text.to_lowercase()) {
+                    quote_ident(text)
+                } else {
+                    "CAST(NULL AS VARCHAR)".to_string()
+                };
+                format!("{source} AS {}", quote_ident(name))
+            })
             .collect();
         select.extend(["_ox_row", "_ox_hash", "_ox_occ"].map(String::from));
         conn.execute_batch(&format!(
@@ -171,13 +188,50 @@ pub(crate) fn rebuild_relations(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// The `(source id, SELECT)` arms of relation `name`: one per non-removed
-/// source table with at least one active host, in source order.
-fn active_arms(
+/// The column of source `source_id`'s table for `relation` that names each
+/// row's host, or `None` when it has none (a loose file loaded without one).
+///
+/// A run's is the host metadata column its own inventory recorded, not the
+/// relation's `host_column`: the suite renames that column (`_triage_host_1`
+/// ...) when a dataset already has one of the name, so two runs feeding one
+/// relation need not agree on it. A loose file has no inventory; its host
+/// column is the relation's.
+pub(crate) fn host_column_of(
     conn: &Connection,
-    name: &str,
-    host_column: Option<&str>,
-) -> Result<Vec<(i64, String)>> {
+    source_id: i64,
+    relation: &str,
+) -> Result<Option<String>> {
+    let recorded: Option<String> = conn
+        .query_row(
+            "SELECT metadata_columns_json FROM ox.inventory_dataset \
+             WHERE source_id = ? AND view = ?",
+            params![source_id, relation],
+            |r| r.get(0),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            duckdb::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    if let Some(json) = recorded {
+        let meta: MetadataColumns = serde_json::from_str(&json).map_err(|e| {
+            EngineError::Invalid(format!(
+                "the case's inventory of source {source_id} for {relation} is unreadable: {e}"
+            ))
+        })?;
+        return Ok(Some(meta.host));
+    }
+    Ok(conn.query_row(
+        "SELECT host_column FROM ox.relation WHERE name = ?",
+        params![relation],
+        |r| r.get(0),
+    )?)
+}
+
+/// The `(source id, SELECT)` arms of relation `name`: one per non-removed
+/// source table with at least one active host, in source order, each
+/// filtered on its own source's host column.
+fn active_arms(conn: &Connection, name: &str) -> Result<Vec<(i64, String)>> {
     let tables: Vec<(i64, String)> = conn
         .prepare(
             "SELECT st.source_id, st.table_schema FROM ox.source_table st \
@@ -207,13 +261,18 @@ fn active_arms(
             quote_ident(&schema),
             quote_ident(name)
         );
-        if let Some(host_column) = host_column.filter(|_| !hosts.is_empty()) {
+        let host_column = if hosts.is_empty() {
+            None
+        } else {
+            host_column_of(conn, source_id, name)?
+        };
+        if let Some(host_column) = host_column {
             // A view cannot bind parameters, so the host values are
             // literals, escaped by quote_literal.
             let list: Vec<String> = hosts.iter().map(|h| quote_literal(h)).collect();
             sql.push_str(&format!(
                 " WHERE {} IN ({})",
-                quote_ident(host_column),
+                quote_ident(&host_column),
                 list.join(", ")
             ));
         }

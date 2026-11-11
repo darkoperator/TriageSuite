@@ -8,10 +8,11 @@
 //! collection that moved since it was written loads without regenerating.
 
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
+use super::supersede::supersede;
 use super::{LoadReport, LoadedRelation};
 use crate::actor::Actor;
 use crate::case::Case;
-use crate::catalog::catalog_dataset;
+use crate::catalog::{catalog_dataset, check_typing};
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
@@ -29,9 +30,12 @@ const STAGE: &str = "ox_stage";
 
 /// Load the run whose output root is `out_root` into `case`.
 ///
-/// Refused when the inventory's status is not `ok`, when the run is already
-/// in the case, or when the inventory declares a SQL type the suite never
-/// writes. Any failure leaves the case exactly as it was.
+/// Refused when the inventory's status is not `ok` or the run is already in
+/// the case (a removed run may be loaded again); `Invalid` when the inventory
+/// declares a SQL type the suite never writes or types a column differently
+/// from the case's catalog. For each relation and host the run has rows for,
+/// an earlier run's rows are superseded (see `supersede`). Any failure leaves
+/// the case exactly as it was.
 pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadReport> {
     let root = canonical_path(out_root)?;
     let mut inventory = read_inventory(&root)?;
@@ -169,6 +173,9 @@ fn load_in(
             inventory.run_id
         )));
     }
+    for dataset in inventory.datasets.iter().filter(|d| loads(d)) {
+        check_typing(conn, dataset)?;
+    }
 
     // The rendered SQL names its views unqualified; the search path puts
     // them in the staging schema. SET is not transactional: on success it
@@ -238,15 +245,22 @@ fn load_in(
         params![loaded_at, loaded_by, id.to_string(), after.to_string()],
     )?;
 
+    let superseded = supersede(conn, id, &loaded_at, actor)?;
     rebuild_relations(conn)?;
     conn.execute_batch(&format!("DROP SCHEMA {} CASCADE;", quote_ident(STAGE)))?;
 
     Ok(LoadReport {
         source_id: id,
         relations,
-        superseded: Vec::new(),
+        superseded,
         warnings,
     })
+}
+
+/// Whether any of `dataset`'s files is included in a view, so that loading
+/// it adds rows.
+fn loads(dataset: &Dataset) -> bool {
+    dataset.files.iter().any(|f| f.included_in_view)
 }
 
 /// Materialize one dataset's typed view and record its table, its hosts and

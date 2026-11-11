@@ -287,6 +287,70 @@ pub(crate) fn catalog_dataset(conn: &Connection, dataset: &Dataset) -> Result<()
     default_primary_time(conn, relation)
 }
 
+/// Refuse `dataset` when the suite's typing of one of its columns differs
+/// from what the catalog already holds for its relation: a column the case
+/// has as suite-typed must be typed the same way (SQL type, text column,
+/// time semantics), and a column the case has as anything else must not be
+/// suite-typed. A relation's column has one typing, and every source table
+/// of the relation is read through it. Columns the relation does not have
+/// yet are not checked.
+pub(crate) fn check_typing(conn: &Connection, dataset: &Dataset) -> Result<()> {
+    let relation = dataset.view.as_str();
+    let meta = &dataset.metadata_columns;
+    let named: BTreeSet<&String> = [&meta.run_id, &meta.host, &meta.identity, &meta.output_file]
+        .into_iter()
+        .chain(&dataset.columns)
+        .collect();
+    for column in read_columns(conn, relation)? {
+        if !named.contains(&column.name) {
+            continue;
+        }
+        let theirs = dataset.effective_types.get(&column.name);
+        let agrees = match (column.origin, theirs) {
+            (Some(TypeOrigin::Suite), Some(t)) => {
+                SqlType::from_sql(&t.sql_type) == column.sql_type
+                    && t.text_column == column.text_column
+                    && t.time_semantics.as_deref().map(parse_semantics)
+                        == column.time_semantics.map(Some)
+            }
+            (Some(TypeOrigin::Suite), None) | (_, Some(_)) => false,
+            (_, None) => true,
+        };
+        if !agrees {
+            let ours = match column.origin {
+                Some(TypeOrigin::Suite) => format!(
+                    "the suite typed it {} (text in {}{})",
+                    column.sql_type.map_or("?", |t| t.sql()),
+                    column.text_column,
+                    column
+                        .time_semantics
+                        .map(|s| format!(", {}", s.as_str()))
+                        .unwrap_or_default()
+                ),
+                _ => "the suite left it as text".to_string(),
+            };
+            let new = match theirs {
+                Some(t) => format!(
+                    "this run types it {} (text in {}{})",
+                    t.sql_type,
+                    t.text_column,
+                    t.time_semantics
+                        .as_deref()
+                        .map(|s| format!(", {s}"))
+                        .unwrap_or_default()
+                ),
+                None => "this run leaves it as text".to_string(),
+            };
+            return Err(EngineError::Invalid(format!(
+                "{relation}.{}: in the case {ours}, but {new}; a relation's columns keep \
+                 one typing across sources",
+                column.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// One column of a loose file, as the loader found it.
 pub(crate) struct FileColumn {
     pub name: String,

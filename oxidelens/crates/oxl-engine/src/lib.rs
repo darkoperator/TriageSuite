@@ -21,7 +21,7 @@ pub use catalog::{
 };
 pub use error::{EngineError, Result};
 pub use load::{
-    load_file, load_run, relation_name_for_file, sources, FileOptions, LoadReport, LoadedRelation,
-    SourceInfo, Superseded,
+    load_file, load_run, relation_name_for_file, remove_source, sources, FileOptions, LoadReport,
+    LoadedRelation, RemoveReport, SourceInfo, Superseded,
 };
 pub use time::{now_iso, parse_utc_text};
