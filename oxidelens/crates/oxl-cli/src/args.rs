@@ -1,7 +1,8 @@
 //! The command line, as clap parses it. Tasks that add commands add a
 //! variant here and a function in `cmd/`.
 
-use clap::{Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use oxl_engine::DEFAULT_LIMIT;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -45,6 +46,163 @@ pub enum Command {
     Source(SourceCmd),
     /// Print the version, command list and limits. Needs no case.
     Capabilities,
+    /// List relations, or describe one relation's columns.
+    Schema {
+        /// The relation to describe; every relation is listed without it.
+        relation: Option<String>,
+    },
+    /// Show a page of a relation's rows.
+    Rows {
+        relation: String,
+        #[command(flatten)]
+        query: QueryArgs,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Count the rows a query selects.
+    Count {
+        relation: String,
+        #[command(flatten)]
+        query: QueryArgs,
+    },
+    /// Group rows by one level of a column list.
+    Groups {
+        relation: String,
+        /// Columns to group by, outermost first.
+        #[arg(long, value_delimiter = ',', required = true)]
+        by: Vec<String>,
+        /// The keys of the levels above, as a JSON array of strings and nulls.
+        #[arg(long)]
+        parent: Option<String>,
+        #[command(flatten)]
+        query: QueryArgs,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Count rows per time bucket.
+    Histogram {
+        relation: String,
+        /// The timestamp column; the relation's primary time when absent.
+        #[arg(long)]
+        column: Option<String>,
+        #[arg(long, default_value_t = 60)]
+        buckets: u32,
+        #[command(flatten)]
+        query: QueryArgs,
+    },
+    /// Count distinct value combinations across hosts.
+    Stack {
+        relation: String,
+        #[arg(long, value_delimiter = ',', required = true)]
+        by: Vec<String>,
+        #[arg(long, value_enum, default_value_t = StackOrderArg::Rarest)]
+        order: StackOrderArg,
+        #[command(flatten)]
+        query: QueryArgs,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Find a value in every relation.
+    Find(FindArgs),
+    /// Count (or list) what happened around a row or a moment.
+    Around(AroundArgs),
+    /// Show one row in full.
+    Row { id: i64 },
+    /// Run one SELECT over the case.
+    Query {
+        /// The SQL, or @file to read it from a file.
+        sql: String,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+}
+
+/// What narrows a relation: shared by every command that reads one.
+#[derive(Args, Debug)]
+pub struct QueryArgs {
+    /// A filter document as JSON, or @file.
+    #[arg(long)]
+    pub filter: Option<String>,
+    /// Search every column for this text.
+    #[arg(long)]
+    pub search: Option<String>,
+    /// Read the search text as a regular expression.
+    #[arg(long)]
+    pub regex: bool,
+    #[arg(long)]
+    pub case_sensitive: bool,
+    /// Restrict to a host; repeat for several.
+    #[arg(long = "host")]
+    pub hosts: Vec<String>,
+    /// Sort key as column or column:desc; repeat for several.
+    #[arg(long)]
+    pub sort: Vec<String>,
+    /// The columns to show, comma-separated.
+    #[arg(long, value_delimiter = ',')]
+    pub columns: Option<Vec<String>>,
+}
+
+#[derive(Args, Debug)]
+pub struct FindArgs {
+    pub value: String,
+    #[arg(long, value_enum, default_value_t = FindModeArg::Contains)]
+    pub mode: FindModeArg,
+    /// Restrict to a host; repeat for several.
+    #[arg(long = "host")]
+    pub hosts: Vec<String>,
+    /// Earliest UTC time.
+    #[arg(long)]
+    pub from: Option<String>,
+    /// Latest UTC time.
+    #[arg(long)]
+    pub to: Option<String>,
+    /// Return the matching rows, merged and in time order, not the summary.
+    #[arg(long)]
+    pub rows: bool,
+    #[command(flatten)]
+    pub page: PageArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("anchor").required(true).args(["row", "host"])))]
+pub struct AroundArgs {
+    /// Centre on this row's host and time.
+    #[arg(long, conflicts_with_all = ["host", "at"])]
+    pub row: Option<i64>,
+    #[arg(long, requires = "at")]
+    pub host: Option<String>,
+    /// A UTC time.
+    #[arg(long, requires = "host")]
+    pub at: Option<String>,
+    /// Half-width of the window: an integer then s, m or h; at most 24h.
+    #[arg(long)]
+    pub window: String,
+    /// Return the merged rows of the window, not the per-relation counts.
+    #[arg(long)]
+    pub rows: bool,
+    #[command(flatten)]
+    pub page: PageArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct PageArgs {
+    /// Rows to return, at least 1; the engine enforces the maximum.
+    #[arg(long, default_value_t = DEFAULT_LIMIT, value_parser = clap::value_parser!(u32).range(1..))]
+    pub limit: u32,
+    #[arg(long, default_value_t = 0)]
+    pub offset: u64,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum StackOrderArg {
+    Rarest,
+    Commonest,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum FindModeArg {
+    Exact,
+    Contains,
 }
 
 #[derive(Subcommand, Debug)]
@@ -97,6 +255,16 @@ impl Command {
             Command::Sources => "sources",
             Command::Source(SourceCmd::Remove { .. }) => "source remove",
             Command::Capabilities => "capabilities",
+            Command::Schema { .. } => "schema",
+            Command::Rows { .. } => "rows",
+            Command::Count { .. } => "count",
+            Command::Groups { .. } => "groups",
+            Command::Histogram { .. } => "histogram",
+            Command::Stack { .. } => "stack",
+            Command::Find(_) => "find",
+            Command::Around(_) => "around",
+            Command::Row { .. } => "row",
+            Command::Query { .. } => "query",
         }
     }
 }

@@ -4,11 +4,12 @@
 mod case;
 mod describe;
 mod load;
+mod read;
 
 use crate::args::{CaseCmd, Cli, Command, LoadCmd, SourceCmd};
 use oxl_engine::{Actor, Case, EngineError, Result};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// What a command returns on success.
 pub struct Reply {
@@ -37,11 +38,19 @@ impl Ctx {
     pub fn open_case(&self) -> Result<Case> {
         match &self.case {
             Some(path) => Case::open(path),
-            None => Err(EngineError::Invalid(
-                "no case: pass --case <path> or set OXIDELENS_CASE".to_string(),
-            )),
+            None => Err(no_case()),
         }
     }
+
+    /// The case file's path, for the engine calls that open their own
+    /// connection and so must not find the case already open here.
+    pub fn case_path(&self) -> Result<&Path> {
+        self.case.as_deref().ok_or_else(no_case)
+    }
+}
+
+fn no_case() -> EngineError {
+    EngineError::Invalid("no case: pass --case <path> or set OXIDELENS_CASE".to_string())
 }
 
 pub fn execute(cli: &Cli) -> Result<Reply> {
@@ -65,6 +74,37 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
             confirm_orphans,
         }) => load::remove(&ctx, *id, *confirm_orphans),
         Command::Capabilities => Ok(describe::capabilities()),
+        Command::Schema { relation } => describe::schema(&ctx, relation.as_deref()),
+        Command::Rows {
+            relation,
+            query,
+            page,
+        } => read::rows(&ctx, relation, query, page),
+        Command::Count { relation, query } => read::count(&ctx, relation, query),
+        Command::Groups {
+            relation,
+            by,
+            parent,
+            query,
+            page,
+        } => read::groups(&ctx, relation, by, parent.as_deref(), query, page),
+        Command::Histogram {
+            relation,
+            column,
+            buckets,
+            query,
+        } => read::histogram(&ctx, relation, column.as_deref(), *buckets, query),
+        Command::Stack {
+            relation,
+            by,
+            order,
+            query,
+            page,
+        } => read::stack(&ctx, relation, by, *order, query, page),
+        Command::Find(args) => read::find(&ctx, args),
+        Command::Around(args) => read::around(&ctx, args),
+        Command::Row { id } => read::row(&ctx, *id),
+        Command::Query { sql, page } => read::query(&ctx, sql, page),
     }
 }
 

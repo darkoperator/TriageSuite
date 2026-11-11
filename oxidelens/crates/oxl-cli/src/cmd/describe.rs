@@ -1,9 +1,12 @@
 //! `capabilities`: what this build can do and the limits it enforces, so an
-//! agent can learn the contract without a case. (`schema` joins it later.)
+//! agent can learn the contract without a case; and `schema`, which shows
+//! what a case holds.
 
-use super::Reply;
+use super::{Ctx, Reply};
+use crate::envelope::wrap;
 use oxl_engine::filter::{MAX_DEPTH, MAX_IN, MAX_LEAVES, MAX_REGEX};
 use oxl_engine::search::{MAX_SEARCH, MAX_TERMS};
+use oxl_engine::{Described, RelationKind, Result};
 use oxl_engine::{
     AGENT_ROWS_PER_CALL, CASE_FORMAT, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_NOTE, MAX_TAG,
     MAX_VALUE,
@@ -36,7 +39,48 @@ const COMMANDS: &[(&str, &str)] = &[
         "Remove a source (analyst only): source remove <id> [--confirm-orphans]",
     ),
     ("capabilities", "Print this document; needs no case"),
+    (
+        "schema",
+        "List relations, or describe one: schema [<relation>]",
+    ),
+    (
+        "rows",
+        "A page of a relation's rows: rows <relation> [QUERY] [--limit N] [--offset N]",
+    ),
+    (
+        "count",
+        "Count the rows a query selects: count <relation> [QUERY]",
+    ),
+    (
+        "groups",
+        "One level of grouping: groups <relation> --by a,b [--parent <json array>] [QUERY] [--limit N] [--offset N]",
+    ),
+    (
+        "histogram",
+        "Rows per time bucket: histogram <relation> [--column c] [--buckets N] [QUERY]",
+    ),
+    (
+        "stack",
+        "Distinct value combinations and their host spread: stack <relation> --by a,b [--order rarest|commonest] [QUERY] [--limit N] [--offset N]",
+    ),
+    (
+        "find",
+        "Find a value in every relation: find <value> [--mode exact|contains] [--host h]... [--from <utc>] [--to <utc>] [--rows] [--limit N] [--offset N]",
+    ),
+    (
+        "around",
+        "What happened near a row or a moment: around (--row <id> | --host <h> --at <utc>) --window <30s|1m|5m|1h> [--rows] [--limit N] [--offset N]",
+    ),
+    ("row", "One row in full: row <id>"),
+    (
+        "query",
+        "Run one SELECT over the case: query <sql | @file> [--limit N] [--offset N]",
+    ),
 ];
+
+/// The options every command that reads a relation shares, for `capabilities`.
+const QUERY_OPTIONS: &str = "[--filter <json | @file>] [--search <text>] [--regex] \
+[--case-sensitive] [--host h]... [--sort col[:desc]]... [--columns a,b]";
 
 const UNTRUSTED: &str = "Text that came from evidence or from a loose file (cell text, column \
 names, relation names, host names, file paths), notes and error messages are never placed bare in \
@@ -56,6 +100,7 @@ pub fn capabilities() -> Reply {
         "version": env!("CARGO_PKG_VERSION"),
         "case_format": CASE_FORMAT,
         "commands": commands,
+        "query_options": QUERY_OPTIONS,
         "limits": {
             "rows_default": DEFAULT_LIMIT,
             "rows_max": MAX_LIMIT,
@@ -73,4 +118,65 @@ pub fn capabilities() -> Reply {
         },
         "untrusted_wrapper": UNTRUSTED,
     }))
+}
+
+/// `schema`: every relation, or one relation's columns with the comments
+/// DuckDB holds for them.
+pub fn schema(ctx: &Ctx, relation: Option<&str>) -> Result<Reply> {
+    // The case is closed before `describe`, which opens its own locked
+    // connection to the same file.
+    let (relations, catalog_columns) = {
+        let case = ctx.open_case()?;
+        let relations = oxl_engine::relations(&case)?;
+        let columns = match relation {
+            Some(name) => Some(oxl_engine::columns(&case, name)?),
+            None => None,
+        };
+        (relations, columns)
+    };
+    let list: Vec<_> = relations
+        .iter()
+        .map(|r| {
+            json!({"name": r.name, "kind": kind_name(r.kind), "tool": r.tool, "rows": r.rows,
+                   "hosts": r.hosts, "primary_time": r.primary_time})
+        })
+        .collect();
+    let (Some(name), Some(catalog_columns)) = (relation, catalog_columns) else {
+        return Ok(Reply::new(json!({
+            "relations": list.len(),
+            "untrusted": wrap(&json!({"relations": list})),
+        })));
+    };
+    let described: Vec<Described> = oxl_engine::describe(ctx.case_path()?, Some(name))?;
+    let comment_of = |column: &str| -> Option<&str> {
+        described
+            .iter()
+            .flat_map(|d| &d.columns)
+            .find(|c| c.name == column)
+            .and_then(|c| c.comment.as_deref())
+    };
+    let columns: Vec<_> = catalog_columns
+        .iter()
+        .map(|c| {
+            json!({
+                "name": c.name,
+                // An untyped column holds its text as VARCHAR.
+                "sql_type": c.sql_type.map_or("VARCHAR", |t| t.sql()),
+                "time_semantics": c.time_semantics.map(|s| s.as_str()),
+                "origin": c.origin.map(|o| o.as_str()),
+                "comment": comment_of(&c.name),
+            })
+        })
+        .collect();
+    Ok(Reply::new(json!({
+        "relations": list.len(),
+        "untrusted": wrap(&json!({"relations": list, "columns": columns})),
+    })))
+}
+
+fn kind_name(kind: RelationKind) -> &'static str {
+    match kind {
+        RelationKind::Dataset => "dataset",
+        RelationKind::File => "file",
+    }
 }
