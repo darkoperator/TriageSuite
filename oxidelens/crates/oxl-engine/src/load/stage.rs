@@ -189,7 +189,9 @@ fn active_arms(
 
     let mut arms = Vec::new();
     for (source_id, schema) in tables {
-        let hosts: Vec<String> = conn
+        // A loose file loaded without a host has one row here with a NULL
+        // host and no host column to filter on.
+        let hosts: Vec<Option<String>> = conn
             .prepare(
                 "SELECT host FROM ox.source_dataset \
                  WHERE source_id = ? AND relation = ? AND active ORDER BY host",
@@ -199,12 +201,13 @@ fn active_arms(
         if hosts.is_empty() {
             continue;
         }
+        let hosts: Vec<String> = hosts.into_iter().flatten().collect();
         let mut sql = format!(
             "SELECT * FROM {}.{}",
             quote_ident(&schema),
             quote_ident(name)
         );
-        if let Some(host_column) = host_column {
+        if let Some(host_column) = host_column.filter(|_| !hosts.is_empty()) {
             // A view cannot bind parameters, so the host values are
             // literals, escaped by quote_literal.
             let list: Vec<String> = hosts.iter().map(|h| quote_literal(h)).collect();

@@ -3,9 +3,11 @@
 //! Every load is one transaction: it either adds a source, its tables, its
 //! inventory and its history row together, or leaves the case as it was.
 
+mod file;
 mod run;
 pub(crate) mod stage;
 
+pub use file::{load_file, relation_name_for_file, FileOptions};
 pub use run::load_run;
 
 use crate::case::Case;
@@ -61,7 +63,7 @@ pub struct SourceInfo {
 pub fn sources(case: &Case) -> Result<Vec<SourceInfo>> {
     let conn = case.conn();
     let mut hosts = conn
-        .prepare("SELECT DISTINCT host FROM ox.source_dataset WHERE source_id = ? ORDER BY host")?;
+        .prepare("SELECT DISTINCT host FROM ox.source_dataset WHERE source_id = ? AND host IS NOT NULL ORDER BY host")?;
     let rows: Vec<SourceInfo> = conn
         .prepare(
             "SELECT id, kind, path, run_id, loaded_at, loaded_by, removed \

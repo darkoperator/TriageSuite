@@ -62,14 +62,14 @@ COMMENT ON COLUMN ox.source_table.rows IS 'Row count at load time.';
 CREATE TABLE ox.source_dataset (
     source_id BIGINT NOT NULL,
     relation VARCHAR NOT NULL,
-    host VARCHAR NOT NULL,
+    host VARCHAR,
     rows BIGINT NOT NULL,
     active BOOLEAN NOT NULL
 );
 COMMENT ON TABLE ox.source_dataset IS 'One row per relation and host of each source; a later run of the same host supersedes it.';
 COMMENT ON COLUMN ox.source_dataset.source_id IS 'The ox.source the rows came from.';
 COMMENT ON COLUMN ox.source_dataset.relation IS 'The relation the rows feed.';
-COMMENT ON COLUMN ox.source_dataset.host IS 'The host the rows describe.';
+COMMENT ON COLUMN ox.source_dataset.host IS 'The host the rows describe; NULL for a loose file loaded without one.';
 COMMENT ON COLUMN ox.source_dataset.rows IS 'Row count for this relation and host at load time.';
 COMMENT ON COLUMN ox.source_dataset.active IS 'False once superseded or removed: the rows leave the relation''s view.';
 

@@ -292,6 +292,62 @@ pub(crate) fn catalog_dataset(conn: &Connection, dataset: &Dataset) -> Result<()
     default_primary_time(conn, relation)
 }
 
+/// One column of a loose file, as the loader found it.
+pub(crate) struct FileColumn {
+    pub name: String,
+    /// What type detection found, with the time semantics for a timestamp;
+    /// `None` leaves the column as text.
+    pub sniffed: Option<(SqlType, Option<TimeSemantics>)>,
+}
+
+/// Catalogue a loose file's table, inside the load's transaction, once its
+/// source table is recorded: its columns in order, a companion for each one
+/// whose type was sniffed (origin `sniffed`), and its default primary time.
+/// Like the app's typing, this writes no history.
+pub(crate) fn catalog_file(
+    conn: &Connection,
+    relation: &str,
+    columns: &[FileColumn],
+) -> Result<()> {
+    for (i, column) in columns.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO ox.column_catalog \
+             (relation, name, ordinal, text_column, typed_column, sql_type, time_semantics, origin) \
+             VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)",
+            params![
+                relation,
+                column.name,
+                i32::try_from(i + 1).unwrap_or(i32::MAX),
+                column.name,
+                UNTYPED
+            ],
+        )?;
+    }
+    // Named only after every column is catalogued, so no companion takes a
+    // name a later column of the file has.
+    for column in columns {
+        let Some((sql_type, semantics)) = column.sniffed else {
+            continue;
+        };
+        let typed = allocate_companion(conn, relation, &column.name)?;
+        conn.execute(
+            "UPDATE ox.column_catalog \
+             SET typed_column = ?, sql_type = ?, time_semantics = ?, origin = ? \
+             WHERE relation = ? AND name = ?",
+            params![
+                typed,
+                sql_type.sql(),
+                semantics.map(|s| s.as_str()),
+                TypeOrigin::Sniffed.as_str(),
+                relation,
+                column.name
+            ],
+        )?;
+    }
+    sync_companions(conn, relation)?;
+    default_primary_time(conn, relation)
+}
+
 /// Add a catalog row for every column of `dataset` its relation does not
 /// have yet: the metadata columns first, then the dataset's own. An earlier
 /// source's row for a column stands.
@@ -559,7 +615,7 @@ fn read_relation(conn: &Connection, name: &str) -> Result<RelationInfo> {
     )?;
     let hosts: Vec<String> = conn
         .prepare(&format!(
-            "SELECT DISTINCT sd.host {active} ORDER BY sd.host"
+            "SELECT DISTINCT sd.host {active} AND sd.host IS NOT NULL ORDER BY sd.host"
         ))?
         .query_map(params![name], |r| r.get(0))?
         .collect::<std::result::Result<_, _>>()?;

@@ -33,7 +33,7 @@ const STAGE: &str = "ox_stage";
 /// in the case, or when the inventory declares a SQL type the suite never
 /// writes. Any failure leaves the case exactly as it was.
 pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadReport> {
-    let root = canonical_root(out_root)?;
+    let root = canonical_path(out_root)?;
     let mut inventory = read_inventory(&root)?;
     check_inventory(&inventory)?;
     inventory.out_root = root.clone();
@@ -62,7 +62,7 @@ pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadR
 /// After a rolled-back load: put the session back on `main` and make sure
 /// no schema the load created survives. The rollback has already undone
 /// them; this is the belt to its braces, so its own errors are ignored.
-fn discard(conn: &Connection, source_id: Option<i64>) {
+pub(super) fn discard(conn: &Connection, source_id: Option<i64>) {
     let _ = conn.execute_batch("RESET schema;");
     let _ = conn.execute_batch(&format!(
         "DROP SCHEMA IF EXISTS {} CASCADE;",
@@ -79,7 +79,7 @@ fn discard(conn: &Connection, source_id: Option<i64>) {
 /// `out_root` made absolute with every link resolved. On Windows the
 /// verbatim `\\?\` prefix `canonicalize` adds is taken off again, because
 /// the path ends up in `read_csv` calls and in what the analyst sees.
-fn canonical_root(out_root: &Path) -> Result<PathBuf> {
+pub(super) fn canonical_path(out_root: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(out_root).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             EngineError::NotFound(format!("no run output root at {}", out_root.display()))

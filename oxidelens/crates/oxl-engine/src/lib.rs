@@ -20,5 +20,8 @@ pub use catalog::{
     RelationKind, SqlType, TimeSemantics, TypeOrigin,
 };
 pub use error::{EngineError, Result};
-pub use load::{load_run, sources, LoadReport, LoadedRelation, SourceInfo, Superseded};
+pub use load::{
+    load_file, load_run, relation_name_for_file, sources, FileOptions, LoadReport, LoadedRelation,
+    SourceInfo, Superseded,
+};
 pub use time::{now_iso, parse_utc_text};
