@@ -11,6 +11,7 @@ use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::{LoadReport, LoadedRelation};
 use crate::actor::Actor;
 use crate::case::Case;
+use crate::catalog::catalog_dataset;
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
@@ -216,6 +217,7 @@ fn load_in(
             continue;
         }
         relations.push(load_dataset(conn, id, dataset, &included)?);
+        catalog_dataset(conn, dataset)?;
     }
 
     record_inventory(conn, id, inventory)?;

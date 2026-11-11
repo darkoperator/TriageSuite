@@ -108,7 +108,7 @@ COMMENT ON COLUMN ox.column_catalog.text_column IS 'The physical column holding 
 COMMENT ON COLUMN ox.column_catalog.typed_column IS 'The physical column holding the typed value; NULL when untyped.';
 COMMENT ON COLUMN ox.column_catalog.sql_type IS 'The typed column''s SQL type; NULL when untyped.';
 COMMENT ON COLUMN ox.column_catalog.time_semantics IS 'utc, local or unknown for a timestamp; NULL otherwise.';
-COMMENT ON COLUMN ox.column_catalog.origin IS 'Who typed it: suite, app or analyst; text when untyped.';
+COMMENT ON COLUMN ox.column_catalog.origin IS 'Who typed it: suite, app-map, sniffed or analyst; text when untyped.';
 
 CREATE TABLE ox.inventory_dataset (
     source_id BIGINT NOT NULL,

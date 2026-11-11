@@ -18,8 +18,6 @@
 
 use crate::error::{EngineError, Result};
 use duckdb::{params, Connection};
-use std::collections::BTreeMap;
-use triage_core::output::duckdb::inventory::{EffectiveType, MetadataColumns};
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The prefix of the columns the engine adds; a loaded relation may not
@@ -119,14 +117,9 @@ pub(crate) fn materialize(
     ))
 }
 
-/// One logical column of a relation and the physical column holding its text.
-struct TextColumn {
-    name: String,
-    text_column: String,
-}
-
 /// Recreate, for every relation in `ox.relation`, the view `main."<name>"`
-/// over its active source tables and the all-text view `main."raw_<name>"`.
+/// over its active source tables and the all-text view `main."raw_<name>"`,
+/// which shows every catalogued column's text under the column's own name.
 ///
 /// Each source's table is one arm of a `UNION ALL BY NAME`, filtered to the
 /// hosts that are active for it in `ox.source_dataset`; a removed source
@@ -147,28 +140,27 @@ pub(crate) fn rebuild_relations(conn: &Connection) -> Result<()> {
             ))?;
             continue;
         }
-        let sources: Vec<i64> = arms.iter().map(|(id, _)| *id).collect();
         let union: Vec<String> = arms.into_iter().map(|(_, sql)| sql).collect();
         conn.execute_batch(&format!(
             "CREATE OR REPLACE VIEW {view} AS\n{};",
             union.join("\nUNION ALL BY NAME\n")
         ))?;
 
-        let columns = inventoried_text_columns(conn, &name, &sources)?;
+        let columns: Vec<(String, String)> = conn
+            .prepare(
+                "SELECT name, text_column FROM ox.column_catalog \
+                 WHERE relation = ? ORDER BY ordinal",
+            )?
+            .query_map(params![name], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
         if columns.is_empty() {
-            // Nothing inventoried says which column holds which text.
+            // Nothing catalogued says which column holds which text.
             conn.execute_batch(&format!("DROP VIEW IF EXISTS {raw_view};"))?;
             continue;
         }
         let mut select: Vec<String> = columns
             .iter()
-            .map(|c| {
-                format!(
-                    "{} AS {}",
-                    quote_ident(&c.text_column),
-                    quote_ident(&c.name)
-                )
-            })
+            .map(|(name, text)| format!("{} AS {}", quote_ident(text), quote_ident(name)))
             .collect();
         select.extend(["_ox_row", "_ox_hash", "_ox_occ"].map(String::from));
         conn.execute_batch(&format!(
@@ -225,62 +217,4 @@ fn active_arms(
         arms.push((source_id, sql));
     }
     Ok(arms)
-}
-
-/// Every column the inventories of `sources` record for relation `name`, in
-/// order (metadata columns first, then the dataset's own), each with the
-/// physical column holding its text: the `__text` companion of a typed
-/// column, the column itself otherwise. The first source to name a column
-/// decides it.
-fn inventoried_text_columns(
-    conn: &Connection,
-    name: &str,
-    sources: &[i64],
-) -> Result<Vec<TextColumn>> {
-    let mut out: Vec<TextColumn> = Vec::new();
-    let mut stmt = conn.prepare(
-        "SELECT metadata_columns_json, columns_json, effective_types_json \
-         FROM ox.inventory_dataset WHERE source_id = ? AND view = ?",
-    )?;
-    for &source_id in sources {
-        let rows: Vec<(String, String, String)> = stmt
-            .query_map(params![source_id, name], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })?
-            .collect::<std::result::Result<_, _>>()?;
-        for (metadata, columns, types) in rows {
-            let metadata: MetadataColumns = from_json(&metadata, name)?;
-            let columns: Vec<String> = from_json(&columns, name)?;
-            let types: BTreeMap<String, EffectiveType> = from_json(&types, name)?;
-            let named = [
-                metadata.run_id,
-                metadata.host,
-                metadata.identity,
-                metadata.output_file,
-            ]
-            .into_iter()
-            .chain(columns);
-            for column in named {
-                if out.iter().any(|c| c.name == column) {
-                    continue;
-                }
-                let text_column = types
-                    .get(&column)
-                    .map_or_else(|| column.clone(), |t| t.text_column.clone());
-                out.push(TextColumn {
-                    name: column,
-                    text_column,
-                });
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn from_json<T: serde::de::DeserializeOwned>(text: &str, relation: &str) -> Result<T> {
-    serde_json::from_str(text).map_err(|e| {
-        EngineError::Invalid(format!(
-            "the recorded inventory of {relation} does not parse: {e}"
-        ))
-    })
 }
