@@ -232,6 +232,108 @@ fn numeric_sort_uses_the_typed_value() {
     assert_eq!(names[10], "SYSTEM");
 }
 
+/// Found on the first real run: a full-width page read every cell, cut it
+/// to the cap and looked up its mark for every matching row before keeping
+/// the first 50, which was most of the 0.6 s a page took.
+#[test]
+fn a_page_reads_cells_and_marks_for_its_own_rows_only() {
+    let (_d, mut case) = loaded();
+    let marked = n(
+        &case,
+        "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'rclone.exe'",
+    );
+    assert!(mark_suspicious(&mut case, &[marked], &analyst()).unwrap()[0].done);
+    let before = page(&case, &events(), 3, 2).unwrap();
+    let (p, statements) = case
+        .statements_during(|| page(&case, &events(), 3, 2).unwrap())
+        .unwrap();
+    // The statement that orders the rows and keeps a page of them.
+    let paging: Vec<&String> = statements
+        .iter()
+        .filter(|sql| sql.contains("OFFSET"))
+        .collect();
+    assert_eq!(paging.len(), 1, "{statements:#?}");
+    assert!(
+        !paging[0].contains("ox.row_mark") && !paging[0].contains("left("),
+        "the paging statement reads marks or cuts cells: {}",
+        paging[0]
+    );
+    // The statement that reads the cells reads only the paged rows.
+    let reading: Vec<&String> = statements
+        .iter()
+        .filter(|sql| sql.contains("left("))
+        .collect();
+    assert_eq!(reading.len(), 1, "{statements:#?}");
+    assert!(
+        reading[0].contains("_ox_row IN (?, ?, ?)"),
+        "{}",
+        reading[0]
+    );
+    // The page is the same page all the same, cells and marks included.
+    assert_eq!(
+        (p.row_ids.clone(), p.marks.clone(), p.truncated),
+        (
+            before.row_ids.clone(),
+            before.marks.clone(),
+            before.truncated
+        )
+    );
+    assert_eq!(p.row_ids.len(), 3);
+    assert!(
+        p.marks.contains(&Some(MarkState::Suspicious)),
+        "{:?}",
+        p.marks
+    );
+    assert_eq!(
+        p.cells
+            .iter()
+            .map(|row| row.iter().map(|c| c.text.clone()).collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        before
+            .cells
+            .iter()
+            .map(|row| row.iter().map(|c| c.text.clone()).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A filtered, sorted page against the same rows asked of the view directly.
+#[test]
+fn a_filtered_sorted_page_matches_the_view() {
+    let (_d, case) = loaded();
+    let q = GridQuery {
+        filter: Some(parse_filter(r#"{"column":"Channel","op":"eq","value":"Security"}"#).unwrap()),
+        sort: vec![SortKey {
+            column: "EventId".into(),
+            descending: true,
+        }],
+        columns: Some(vec!["EventId".into(), "UserName".into()]),
+        ..events()
+    };
+    let p = page(&case, &q, 3, 1).unwrap();
+    // Security rows by EventId (typed) descending, then row id; skip one, take three.
+    let mut stmt_ids = Vec::new();
+    for i in 0..3 {
+        stmt_ids.push(n(
+            &case,
+            &format!(
+                "select _ox_row from evtxtriage_events where Channel = 'Security' \
+                 order by EventId desc nulls last, _ox_row limit 1 offset {}",
+                1 + i
+            ),
+        ));
+    }
+    assert_eq!(p.row_ids, stmt_ids);
+    assert!(p.truncated);
+    for (row, id) in p.cells.iter().zip(&p.row_ids) {
+        let event = n(
+            &case,
+            &format!("select EventId from evtxtriage_events where _ox_row = {id}"),
+        );
+        assert_eq!(row[0].text.as_deref(), Some(event.to_string().as_str()));
+    }
+}
+
 #[test]
 fn marks_come_back_with_the_page() {
     let (_d, mut case) = loaded();

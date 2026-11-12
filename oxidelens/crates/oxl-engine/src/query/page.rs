@@ -6,6 +6,7 @@ use crate::error::{EngineError, Result};
 use crate::listing::check_limit;
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
+use std::collections::HashMap;
 use triage_core::output::duckdb::sql::quote_ident;
 
 pub const DEFAULT_LIMIT: u32 = 50;
@@ -64,12 +65,44 @@ pub struct Page {
 
 /// Up to `limit` rows of `q` from `offset`, in `q`'s order. `Invalid` when
 /// `limit` is 0 or over `MAX_LIMIT`.
+///
+/// Two statements: the first orders the rows in scope and keeps the page's
+/// row ids, the second reads the cells and marks of those rows alone. Done
+/// in one, every cell of every row in scope was cast, cut and looked up
+/// before the page was kept, which on a real case was most of the time a
+/// page took.
 pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page> {
     check_limit(limit)?;
     let scope = scope(case, q)?;
     let order = order_sql(case, &scope, q)?;
+    let conn = case.conn();
 
     // Fetching one more than asked says whether the page is the last one.
+    let sql = format!(
+        "SELECT {ROW_ALIAS}._ox_row FROM {} WHERE {} ORDER BY {order} LIMIT ? OFFSET ?",
+        scope.from_sql, scope.where_sql,
+    );
+    let mut params = scope.params.clone();
+    params.push(SqlValue::BigInt(i64::from(limit) + 1));
+    params.push(SqlValue::UBigInt(offset));
+    let mut row_ids: Vec<i64> = conn
+        .prepare(&sql)?
+        .query_map(params_from_iter(params), |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    let truncated = row_ids.len() > limit as usize;
+    row_ids.truncate(limit as usize);
+
+    let mut out = Page {
+        columns: scope.columns.iter().map(|c| c.name.clone()).collect(),
+        marks: Vec::with_capacity(row_ids.len()),
+        cells: Vec::with_capacity(row_ids.len()),
+        row_ids,
+        truncated,
+    };
+    if out.row_ids.is_empty() {
+        return Ok(out);
+    }
+
     // Each text is cut a character past the cap in SQL, so a huge cell is
     // not carried whole only to be clipped here.
     let mut select = vec![format!("{ROW_ALIAS}._ox_row"), mark_sql()];
@@ -85,38 +118,31 @@ pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page>
         });
     }
     let sql = format!(
-        "SELECT {} FROM {} WHERE {} ORDER BY {order} LIMIT ? OFFSET ?",
+        "SELECT {} FROM {} WHERE {ROW_ALIAS}._ox_row IN ({})",
         select.join(", "),
         scope.from_sql,
-        scope.where_sql,
+        vec!["?"; out.row_ids.len()].join(", "),
     );
-    let mut params = scope.params.clone();
-    params.push(SqlValue::BigInt(i64::from(limit) + 1));
-    params.push(SqlValue::UBigInt(offset));
-
     let width = scope.columns.len();
-    let mut out = Page {
-        columns: scope.columns.iter().map(|c| c.name.clone()).collect(),
-        row_ids: Vec::new(),
-        marks: Vec::new(),
-        cells: Vec::new(),
-        truncated: false,
-    };
-    let mut stmt = case.conn().prepare(&sql)?;
-    let mut rows = stmt.query(params_from_iter(params))?;
+    let mut read: HashMap<i64, (Option<MarkState>, Vec<Cell>)> =
+        HashMap::with_capacity(out.row_ids.len());
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(params_from_iter(&out.row_ids))?;
     while let Some(row) = rows.next()? {
-        if out.row_ids.len() == limit as usize {
-            out.truncated = true;
-            break;
-        }
-        out.row_ids.push(row.get(0)?);
-        out.marks.push(read_mark(row.get(1)?)?);
         let mut cells = Vec::with_capacity(width);
         for i in 0..width {
             let text: Option<String> = row.get(2 + 2 * i)?;
             let failed: bool = row.get(3 + 2 * i)?;
             cells.push(clip(text, failed));
         }
+        read.insert(row.get(0)?, (read_mark(row.get(1)?)?, cells));
+    }
+    for id in &out.row_ids {
+        // Both statements read the same rows of one connection's snapshot.
+        let (mark, cells) = read.remove(id).ok_or_else(|| {
+            EngineError::Invalid(format!("row {id} was paged but could not be read back"))
+        })?;
+        out.marks.push(mark);
         out.cells.push(cells);
     }
     Ok(out)
