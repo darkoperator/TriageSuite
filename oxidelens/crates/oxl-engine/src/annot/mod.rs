@@ -26,8 +26,9 @@ pub use tags::{add_tag, remove_tag, tags, TagInfo, AGENT_TAG_PREFIX, MAX_TAG};
 
 use crate::actor::Actor;
 use crate::error::{EngineError, Result};
-use crate::load::stage::host_column;
-use duckdb::{params, Connection};
+use duckdb::types::Value as SqlValue;
+use duckdb::{params_from_iter, Connection};
+use std::collections::{BTreeMap, HashMap};
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// The most row ids an agent may pass to one mark or tag call.
@@ -84,38 +85,180 @@ fn check_batch(rows: &[i64], actor: &Actor) -> Result<()> {
     Ok(())
 }
 
-/// The source, relation and schema-qualified table holding row `row_id`,
-/// found through the row-id ranges `ox.source_table` records; `None` when
-/// no source ever loaded it. Each table's rows take one contiguous run of
-/// `ox.row_seq` in a single statement, so the ranges do not overlap; a live
-/// table is still asked whether it holds the row. A removed source's
-/// schema is gone and its range is all that remains of it.
+/// The source, relation and schema-qualified table holding row `row_id`;
+/// `None` when no source ever loaded it. See `locate_rows`.
 pub(crate) fn locate(conn: &Connection, row_id: i64) -> Result<Option<(i64, String, String)>> {
-    let candidates: Vec<(i64, String, String, bool)> = conn
-        .prepare(
-            "SELECT st.source_id, st.relation, st.table_schema, s.removed \
-             FROM ox.source_table st JOIN ox.source s ON s.id = st.source_id \
-             WHERE ? BETWEEN st.first_row AND st.last_row ORDER BY st.source_id, st.relation",
-        )?
-        .query_map(params![row_id], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-        })?
+    Ok(find_row(conn, row_id)?.map(|r| (r.source_id, r.relation, r.table)))
+}
+
+/// The most ids one statement names. A batch has no limit of its own (an
+/// analyst's has none); its ids are asked about this many at a time.
+const IDS_PER_STATEMENT: usize = 2_048;
+
+/// `ids` as the text of a SQL list. They are integers, so the text is
+/// safe to put into a statement as it is.
+fn id_list(ids: &[i64]) -> String {
+    ids.iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The most rows one multi-row write carries.
+const ROWS_PER_STATEMENT: usize = 512;
+
+/// Run `sql` over `rows` a chunk at a time: its `{values}` becomes
+/// `placeholder` (one row's `(?, ...)`) once per row of the chunk, and the
+/// chunk's values are its parameters, in order. A batch decides every row
+/// first and then writes them this way, so its cost does not grow by a
+/// statement per row.
+fn write_rows(
+    conn: &Connection,
+    sql: &str,
+    placeholder: &str,
+    rows: &[Vec<SqlValue>],
+) -> Result<()> {
+    for chunk in rows.chunks(ROWS_PER_STATEMENT) {
+        let values = vec![placeholder; chunk.len()].join(", ");
+        let params: Vec<&SqlValue> = chunk.iter().flatten().collect();
+        conn.execute(&sql.replace("{values}", &values), params_from_iter(params))?;
+    }
+    Ok(())
+}
+
+/// Run `sql` once per chunk of `ids`, its `{ids}` the chunk as a SQL list.
+fn per_id_chunk(conn: &Connection, sql: &str, params: &[SqlValue], ids: &[i64]) -> Result<()> {
+    for chunk in ids.chunks(IDS_PER_STATEMENT) {
+        conn.execute(
+            &sql.replace("{ids}", &id_list(chunk)),
+            params_from_iter(params),
+        )?;
+    }
+    Ok(())
+}
+
+/// Optional text as a statement parameter.
+fn text_or_null(text: Option<String>) -> SqlValue {
+    text.map_or(SqlValue::Null, SqlValue::Text)
+}
+
+/// Each of `ids` that a source ever loaded, located, with its host and
+/// standing; an id no source loaded is absent. A row is found through the
+/// row-id ranges `ox.source_table` records. Each table's rows take one
+/// contiguous run of `ox.row_seq` in a single statement, so the ranges do
+/// not overlap; a live table is still asked whether it holds the row. A
+/// removed source's schema is gone and its range is all that remains of
+/// it. The whole batch is read a few statements at a time: the ranges, then
+/// each table the rows fall in once, then the catalog.
+pub(crate) fn locate_rows(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, LocatedRow>> {
+    let mut wanted: Vec<i64> = ids.to_vec();
+    wanted.sort_unstable();
+    wanted.dedup();
+
+    // Every range each id falls in, in source then relation order.
+    let mut candidates: Vec<(i64, i64, String, String, bool)> = Vec::new();
+    for chunk in wanted.chunks(IDS_PER_STATEMENT) {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT u.id, st.source_id, st.relation, st.table_schema, s.removed \
+             FROM (SELECT unnest([{}]) AS id) AS u \
+             JOIN ox.source_table st ON u.id BETWEEN st.first_row AND st.last_row \
+             JOIN ox.source s ON s.id = st.source_id \
+             ORDER BY u.id, st.source_id, st.relation",
+            id_list(chunk)
+        ))?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        for row in rows {
+            candidates.push(row?);
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let host_columns: HashMap<String, Option<String>> = conn
+        .prepare("SELECT name, host_column FROM ox.relation")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
-    for (source, relation, schema, removed) in candidates {
-        let table = format!("{}.{}", quote_ident(&schema), quote_ident(&relation));
+
+    // Which ids each live table holds, and each one's host.
+    let mut by_table: BTreeMap<(String, String), Vec<i64>> = BTreeMap::new();
+    for (id, _, relation, schema, removed) in &candidates {
         if !removed {
-            let held: i64 = conn.query_row(
-                &format!("SELECT count(*) FROM {table} WHERE _ox_row = ?"),
-                params![row_id],
-                |r| r.get(0),
-            )?;
-            if held == 0 {
-                continue;
+            by_table
+                .entry((schema.clone(), relation.clone()))
+                .or_default()
+                .push(*id);
+        }
+    }
+    let mut held: HashMap<(String, String, i64), Option<String>> = HashMap::new();
+    for ((schema, relation), ids) in by_table {
+        let table = format!("{}.{}", quote_ident(&schema), quote_ident(&relation));
+        let host = match host_columns.get(&relation).cloned().flatten() {
+            Some(column) => format!("CAST({} AS VARCHAR)", quote_ident(&column)),
+            None => "CAST(NULL AS VARCHAR)".to_string(),
+        };
+        for chunk in ids.chunks(IDS_PER_STATEMENT) {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT _ox_row, {host} FROM {table} WHERE _ox_row IN ({})",
+                id_list(chunk)
+            ))?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?)))?;
+            for row in rows {
+                let (id, host) = row?;
+                held.insert((schema.clone(), relation.clone(), id), host);
             }
         }
-        return Ok(Some((source, relation, table)));
     }
-    Ok(None)
+
+    // A loose file loaded without a host has one dataset row, its host NULL.
+    let active: HashMap<(i64, String, Option<String>), bool> = conn
+        .prepare(
+            "SELECT source_id, relation, host, bool_or(active) FROM ox.source_dataset \
+             GROUP BY source_id, relation, host",
+        )?
+        .query_map([], |r| {
+            Ok(((r.get(0)?, r.get(1)?, r.get(2)?), r.get::<_, bool>(3)?))
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut out = HashMap::new();
+    for (id, source_id, relation, schema, removed) in candidates {
+        if out.contains_key(&id) {
+            continue;
+        }
+        let table = format!("{}.{}", quote_ident(&schema), quote_ident(&relation));
+        let (host, standing) = if removed {
+            (None, Standing::Removed)
+        } else {
+            let Some(host) = held.get(&(schema, relation.clone(), id)) else {
+                continue;
+            };
+            let is_active = active
+                .get(&(source_id, relation.clone(), host.clone()))
+                .copied()
+                .unwrap_or(false);
+            let standing = if is_active {
+                Standing::Active
+            } else {
+                Standing::Superseded
+            };
+            (host.clone(), standing)
+        };
+        out.insert(
+            id,
+            LocatedRow {
+                row_id: id,
+                source_id,
+                relation,
+                table,
+                host,
+                standing,
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// Whether a located row is in its relation's view.
@@ -143,64 +286,16 @@ pub(crate) struct LocatedRow {
 
 /// Row `row_id`, located; `None` when no source ever loaded it.
 pub(crate) fn find_row(conn: &Connection, row_id: i64) -> Result<Option<LocatedRow>> {
-    let Some((source_id, relation, table)) = locate(conn, row_id)? else {
-        return Ok(None);
-    };
-    let removed: bool = conn.query_row(
-        "SELECT removed FROM ox.source WHERE id = ?",
-        params![source_id],
-        |r| r.get(0),
-    )?;
-    if removed {
-        return Ok(Some(LocatedRow {
-            row_id,
-            source_id,
-            relation,
-            table,
-            host: None,
-            standing: Standing::Removed,
-        }));
-    }
-    let host: Option<String> = match host_column(conn, &relation)? {
-        Some(column) => conn.query_row(
-            &format!(
-                "SELECT CAST({} AS VARCHAR) FROM {table} WHERE _ox_row = ?",
-                quote_ident(&column)
-            ),
-            params![row_id],
-            |r| r.get(0),
-        )?,
-        None => None,
-    };
-    // A loose file loaded without a host has one dataset row, its host NULL.
-    let active: Option<bool> = conn.query_row(
-        "SELECT bool_or(active) FROM ox.source_dataset \
-         WHERE source_id = ? AND relation = ? AND host IS NOT DISTINCT FROM ?",
-        params![source_id, relation, host],
-        |r| r.get(0),
-    )?;
-    let standing = if active == Some(true) {
-        Standing::Active
-    } else {
-        Standing::Superseded
-    };
-    Ok(Some(LocatedRow {
-        row_id,
-        source_id,
-        relation,
-        table,
-        host,
-        standing,
-    }))
+    Ok(locate_rows(conn, &[row_id])?.remove(&row_id))
 }
 
-/// Why row `row_id` may not take a new annotation, or `None` when it may:
-/// it must exist and be in its relation's view.
-fn unwritable(conn: &Connection, row_id: i64) -> Result<Option<String>> {
-    Ok(match find_row(conn, row_id)? {
+/// Why row `row_id`, as `located` found it, may not take a new annotation,
+/// or `None` when it may: it must exist and be in its relation's view.
+fn unwritable(located: &HashMap<i64, LocatedRow>, row_id: i64) -> Option<String> {
+    match located.get(&row_id) {
         None => Some(no_row(row_id)),
-        Some(row) => inactive(&row),
-    })
+        Some(row) => inactive(row),
+    }
 }
 
 /// Why located row `row` is out of its relation's view, or `None` when it

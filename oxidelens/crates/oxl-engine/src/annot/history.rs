@@ -1,6 +1,7 @@
 //! The append-only change log, `ox.history`: written here for marks, tags
 //! and notes, read back newest first. Nothing updates or deletes it.
 
+use super::{text_or_null, write_rows};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
@@ -36,21 +37,53 @@ pub(super) struct Change<'a> {
 /// Write `change`'s history row in the caller's transaction, stamped `at`
 /// and by `actor`.
 pub(super) fn record(conn: &Connection, actor: &Actor, at: &str, change: Change<'_>) -> Result<()> {
-    conn.execute(
+    record_all(conn, actor, at, vec![change])
+}
+
+/// Write one history row per change, in the caller's transaction, stamped
+/// `at` and by `actor`, their ids rising in the order given: the order a
+/// batch made the changes, as one statement per change would have numbered
+/// them.
+pub(super) fn record_all(
+    conn: &Connection,
+    actor: &Actor,
+    at: &str,
+    changes: Vec<Change<'_>>,
+) -> Result<()> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let count = i64::try_from(changes.len()).unwrap_or(i64::MAX);
+    let mut ids: Vec<i64> = conn
+        .prepare("SELECT nextval('ox.history_seq') FROM range(?)")?
+        .query_map(params![count], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    ids.sort_unstable();
+    let label = actor.label();
+    let rows: Vec<Vec<SqlValue>> = ids
+        .into_iter()
+        .zip(changes)
+        .map(|(id, change)| {
+            vec![
+                SqlValue::BigInt(id),
+                SqlValue::Text(at.to_string()),
+                SqlValue::Text(label.clone()),
+                SqlValue::Text(change.target_kind.to_string()),
+                SqlValue::Text(change.target_id),
+                SqlValue::Text(change.action.to_string()),
+                text_or_null(change.before.map(|v| v.to_string())),
+                text_or_null(change.after.map(|v| v.to_string())),
+            ]
+        })
+        .collect();
+    write_rows(
+        conn,
         "INSERT INTO ox.history \
          (id, \"at\", \"by\", target_kind, target_id, action, before_json, after_json) \
-         VALUES (nextval('ox.history_seq'), ?, ?, ?, ?, ?, ?, ?)",
-        params![
-            at,
-            actor.label(),
-            change.target_kind,
-            change.target_id,
-            change.action,
-            change.before.map(|v| v.to_string()),
-            change.after.map(|v| v.to_string()),
-        ],
-    )?;
-    Ok(())
+         VALUES {values}",
+        "(?, ?, ?, ?, ?, ?, ?, ?)",
+        &rows,
+    )
 }
 
 /// Up to `limit` history rows from `offset`, newest first, of one target

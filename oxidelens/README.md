@@ -131,8 +131,12 @@ and the message names the hosts it has; a host the case has but a relation
 lacks is no rows there.
 
 Batch commands (`mark set`, `mark clear`, `tag add`, `tag remove`) take `--rows` as a
-comma-separated list of integers; anything else (an empty entry, a sign, a
-decimal) is `invalid`. They exit 0 when the call was accepted, even if some
+comma-separated list of integers, or as `@file`, a file holding them separated
+by commas, spaces or new lines (a Windows command line holds about 3,500 ids);
+anything else (an empty entry, a sign, a decimal) is `invalid`. A batch reads
+and writes its rows a few statements at a time, however many it has: on a
+5.5 M-row case 1,000 rows take under half a second and 20,000 about 3 s.
+They exit 0 when the call was accepted, even if some
 rows were not done: `done` and `not_done` count them and `outcomes` says why
 for each row. A refusal of the whole call (an agent over the row cap, a
 malformed tag) is an error. `column declare --type TIMESTAMP` requires

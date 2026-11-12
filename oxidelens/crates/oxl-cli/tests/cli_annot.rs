@@ -443,6 +443,47 @@ fn bad_row_lists_are_invalid() {
     }
 }
 
+/// Found on the second real run: a Windows command line holds about 3,500
+/// row ids, so a larger batch could not be passed at all. `--rows @file`
+/// reads them from a file, separated by commas, spaces or new lines.
+#[test]
+fn row_ids_can_come_from_a_file() {
+    let (d, p) = loaded();
+    let p = p.as_str();
+    let r = ws01_4624(p);
+    let list = d.path().join("rows.txt");
+    std::fs::write(&list, format!("{r}\r\n999999999, {r}\n")).unwrap();
+    let at = format!("@{}", list.to_string_lossy());
+    let (c, v) = ox(&["--case", p, "mark", "set", "--rows", &at]);
+    assert_eq!(c, 0, "{v}");
+    let ids: Vec<i64> = v["data"]["outcomes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["row_id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(ids, [r, 999_999_999, r]);
+    assert_eq!(
+        (v["data"]["done"].clone(), v["data"]["not_done"].clone()),
+        (json!(2), json!(1))
+    );
+    let (c, v) = ox(&["--case", p, "tag", "add", "--rows", &at, "--tag", "batch"]);
+    assert_eq!((c, v["data"]["done"].clone()), (0, json!(2)), "{v}");
+
+    // A file is held to the same rule as the list: a stray comma is a typo.
+    for bad in ["1,,2", "1\n\nx", "1.5", "-1"] {
+        std::fs::write(&list, bad).unwrap();
+        assert_eq!(
+            ox(&["--case", p, "mark", "set", "--rows", &at]).0,
+            2,
+            "{bad:?}"
+        );
+    }
+    let missing = format!("@{}", d.path().join("none.txt").to_string_lossy());
+    let (c, v) = ox(&["--case", p, "mark", "clear", "--rows", &missing]);
+    assert_eq!(c, 2, "{v}");
+}
+
 #[test]
 fn whole_call_refusals_exit_4_and_empty_input_exits_2() {
     let (_d, p) = loaded();

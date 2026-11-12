@@ -30,6 +30,75 @@ fn mark_rows(case: &Case, row: i64) -> i64 {
     )
 }
 
+/// Found on the second real run: marking 1,000 rows took 6.5 s and tagging
+/// them 11.5 s, whatever the case's size, because each row was located,
+/// checked and written with statements of its own. A batch now reads what
+/// it needs and writes what it decided a few statements at a time, however
+/// many rows it has.
+#[test]
+fn a_batch_costs_a_few_statements_whatever_its_size() {
+    let (_d, mut case) = loaded();
+    let analyst = analyst();
+    let mut rows: Vec<i64> = Vec::new();
+    for relation in [
+        "evtxtriage_events",
+        "petriage_timeline",
+        "ext_hayabusa_csv_timeline",
+    ] {
+        // A table's rows take one contiguous run of ids.
+        let first = n(&case, &format!("select min(_ox_row) from {relation}"));
+        let last = n(&case, &format!("select max(_ox_row) from {relation}"));
+        let count = n(&case, &format!("select count(*) from {relation}"));
+        assert_eq!(last - first + 1, count, "{relation}");
+        rows.extend(first..=last);
+    }
+    let n_rows = rows.len();
+    assert!(n_rows >= 20, "{n_rows}");
+    // Fewer than one statement per row.
+    let allowed = 20;
+    assert!(allowed < n_rows);
+    // Listed in an order other than the tables', to see the history follow it.
+    rows.reverse();
+    type Batch = fn(&mut Case, &[i64], &Actor) -> oxl_engine::Result<Vec<oxl_engine::RowOutcome>>;
+    let calls: [(&str, Batch); 4] = [
+        ("mark set", |c, r, a| mark_suspicious(c, r, a)),
+        ("mark clear", |c, r, a| clear_suspicious(c, r, a)),
+        ("tag add", |c, r, a| add_tag(c, r, "batch", a)),
+        ("tag remove", |c, r, a| remove_tag(c, r, "batch", a)),
+    ];
+    for (what, call) in calls {
+        let (outcomes, statements) = case
+            .statements_during_mut(|case| call(case, &rows, &analyst).unwrap())
+            .unwrap();
+        assert!(outcomes.iter().all(|o| o.done), "{what}: {outcomes:?}");
+        assert!(
+            statements.len() <= allowed,
+            "{what} ran {} statements for {n_rows} rows (allowed {allowed}): {statements:#?}",
+            statements.len()
+        );
+    }
+    // Each call's history rows are numbered in the order its rows were given.
+    let given = rows
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    for action in ["mark_set", "mark_clear", "tag_add", "tag_remove"] {
+        let in_place = n(
+            &case,
+            &format!(
+                "select count(*) from \
+                 (select cast(target_id as bigint) as t, row_number() over (order by id) as r \
+                  from ox.history where action = '{action}') h \
+                 join (select unnest(l) as t, generate_subscripts(l, 1) as p \
+                       from (select [{given}] as l)) g using (t) \
+                 where h.r = g.p"
+            ),
+        );
+        assert_eq!(in_place, i64::try_from(n_rows).unwrap(), "{action}");
+    }
+}
+
 #[test]
 fn an_analyst_marks_and_clears() {
     let (_d, mut case) = loaded();

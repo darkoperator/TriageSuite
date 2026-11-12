@@ -3,14 +3,19 @@
 //! An agent's tags carry the `ai:` prefix and an analyst's never do, so the
 //! prefix alone says whose a tag is. An agent removes only a tag it applied.
 
-use super::history::{record, Change};
-use super::{check_batch, find_row, no_row, unwritable, RowOutcome};
+use super::history::{record_all, Change};
+use super::{
+    check_batch, id_list, locate_rows, no_row, per_id_chunk, unwritable, write_rows, LocatedRow,
+    RowOutcome, IDS_PER_STATEMENT,
+};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::time::now_iso;
+use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection};
+use std::collections::HashMap;
 
 /// The prefix every agent tag carries, and no analyst tag may.
 pub const AGENT_TAG_PREFIX: &str = "ai:";
@@ -63,37 +68,11 @@ pub fn add_tag(case: &mut Case, rows: &[i64], tag: &str, actor: &Actor) -> Resul
     check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
-    let out = rows
-        .iter()
-        .map(|&row| add_one(&tx, row, &tag, actor, &at))
-        .collect::<Result<_>>()?;
+    let mut batch = TagBatch::new(&tx, rows, &tag, actor, &at)?;
+    let out = rows.iter().map(|&row| batch.add(row)).collect();
+    batch.write()?;
     tx.commit()?;
     Ok(out)
-}
-
-fn add_one(conn: &Connection, row: i64, tag: &str, actor: &Actor, at: &str) -> Result<RowOutcome> {
-    if let Some(reason) = unwritable(conn, row)? {
-        return Ok(RowOutcome::refused(row, reason));
-    }
-    if let Some(by) = tagged_by(conn, row, tag)? {
-        return Ok(RowOutcome::unchanged(
-            row,
-            format!("row {row} already carries {tag}, tagged by {by}"),
-        ));
-    }
-    let label = actor.label();
-    conn.execute(
-        "INSERT INTO ox.tag (name, created_by, created_at) VALUES (?, ?, ?) \
-         ON CONFLICT DO NOTHING",
-        params![tag, label, at],
-    )?;
-    conn.execute(
-        "INSERT INTO ox.row_tag (row_id, tag, tagged_by, tagged_at) VALUES (?, ?, ?, ?)",
-        params![row, tag, label, at],
-    )?;
-    let after = tag_json(row, tag, &label, at);
-    record(conn, actor, at, change(row, "tag_add", None, Some(after)))?;
-    Ok(RowOutcome::changed(row))
 }
 
 /// Remove `tag` from each of `rows`. An agent removes only a tag it
@@ -110,62 +89,154 @@ pub fn remove_tag(
     check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
-    let out = rows
-        .iter()
-        .map(|&row| remove_one(&tx, row, &tag, actor, &at))
-        .collect::<Result<_>>()?;
+    let mut batch = TagBatch::new(&tx, rows, &tag, actor, &at)?;
+    let out = rows.iter().map(|&row| batch.remove(row)).collect();
+    batch.write()?;
     tx.commit()?;
     Ok(out)
 }
 
-fn remove_one(
-    conn: &Connection,
-    row: i64,
-    tag: &str,
-    actor: &Actor,
-    at: &str,
-) -> Result<RowOutcome> {
-    let Some((by, tagged_at)) = tag_on(conn, row, tag)? else {
-        let reason = match find_row(conn, row)? {
-            None => no_row(row),
-            Some(_) => format!("row {row} does not carry {tag}"),
-        };
-        return Ok(RowOutcome::refused(row, reason));
-    };
-    if actor.is_agent() && by != actor.label() {
-        return Ok(RowOutcome::refused(
-            row,
-            format!("tagged {tag} by {by}; only an analyst can remove it"),
-        ));
+/// One call's change to one tag over its rows. It reads what it needs about
+/// them up front, decides each row in order against what it has decided so
+/// far (so a row named twice sees the first change), and writes every
+/// change at the end a few statements at a time.
+struct TagBatch<'a> {
+    conn: &'a Connection,
+    tag: &'a str,
+    actor: &'a Actor,
+    at: &'a str,
+    located: HashMap<i64, LocatedRow>,
+    /// Who tagged each row with `tag`, and when, as the batch has left it.
+    tagged: HashMap<i64, (String, String)>,
+    added: Vec<i64>,
+    removed: Vec<i64>,
+    history: Vec<Change<'static>>,
+}
+
+impl<'a> TagBatch<'a> {
+    fn new(
+        conn: &'a Connection,
+        rows: &[i64],
+        tag: &'a str,
+        actor: &'a Actor,
+        at: &'a str,
+    ) -> Result<TagBatch<'a>> {
+        Ok(TagBatch {
+            conn,
+            tag,
+            actor,
+            at,
+            located: locate_rows(conn, rows)?,
+            tagged: tags_on(conn, rows, tag)?,
+            added: Vec::new(),
+            removed: Vec::new(),
+            history: Vec::new(),
+        })
     }
-    conn.execute(
-        "DELETE FROM ox.row_tag WHERE row_id = ? AND tag = ?",
-        params![row, tag],
-    )?;
-    let before = tag_json(row, tag, &by, &tagged_at);
-    record(
-        conn,
-        actor,
-        at,
-        change(row, "tag_remove", Some(before), None),
-    )?;
-    Ok(RowOutcome::changed(row))
+
+    fn add(&mut self, row: i64) -> RowOutcome {
+        let tag = self.tag;
+        if let Some(reason) = unwritable(&self.located, row) {
+            return RowOutcome::refused(row, reason);
+        }
+        if let Some((by, _)) = self.tagged.get(&row) {
+            return RowOutcome::unchanged(
+                row,
+                format!("row {row} already carries {tag}, tagged by {by}"),
+            );
+        }
+        let label = self.actor.label();
+        let after = tag_json(row, tag, &label, self.at);
+        self.history.push(change(row, "tag_add", None, Some(after)));
+        self.added.push(row);
+        self.tagged.insert(row, (label, self.at.to_string()));
+        RowOutcome::changed(row)
+    }
+
+    fn remove(&mut self, row: i64) -> RowOutcome {
+        let tag = self.tag;
+        let Some((by, tagged_at)) = self.tagged.get(&row).cloned() else {
+            let reason = if self.located.contains_key(&row) {
+                format!("row {row} does not carry {tag}")
+            } else {
+                no_row(row)
+            };
+            return RowOutcome::refused(row, reason);
+        };
+        if self.actor.is_agent() && by != self.actor.label() {
+            return RowOutcome::refused(
+                row,
+                format!("tagged {tag} by {by}; only an analyst can remove it"),
+            );
+        }
+        let before = tag_json(row, tag, &by, &tagged_at);
+        self.history
+            .push(change(row, "tag_remove", Some(before), None));
+        self.removed.push(row);
+        self.tagged.remove(&row);
+        RowOutcome::changed(row)
+    }
+
+    /// Write every change the batch decided, and its history. The tag is
+    /// defined first, when the batch put it on any row.
+    fn write(self) -> Result<()> {
+        let (conn, tag, at) = (self.conn, self.tag, self.at);
+        let label = self.actor.label();
+        per_id_chunk(
+            conn,
+            "DELETE FROM ox.row_tag WHERE tag = ? AND row_id IN ({ids})",
+            &[SqlValue::Text(tag.to_string())],
+            &self.removed,
+        )?;
+        if !self.added.is_empty() {
+            conn.execute(
+                "INSERT INTO ox.tag (name, created_by, created_at) VALUES (?, ?, ?) \
+                 ON CONFLICT DO NOTHING",
+                params![tag, label, at],
+            )?;
+        }
+        let rows: Vec<Vec<SqlValue>> = self
+            .added
+            .iter()
+            .map(|row| {
+                vec![
+                    SqlValue::BigInt(*row),
+                    SqlValue::Text(tag.to_string()),
+                    SqlValue::Text(label.clone()),
+                    SqlValue::Text(at.to_string()),
+                ]
+            })
+            .collect();
+        write_rows(
+            conn,
+            "INSERT INTO ox.row_tag (row_id, tag, tagged_by, tagged_at) VALUES {values}",
+            "(?, ?, ?, ?)",
+            &rows,
+        )?;
+        record_all(conn, self.actor, at, self.history)
+    }
 }
 
-/// Who tagged `row` with `tag`, and when; `None` when it does not carry it.
-fn tag_on(conn: &Connection, row: i64, tag: &str) -> Result<Option<(String, String)>> {
-    Ok(conn
-        .prepare(
-            "SELECT tagged_by, tagged_at FROM ox.row_tag WHERE row_id = ? AND tag = ? \
-             ORDER BY tagged_at LIMIT 1",
-        )?
-        .query_map(params![row, tag], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .next()
-        .transpose()?)
-}
-
-fn tagged_by(conn: &Connection, row: i64, tag: &str) -> Result<Option<String>> {
-    Ok(tag_on(conn, row, tag)?.map(|(by, _)| by))
+/// Who tagged each of `rows` that carries `tag`, and when: the earliest,
+/// should a row carry it more than once.
+fn tags_on(conn: &Connection, rows: &[i64], tag: &str) -> Result<HashMap<i64, (String, String)>> {
+    let mut out = HashMap::new();
+    for chunk in rows.chunks(IDS_PER_STATEMENT) {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT row_id, tagged_by, tagged_at FROM ox.row_tag \
+             WHERE tag = ? AND row_id IN ({}) \
+             QUALIFY row_number() OVER (PARTITION BY row_id ORDER BY tagged_at) = 1",
+            id_list(chunk)
+        ))?;
+        let found = stmt.query_map(params![tag], |r| {
+            Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?)))
+        })?;
+        for row in found {
+            let (row, by_at) = row?;
+            out.insert(row, by_at);
+        }
+    }
+    Ok(out)
 }
 
 fn tag_json(row: i64, tag: &str, by: &str, at: &str) -> serde_json::Value {

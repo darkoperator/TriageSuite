@@ -9,8 +9,11 @@
 //! An agent's mark is provisional: an analyst marking the row takes it
 //! over, and an agent clears only a mark it set itself.
 
-use super::history::{record, Change};
-use super::{check_batch, find_row, no_row, unwritable, RowOutcome, Standing};
+use super::history::{record_all, Change};
+use super::{
+    check_batch, id_list, locate_rows, no_row, per_id_chunk, unwritable, write_rows, LocatedRow,
+    RowOutcome, Standing, IDS_PER_STATEMENT,
+};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
@@ -18,7 +21,8 @@ use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::query::MarkState;
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
-use duckdb::{params, params_from_iter, Connection};
+use duckdb::{params_from_iter, Connection};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MarkedRow {
@@ -36,6 +40,7 @@ pub struct MarkedRow {
 }
 
 /// The mark on a row, as stored.
+#[derive(Clone)]
 struct Mark {
     mark: String,
     marked_by: String,
@@ -61,52 +66,11 @@ pub fn mark_suspicious(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<V
     check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
-    let out = rows
-        .iter()
-        .map(|&row| mark_one(&tx, row, actor, &at))
-        .collect::<Result<_>>()?;
+    let mut batch = MarkBatch::new(&tx, rows, actor, &at)?;
+    let out = rows.iter().map(|&row| batch.mark(row)).collect();
+    batch.write()?;
     tx.commit()?;
     Ok(out)
-}
-
-fn mark_one(conn: &Connection, row: i64, actor: &Actor, at: &str) -> Result<RowOutcome> {
-    if let Some(reason) = unwritable(conn, row)? {
-        return Ok(RowOutcome::refused(row, reason));
-    }
-    let label = actor.label();
-    let wanted = Mark {
-        mark: MarkState::Suspicious.as_str().to_string(),
-        marked_by: label.clone(),
-        marked_at: at.to_string(),
-    };
-    let Some(existing) = mark_on(conn, row)? else {
-        conn.execute(
-            "INSERT INTO ox.row_mark (row_id, mark, marked_by, marked_at) VALUES (?, ?, ?, ?)",
-            params![row, wanted.mark, wanted.marked_by, wanted.marked_at],
-        )?;
-        record(
-            conn,
-            actor,
-            at,
-            change(row, "mark_set", None, Some(&wanted)),
-        )?;
-        return Ok(RowOutcome::changed(row));
-    };
-    let already = format!("already marked by {}", existing.marked_by);
-    if actor.is_agent() {
-        return Ok(RowOutcome::refused(row, already));
-    }
-    if Actor::parse(&existing.marked_by).is_ok_and(|owner| owner.is_agent()) {
-        conn.execute(
-            "UPDATE ox.row_mark SET mark = ?, marked_by = ?, marked_at = ? WHERE row_id = ?",
-            params![wanted.mark, wanted.marked_by, wanted.marked_at, row],
-        )?;
-        let take_over = change(row, "mark_take_over", Some(&existing), Some(&wanted));
-        record(conn, actor, at, take_over)?;
-        return Ok(RowOutcome::changed(row));
-    }
-    // Marked by an analyst, this one or another: it is already what was asked.
-    Ok(RowOutcome::unchanged(row, already))
 }
 
 /// Clear the mark on each of `rows`. An analyst clears any mark; an agent
@@ -117,57 +81,173 @@ pub fn clear_suspicious(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<
     check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
-    let out = rows
-        .iter()
-        .map(|&row| clear_one(&tx, row, actor, &at))
-        .collect::<Result<_>>()?;
+    let mut batch = MarkBatch::new(&tx, rows, actor, &at)?;
+    let out = rows.iter().map(|&row| batch.clear(row)).collect();
+    batch.write()?;
     tx.commit()?;
     Ok(out)
 }
 
-fn clear_one(conn: &Connection, row: i64, actor: &Actor, at: &str) -> Result<RowOutcome> {
-    let Some(existing) = mark_on(conn, row)? else {
-        let reason = match find_row(conn, row)? {
-            None => no_row(row),
-            Some(_) => format!("row {row} is not marked"),
-        };
-        return Ok(RowOutcome::refused(row, reason));
-    };
-    if actor.is_agent() && existing.marked_by != actor.label() {
-        return Ok(RowOutcome::refused(
-            row,
-            format!(
-                "marked by {}; only an analyst can clear it",
-                existing.marked_by
-            ),
-        ));
-    }
-    conn.execute("DELETE FROM ox.row_mark WHERE row_id = ?", params![row])?;
-    record(
-        conn,
-        actor,
-        at,
-        change(row, "mark_clear", Some(&existing), None),
-    )?;
-    Ok(RowOutcome::changed(row))
+/// One call's mark change over its rows. It reads what it needs about them
+/// up front, decides each row in order against what it has decided so far
+/// (so a row named twice sees the first change), and writes every change
+/// at the end a few statements at a time.
+struct MarkBatch<'a> {
+    conn: &'a Connection,
+    actor: &'a Actor,
+    at: &'a str,
+    located: HashMap<i64, LocatedRow>,
+    /// The mark on each row, as the batch has left it so far.
+    marked: HashMap<i64, Mark>,
+    inserts: Vec<(i64, Mark)>,
+    take_overs: Vec<(i64, Mark)>,
+    clears: Vec<i64>,
+    history: Vec<Change<'static>>,
 }
 
-/// The mark on `row`, if any.
-fn mark_on(conn: &Connection, row: i64) -> Result<Option<Mark>> {
-    Ok(conn
-        .prepare(
-            "SELECT mark, marked_by, marked_at FROM ox.row_mark WHERE row_id = ? \
-             ORDER BY marked_at LIMIT 1",
-        )?
-        .query_map(params![row], |r| {
-            Ok(Mark {
-                mark: r.get(0)?,
-                marked_by: r.get(1)?,
-                marked_at: r.get(2)?,
-            })
-        })?
-        .next()
-        .transpose()?)
+impl<'a> MarkBatch<'a> {
+    fn new(conn: &'a Connection, rows: &[i64], actor: &'a Actor, at: &'a str) -> Result<Self> {
+        Ok(MarkBatch {
+            conn,
+            actor,
+            at,
+            located: locate_rows(conn, rows)?,
+            marked: marks_on(conn, rows)?,
+            inserts: Vec::new(),
+            take_overs: Vec::new(),
+            clears: Vec::new(),
+            history: Vec::new(),
+        })
+    }
+
+    fn mark(&mut self, row: i64) -> RowOutcome {
+        if let Some(reason) = unwritable(&self.located, row) {
+            return RowOutcome::refused(row, reason);
+        }
+        let wanted = Mark {
+            mark: MarkState::Suspicious.as_str().to_string(),
+            marked_by: self.actor.label(),
+            marked_at: self.at.to_string(),
+        };
+        let Some(existing) = self.marked.get(&row).cloned() else {
+            self.history
+                .push(change(row, "mark_set", None, Some(&wanted)));
+            self.inserts.push((row, wanted.clone()));
+            self.marked.insert(row, wanted);
+            return RowOutcome::changed(row);
+        };
+        let already = format!("already marked by {}", existing.marked_by);
+        if self.actor.is_agent() {
+            return RowOutcome::refused(row, already);
+        }
+        if Actor::parse(&existing.marked_by).is_ok_and(|owner| owner.is_agent()) {
+            self.history.push(change(
+                row,
+                "mark_take_over",
+                Some(&existing),
+                Some(&wanted),
+            ));
+            self.take_overs.push((row, wanted.clone()));
+            self.marked.insert(row, wanted);
+            return RowOutcome::changed(row);
+        }
+        // Marked by an analyst, this one or another: it is already what was asked.
+        RowOutcome::unchanged(row, already)
+    }
+
+    fn clear(&mut self, row: i64) -> RowOutcome {
+        let Some(existing) = self.marked.get(&row).cloned() else {
+            let reason = if self.located.contains_key(&row) {
+                format!("row {row} is not marked")
+            } else {
+                no_row(row)
+            };
+            return RowOutcome::refused(row, reason);
+        };
+        if self.actor.is_agent() && existing.marked_by != self.actor.label() {
+            return RowOutcome::refused(
+                row,
+                format!(
+                    "marked by {}; only an analyst can clear it",
+                    existing.marked_by
+                ),
+            );
+        }
+        self.history
+            .push(change(row, "mark_clear", Some(&existing), None));
+        self.clears.push(row);
+        self.marked.remove(&row);
+        RowOutcome::changed(row)
+    }
+
+    /// Write every change the batch decided, and its history.
+    fn write(self) -> Result<()> {
+        let conn = self.conn;
+        per_id_chunk(
+            conn,
+            "DELETE FROM ox.row_mark WHERE row_id IN ({ids})",
+            &[],
+            &self.clears,
+        )?;
+        let values = |marks: &[(i64, Mark)]| -> Vec<Vec<SqlValue>> {
+            marks
+                .iter()
+                .map(|(row, m)| {
+                    vec![
+                        SqlValue::BigInt(*row),
+                        SqlValue::Text(m.mark.clone()),
+                        SqlValue::Text(m.marked_by.clone()),
+                        SqlValue::Text(m.marked_at.clone()),
+                    ]
+                })
+                .collect()
+        };
+        write_rows(
+            conn,
+            "UPDATE ox.row_mark AS m \
+             SET mark = v.mark, marked_by = v.marked_by, marked_at = v.marked_at \
+             FROM (VALUES {values}) AS v(row_id, mark, marked_by, marked_at) \
+             WHERE m.row_id = v.row_id",
+            "(CAST(? AS BIGINT), CAST(? AS VARCHAR), CAST(? AS VARCHAR), CAST(? AS VARCHAR))",
+            &values(&self.take_overs),
+        )?;
+        write_rows(
+            conn,
+            "INSERT INTO ox.row_mark (row_id, mark, marked_by, marked_at) VALUES {values}",
+            "(?, ?, ?, ?)",
+            &values(&self.inserts),
+        )?;
+        record_all(conn, self.actor, self.at, self.history)
+    }
+}
+
+/// The mark on each of `rows` that has one: its earliest, should a row
+/// carry more than one.
+fn marks_on(conn: &Connection, rows: &[i64]) -> Result<HashMap<i64, Mark>> {
+    let mut out = HashMap::new();
+    for chunk in rows.chunks(IDS_PER_STATEMENT) {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT row_id, mark, marked_by, marked_at FROM ox.row_mark \
+             WHERE row_id IN ({}) \
+             QUALIFY row_number() OVER (PARTITION BY row_id ORDER BY marked_at) = 1",
+            id_list(chunk)
+        ))?;
+        let marks = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                Mark {
+                    mark: r.get(1)?,
+                    marked_by: r.get(2)?,
+                    marked_at: r.get(3)?,
+                },
+            ))
+        })?;
+        for mark in marks {
+            let (row, mark) = mark?;
+            out.insert(row, mark);
+        }
+    }
+    Ok(out)
 }
 
 /// The history entry for a change to `row`'s mark.
@@ -217,10 +297,12 @@ pub fn marks(
         })?
         .collect::<std::result::Result<_, _>>()?;
     let stored = Listing::from_fetched(stored, limit);
+    let ids: Vec<i64> = stored.items.iter().map(|(id, ..)| *id).collect();
+    let located = locate_rows(conn, &ids)?;
     let mut out = Vec::with_capacity(stored.items.len());
     for (row_id, mark, marked_by, marked_at) in stored.items {
         // Removing a source keeps its rows' ranges, so every mark locates.
-        let row = find_row(conn, row_id)?.ok_or_else(|| {
+        let row = located.get(&row_id).ok_or_else(|| {
             EngineError::Invalid(format!(
                 "the case holds a mark on row {row_id}, which no source ever loaded"
             ))
@@ -230,8 +312,8 @@ pub fn marks(
         })?;
         out.push(MarkedRow {
             row_id,
-            relation: row.relation,
-            host: row.host,
+            relation: row.relation.clone(),
+            host: row.host.clone(),
             mark,
             marked_by,
             marked_at,

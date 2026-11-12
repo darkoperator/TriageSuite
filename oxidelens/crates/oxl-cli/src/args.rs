@@ -282,7 +282,8 @@ pub enum SourceCmd {
 /// The rows a batch command acts on.
 #[derive(Args, Debug)]
 pub struct RowsArg {
-    /// Row ids, comma-separated.
+    /// Row ids, comma-separated, or @file holding them separated by commas,
+    /// spaces or new lines.
     #[arg(long)]
     pub rows: String,
 }

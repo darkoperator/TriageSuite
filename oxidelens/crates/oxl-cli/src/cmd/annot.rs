@@ -18,20 +18,40 @@ use crate::envelope::wrap;
 use oxl_engine::{Actor, EngineError, Result, RowOutcome, SqlType, TimeSemantics};
 use serde_json::json;
 
-/// `1,2,3` as row ids. Anything else, an empty entry included, is
-/// `invalid`: a stray comma is a typo, and acting on the rest would hide it.
+/// `1,2,3` as row ids, or with `@path` the ids in that file, which a list
+/// too long for a command line needs: there they are separated by commas,
+/// spaces or new lines, in any mix. Anything else, an empty entry between
+/// commas included, is `invalid`: a stray comma is a typo, and acting on the
+/// rest would hide it.
 fn parse_rows(text: &str) -> Result<Vec<i64>> {
-    text.split(',')
-        .map(|part| {
-            let digits = !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-            match part.parse::<i64>() {
-                Ok(id) if digits => Ok(id),
-                _ => Err(EngineError::Invalid(format!(
-                    "--rows is a comma-separated list of integers, not {text:?}"
-                ))),
-            }
-        })
-        .collect()
+    let invalid = |what: &str| {
+        EngineError::Invalid(format!(
+            "--rows is a comma-separated list of integers, or @file holding integers \
+             separated by commas, spaces or new lines; not {what:?}"
+        ))
+    };
+    let id = |word: &str| {
+        let digits = !word.is_empty() && word.bytes().all(|b| b.is_ascii_digit());
+        match word.parse::<i64>() {
+            Ok(id) if digits => Ok(id),
+            _ => Err(invalid(text)),
+        }
+    };
+    if !text.starts_with('@') {
+        return text.split(',').map(id).collect();
+    }
+    let content = text_arg(text)?;
+    let mut out = Vec::new();
+    for entry in content.split(',') {
+        let words: Vec<&str> = entry.split_ascii_whitespace().collect();
+        if words.is_empty() {
+            return Err(invalid(text));
+        }
+        for word in words {
+            out.push(id(word)?);
+        }
+    }
+    Ok(out)
 }
 
 /// A batch call that was accepted: exit 0 even when some rows were not done.

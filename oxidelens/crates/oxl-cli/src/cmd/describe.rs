@@ -75,11 +75,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ("row", "One row in full: row <id>"),
     (
         "mark set",
-        "Mark rows suspicious: mark set --rows 1,2,3. An agent may mark at most 1,000 rows per call and never changes a mark that exists",
+        "Mark rows suspicious: mark set --rows <1,2,3 | @file>. An agent may mark at most 1,000 rows per call and never changes a mark that exists",
     ),
     (
         "mark clear",
-        "Clear marks: mark clear --rows 1,2,3. An agent clears only marks it set",
+        "Clear marks: mark clear --rows <1,2,3 | @file>. An agent clears only marks it set",
     ),
     (
         "mark list",
@@ -87,11 +87,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "tag add",
-        "Tag rows: tag add --rows 1,2,3 --tag <tag>. An agent's tag starts ai:, an analyst's does not",
+        "Tag rows: tag add --rows <1,2,3 | @file> --tag <tag>. An agent's tag starts ai:, an analyst's does not",
     ),
     (
         "tag remove",
-        "Remove a tag: tag remove --rows 1,2,3 --tag <tag>. An agent removes only tags it applied",
+        "Remove a tag: tag remove --rows <1,2,3 | @file> --tag <tag>. An agent removes only tags it applied",
     ),
     (
         "tag list",

@@ -164,18 +164,38 @@ impl Case {
     /// counting, so a statement run on any connection to the case is seen.
     #[doc(hidden)]
     pub fn statements_during<T>(&self, call: impl FnOnce() -> T) -> Result<(T, Vec<String>)> {
-        const STOP: &str = "CALL disable_logging()";
+        self.start_query_log()?;
+        let out = call();
+        Ok((out, self.stop_query_log()?))
+    }
+
+    /// `statements_during` for a call that changes the case.
+    #[doc(hidden)]
+    pub fn statements_during_mut<T>(
+        &mut self,
+        call: impl FnOnce(&mut Case) -> T,
+    ) -> Result<(T, Vec<String>)> {
+        self.start_query_log()?;
+        let out = call(self);
+        Ok((out, self.stop_query_log()?))
+    }
+
+    fn start_query_log(&self) -> Result<()> {
         self.conn()
             .execute_batch("CALL truncate_duckdb_logs(); CALL enable_logging('QueryLog');")?;
-        let out = call();
+        Ok(())
+    }
+
+    /// Stop the query log and return what it holds, the stop itself left out.
+    fn stop_query_log(&self) -> Result<Vec<String>> {
+        const STOP: &str = "CALL disable_logging()";
         self.conn().execute_batch(STOP)?;
-        let statements = self
+        Ok(self
             .conn()
             .prepare("SELECT message FROM duckdb_logs WHERE type = 'QueryLog'")?
             .query_map([], |r| r.get::<_, String>(0))?
             .filter(|sql| sql.as_deref().map_or(true, |sql| sql.trim() != STOP))
-            .collect::<std::result::Result<_, _>>()?;
-        Ok((out, statements))
+            .collect::<std::result::Result<_, _>>()?)
     }
 }
 
