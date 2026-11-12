@@ -13,6 +13,152 @@ fn code<T>(result: oxl_engine::Result<T>) -> &'static str {
     }
 }
 
+/// Found on the second real run: removing a 900 MB source left the case
+/// file at 2 GB, because DuckDB keeps a file's freed blocks for reuse and
+/// never gives them back. The size and the free part are reported, and
+/// `compact_to` writes a copy without the free part, the original left as
+/// it is. The copy carries on where the case was: its ids continue, so a
+/// removed source's row ids are never handed out again.
+#[test]
+fn a_case_reports_its_free_space_and_compacts_into_a_copy() {
+    use oxl_engine::{
+        add_note, load_run, mark_suspicious, relations, remove_source, row_place, RowStanding,
+    };
+    let d = tempfile::tempdir().unwrap();
+    let analyst = Actor::Analyst("tester".into());
+    let p = d.path().join("a.case.duckdb");
+    let mut case = Case::create(&p, "IR-1", &analyst).unwrap();
+    let first = load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("one")),
+        &analyst,
+    )
+    .unwrap()
+    .source_id;
+    let marked = case
+        .scalar_i64("SELECT min(_ox_row) FROM evtxtriage_events")
+        .unwrap();
+    assert!(mark_suspicious(&mut case, &[marked], &analyst).unwrap()[0].done);
+    add_note(&mut case, marked, "kept", &analyst).unwrap();
+    let loose = load_file(
+        &mut case,
+        &oxl_fixtures::loose_fw_csv(d.path()),
+        FileOptions::default(),
+        &analyst,
+    )
+    .unwrap();
+    let loose_last = case.scalar_i64("SELECT max(_ox_row) FROM fw_csv").unwrap();
+    remove_source(&mut case, loose.source_id, true, &analyst).unwrap();
+    let size = case.size().unwrap();
+    assert!(size.bytes > 0 && size.free_bytes <= size.bytes, "{size:?}");
+
+    let out = d.path().join("b.case.duckdb");
+    let report = case.compact_to(&out).unwrap();
+    assert_eq!(report.bytes_before, std::fs::metadata(&p).unwrap().len());
+    assert_eq!(report.bytes_after, std::fs::metadata(&out).unwrap().len());
+    let rows = |c: &Case| -> Vec<(String, u64)> {
+        relations(c)
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.name, r.rows))
+            .collect()
+    };
+    let history = |c: &Case| c.scalar_i64("SELECT count(*) FROM ox.history").unwrap();
+    let (rows_before, history_before) = (rows(&case), history(&case));
+    drop(case);
+
+    let mut copy = Case::open(&out).unwrap();
+    let info = copy.info().unwrap();
+    assert_eq!(
+        (info.name.as_str(), info.path.as_path()),
+        ("IR-1", out.as_path())
+    );
+    assert_eq!(rows(&copy), rows_before);
+    assert_eq!(history(&copy), history_before);
+    assert_eq!(
+        copy.scalar_i64(&format!(
+            "SELECT count(*) FROM ox.row_mark WHERE row_id = {marked}"
+        ))
+        .unwrap(),
+        1
+    );
+    // The removed source's place is kept, and its ids are not reused.
+    assert_eq!(
+        row_place(&copy, loose_last).unwrap().unwrap().standing,
+        RowStanding::Removed
+    );
+    let again = load_run(
+        &mut copy,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("two")),
+        &analyst,
+    )
+    .unwrap();
+    let newest = copy
+        .scalar_i64(&format!(
+            "SELECT min(first_row) FROM ox.source_table WHERE source_id = {}",
+            again.source_id
+        ))
+        .unwrap();
+    assert!(newest > loose_last, "{newest} <= {loose_last}");
+    assert!(again.source_id > first);
+    // The original is untouched and still opens.
+    drop(copy);
+    assert_eq!(Case::open(&p).unwrap().info().unwrap().name, "IR-1");
+}
+
+/// Reviewed: DuckDB names a database after its file and compares names
+/// without regard to case, so a case called like compaction's own name for
+/// the copy still compacts.
+#[test]
+fn a_case_named_like_the_copy_still_compacts() {
+    let d = tempfile::tempdir().unwrap();
+    let analyst = Actor::Analyst("tester".into());
+    let case = Case::create(&d.path().join("Ox_Compact.duckdb"), "IR-1", &analyst).unwrap();
+    let out = d.path().join("copy.case.duckdb");
+    case.compact_to(&out).unwrap();
+    assert_eq!(Case::open(&out).unwrap().info().unwrap().name, "IR-1");
+}
+
+#[test]
+fn compacting_never_overwrites_a_file() {
+    let d = tempfile::tempdir().unwrap();
+    let analyst = Actor::Analyst("tester".into());
+    let case = Case::create(&d.path().join("a.case.duckdb"), "IR-1", &analyst).unwrap();
+    let taken = d.path().join("taken.duckdb");
+    std::fs::write(&taken, b"keep me").unwrap();
+    assert_eq!(code(case.compact_to(&taken)), "invalid");
+    assert_eq!(std::fs::read(&taken).unwrap(), b"keep me");
+    assert_eq!(code(case.compact_to(&d.path().join("copy.txt"))), "invalid");
+    assert!(!d.path().join("copy.txt").exists());
+    // A log beside the name, which DuckDB would replay into the copy.
+    let logged = d.path().join("logged.case.duckdb");
+    std::fs::write(d.path().join("logged.case.duckdb.wal"), b"not ours").unwrap();
+    assert_eq!(code(case.compact_to(&logged)), "invalid");
+    assert!(!logged.exists());
+    assert_eq!(
+        std::fs::read(d.path().join("logged.case.duckdb.wal")).unwrap(),
+        b"not ours"
+    );
+    // A copy that works leaves nothing beside it but itself (the open
+    // case's own log aside).
+    case.compact_to(&d.path().join("fine.case.duckdb")).unwrap();
+    let mut names: Vec<String> = std::fs::read_dir(d.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "a.case.duckdb.wal")
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "a.case.duckdb",
+            "fine.case.duckdb",
+            "logged.case.duckdb.wal",
+            "taken.duckdb"
+        ]
+    );
+}
+
 #[test]
 fn create_then_open_round_trips_info() {
     let d = tempfile::tempdir().unwrap();

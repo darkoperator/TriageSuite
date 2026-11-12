@@ -241,8 +241,14 @@ pub enum CaseCmd {
         #[arg(long)]
         name: String,
     },
-    /// Show the case's name, format and creator.
+    /// Show the case's name, format and creator, and its size.
     Info,
+    /// Write a copy of the case without the space removed sources left
+    /// free; the case itself is left as it is.
+    Compact {
+        /// The new case file to write; it must not exist.
+        out: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -396,6 +402,7 @@ impl Command {
         match self {
             Command::Case(CaseCmd::New { .. }) => "case new",
             Command::Case(CaseCmd::Info) => "case info",
+            Command::Case(CaseCmd::Compact { .. }) => "case compact",
             Command::Load(LoadCmd::Run { .. }) => "load run",
             Command::Load(LoadCmd::File { .. }) => "load file",
             Command::Sources => "sources",

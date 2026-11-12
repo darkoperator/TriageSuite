@@ -46,16 +46,23 @@ fn calls(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
     let fw_two = loose.join("fw_two.csv");
     std::fs::copy(loose.join("fw.csv"), &fw_two).unwrap();
     let new_case = dir.join("second.case.duckdb");
-    let (rerun, fw_two, new_case) = (
+    // A fresh name per call list: compacting never writes over a file.
+    let compact = (0..)
+        .map(|i| dir.join(format!("compact{i}.case.duckdb")))
+        .find(|p| !p.exists())
+        .unwrap();
+    let (rerun, fw_two, new_case, compact) = (
         rerun.to_string_lossy().into_owned(),
         fw_two.to_string_lossy().into_owned(),
         new_case.to_string_lossy().into_owned(),
+        compact.to_string_lossy().into_owned(),
     );
     let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let ev = "evtxtriage_events";
     vec![
         s(&["case", "new", &new_case, "--name", "WS01 second case"]),
         s(&["case", "info"]),
+        s(&["case", "compact", &compact]),
         s(&["sources"]),
         s(&["load", "run", &rerun]),
         s(&[
@@ -158,10 +165,12 @@ fn every_successful_command_emits_the_envelope_keys() {
     assert_eq!(exercised, all, "commands with no contract call, or unknown");
 }
 
-/// The commands that change the case named by `--case`. Every other command
-/// only reads it (`case new` writes a different file; `capabilities` opens
-/// none).
+/// The commands that need the case named by `--case` to themselves: every
+/// one that changes it, and `case compact`, which only reads it but writes
+/// its copy from a case opened that way. Every other command only reads it
+/// (`case new` writes a different file; `capabilities` opens none).
 const CHANGES_THE_CASE: &[&str] = &[
+    "case compact",
     "load run",
     "load file",
     "source remove",

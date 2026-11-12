@@ -21,7 +21,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "case info",
-        "Show the case's format, creator and creation time",
+        "Show the case's format, creator and creation time, and its size: bytes, and free_bytes, the part removed sources left that the file keeps for reuse",
+    ),
+    (
+        "case compact",
+        "Write a copy of the case without its free space: case compact <new path>. The case itself is left as it is; work on in the copy. Everything is copied, ids carry on where the case was",
     ),
     (
         "load run",

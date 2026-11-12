@@ -52,6 +52,46 @@ fn case_new_info_and_load_run() {
     );
 }
 
+/// Found on the second real run: removing a source left its space in the
+/// file. `case info` says how much is free, and `case compact` writes a
+/// copy without it, refusing a path that exists.
+#[test]
+fn case_info_reports_free_space_and_compact_writes_a_copy() {
+    let (d, p, run) = setup();
+    let p = p.as_str();
+    assert_eq!(ox(&["case", "new", p, "--name", "IR-1"]).0, 0);
+    let (_, v) = ox(&["--case", p, "load", "run", &run]);
+    let source = v["data"]["source_id"].as_i64().unwrap().to_string();
+    assert_eq!(ox(&["--case", p, "source", "remove", &source]).0, 0);
+    let (code, v) = ox(&["--case", p, "case", "info"]);
+    let (bytes, free) = (
+        v["data"]["bytes"].as_u64().unwrap(),
+        v["data"]["free_bytes"].as_u64().unwrap(),
+    );
+    assert!(code == 0 && bytes > 0 && free <= bytes, "{v}");
+
+    let out = d.path().join("copy.case.duckdb");
+    let out = out.to_string_lossy();
+    let (raw_code, raw) = ox_raw(&["--case", p, "case", "compact", &out]);
+    assert_eq!(raw_code, 0, "{raw}");
+    assert_only_inside(&raw, "copy.case.duckdb");
+    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(v["command"], "case compact");
+    assert_eq!(
+        v["data"]["bytes_after"].as_u64(),
+        Some(std::fs::metadata(out.as_ref()).unwrap().len())
+    );
+    let (code, v) = ox(&["--case", &out, "sources"]);
+    assert_eq!((code, v["data"]["sources"].clone()), (0, json!(1)), "{v}");
+    // Never over a file that exists.
+    let (code, v) = ox(&["--case", p, "case", "compact", &out]);
+    assert_eq!(
+        (code, v["error"]["code"].clone()),
+        (2, json!("invalid")),
+        "{v}"
+    );
+}
+
 #[test]
 fn load_run_leaves_out_per_channel_copies_unless_asked() {
     let d = tempfile::tempdir().unwrap();

@@ -69,6 +69,7 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
     match &cli.command {
         Command::Case(CaseCmd::New { path, name }) => case::new(&ctx, path, name),
         Command::Case(CaseCmd::Info) => case::info(&ctx),
+        Command::Case(CaseCmd::Compact { out }) => case::compact(&ctx, out),
         Command::Load(LoadCmd::Run {
             out_root,
             per_channel,

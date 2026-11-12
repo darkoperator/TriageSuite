@@ -24,7 +24,7 @@ pub use annot::{
     remove_tag, row_detail, row_place, tags, HistoryRow, MarkedRow, Note, RowDetail, RowOutcome,
     RowPlace, RowStanding, TagInfo, AGENT_ROWS_PER_CALL, AGENT_TAG_PREFIX, MAX_NOTE, MAX_TAG,
 };
-pub use case::{Case, CaseInfo, CASE_FORMAT};
+pub use case::{Case, CaseInfo, CaseSize, CompactReport, CASE_FORMAT};
 pub use catalog::{
     column_comments, columns, declare_type, relation, relations, set_primary_time, ColumnInfo,
     ColumnRole, RelationInfo, RelationKind, SqlType, TimeSemantics, TypeOrigin,
