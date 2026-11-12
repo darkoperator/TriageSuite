@@ -236,6 +236,60 @@ fn merged_rows_outside_the_event_log_have_readable_summaries() {
     assert_eq!(summary("retriage_userassist_ntuser_dat"), "rclone.exe · 3");
 }
 
+/// Found on the second real run: browser, SUM and MRU rows read as their
+/// browser, profile and key-path columns, and a RegBack copy as slots and
+/// key paths, where the dataset it copies reads as its task.
+#[test]
+fn browser_sum_mru_and_regback_rows_have_readable_summaries() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::app_timed_more(&d.path().join("run"));
+    let mut case = new_case(d.path());
+    load_run(&mut case, &run, &analyst()).unwrap();
+    let rows = merged_rows(
+        &case,
+        &MergedSource::Around {
+            host: "WS01".into(),
+            at: "2026-01-05T02:17:00Z".into(),
+            window_seconds: 300,
+        },
+        50,
+        0,
+    )
+    .unwrap()
+    .items;
+    let summary = |rel: &str| {
+        rows.iter()
+            .find(|r| r.relation == rel)
+            .unwrap_or_else(|| panic!("no {rel} row in {rows:#?}"))
+            .summary
+            .clone()
+    };
+    assert_eq!(
+        summary("browsertriage_history"),
+        "https://files.example.com/rclone.zip · rclone download"
+    );
+    assert_eq!(
+        summary("browsertriage_timeline"),
+        r"Download Start · Download · C:\Users\svc_backup\Downloads\rclone.zip"
+    );
+    assert_eq!(
+        summary("sumetriage_clients"),
+        r"LAB\svc_backup · 203.0.113.7 · File Server"
+    );
+    assert_eq!(
+        summary("retriage_recent_documents_ntuser_dat"),
+        "stage.zip · stage.lnk"
+    );
+    assert_eq!(summary("retriage_taskcache_software_regback"), r"\Updater");
+    // The MRU slot without a time is not on the timeline.
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.relation == "retriage_recent_documents_ntuser_dat")
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn every_pivot_says_how_its_times_are_zoned() {
     let (d, mut case) = loaded();

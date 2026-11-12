@@ -232,6 +232,67 @@ fn the_app_gives_registry_and_prefetch_relations_their_timeline() {
     }
 }
 
+/// Found on the second real run, a domain controller: 37 relations had no
+/// timeline, every browser and SUM dataset among them, though their times
+/// are text in the Z form, and RETriage's RegBack copies missed what the app
+/// gives the datasets they copy.
+#[test]
+fn browser_sum_mru_and_regback_relations_get_a_timeline() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::app_timed_more(&d.path().join("run"));
+    let mut case = oxl_fixtures::new_case(d.path());
+    oxl_engine::load_run(&mut case, &run, &analyst()).unwrap();
+    for (rel, time) in [
+        ("browsertriage_history", "Visit Time"),
+        ("browsertriage_timeline", "Timestamp"),
+        ("sumetriage_clients", "InsertDate"),
+        ("retriage_recent_documents_ntuser_dat", "OpenedOn"),
+        ("retriage_taskcache_software_regback", "CreatedOn"),
+    ] {
+        assert_eq!(
+            relation(&case, rel).unwrap().primary_time.as_deref(),
+            Some(time),
+            "{rel}"
+        );
+        assert_eq!(
+            n(
+                &case,
+                &format!("select count(*) from {rel} where \"{time}__typed\" is not null")
+            ),
+            1,
+            "{rel}.{time} did not cast"
+        );
+        let column = columns(&case, rel)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == time)
+            .unwrap();
+        assert_eq!(
+            (column.sql_type, column.time_semantics, column.origin),
+            (
+                Some(SqlType::Timestamp),
+                Some(TimeSemantics::Utc),
+                Some(TypeOrigin::AppMap)
+            ),
+            "{rel}.{time}"
+        );
+    }
+    // The other times of a relation are typed too, the primary one aside.
+    for (rel, other) in [
+        ("browsertriage_history", "Last Visit Time"),
+        ("sumetriage_clients", "LastAccess"),
+    ] {
+        assert_eq!(
+            n(
+                &case,
+                &format!("select count(*) from {rel} where \"{other}__typed\" is not null")
+            ),
+            1,
+            "{rel}.{other}"
+        );
+    }
+}
+
 /// Reviewed: a case loaded before an entry existed chose its primary time
 /// automatically (`PreviousRun0`); a later load moves an automatic choice
 /// to the listed column, and leaves an analyst's choice as it is.

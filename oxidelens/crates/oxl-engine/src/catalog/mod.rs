@@ -18,7 +18,7 @@ use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::load::stage::rebuild_relations;
 use crate::time::now_iso;
-use appmap::{primary_time_for, rule_for, AppRule, APP_TYPES};
+use appmap::{app_types_for, primary_time_for, rule_for, AppRule};
 use duckdb::{params, params_from_iter, Connection};
 use std::collections::{BTreeMap, BTreeSet};
 use triage_core::output::duckdb::inventory::Dataset;
@@ -560,7 +560,7 @@ fn record_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
 /// Catalogue the `APP_TYPES` entries of `relation` whose column nobody has
 /// typed yet. A column the suite or an analyst typed keeps that typing.
 fn apply_app_types(conn: &Connection, relation: &str) -> Result<()> {
-    for app in APP_TYPES.iter().filter(|t| t.relation == relation) {
+    for app in app_types_for(relation) {
         let untyped = read_columns(conn, relation)?
             .into_iter()
             .any(|c| c.name == app.column && c.origin.is_none());

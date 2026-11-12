@@ -361,6 +361,71 @@ pub fn app_timed(dir: &Path) -> PathBuf {
     )
 }
 
+/// A run of WS01 with one row each of datasets the suite types nothing of
+/// and whose times are text in the Z form: `browsertriage_history` and
+/// `browsertriage_timeline` (column names with spaces, as BrowserTriage
+/// writes them), `sumetriage_clients`, `retriage_recent_documents_ntuser_dat`
+/// (one MRU slot with a time, one without), and
+/// `retriage_taskcache_software_regback`, RETriage's copy of the TaskCache
+/// read from the hive's RegBack backup. Run id `20260112000000-kkkk`.
+pub fn app_timed_more(dir: &Path) -> PathBuf {
+    let ws = "Processed-WS01-20260112000000";
+    let history = format!("{ws}/Browser/history.csv");
+    let timeline = format!("{ws}/Browser/timeline.csv");
+    let clients = format!("{ws}/SUM/clients.csv");
+    let recent = format!("{ws}/Registry/recentdocs.csv");
+    let regback = format!("{ws}/Registry/taskcache_regback.csv");
+    write_run(
+        &dir.join("run-20260112000000-kkkk"),
+        "20260112000000-kkkk",
+        vec![
+            untyped(
+                "BrowserTriage",
+                "history",
+                "browsertriage_history",
+                &history,
+                "Browser,Profile,Record Type,Visit Time,URL,Title,Last Visit Time",
+                &["Chrome,Default,Visit,2026-01-05T02:16:30.0000000Z,https://files.example.com/rclone.zip,rclone download,2026-01-05T02:16:31.0000000Z"],
+            ),
+            untyped(
+                "BrowserTriage",
+                "timeline",
+                "browsertriage_timeline",
+                &timeline,
+                "Timestamp,Timestamp Type,Browser,Profile,Artifact,Value",
+                &["2026-01-05T02:16:40.0000000Z,Download Start,Chrome,Default,Download,C:\\Users\\svc_backup\\Downloads\\rclone.zip"],
+            ),
+            untyped(
+                "SumETriage",
+                "clients",
+                "sumetriage_clients",
+                &clients,
+                "RoleGuid,RoleDescription,AuthenticatedUserName,TotalAccesses,InsertDate,LastAccess,IpAddress,ClientName",
+                &["{10a9226f},File Server,LAB\\svc_backup,4,2026-01-05T02:17:30.0000000Z,2026-01-05T02:18:30.0000000Z,203.0.113.7,"],
+            ),
+            untyped(
+                "RETriage",
+                "recent_documents_ntuser_dat",
+                "retriage_recent_documents_ntuser_dat",
+                &recent,
+                "Extension,BatchKeyPath,ValueName,BatchValueName,TargetName,LnkName,MruPosition,OpenedOn",
+                &[
+                    "RecentDocs,RecentDocs,0,0,stage.zip,stage.lnk,0,2026-01-05T02:18:10.0000000Z",
+                    "RecentDocs,RecentDocs,1,1,notes.txt,notes.lnk,1,",
+                ],
+            ),
+            untyped(
+                "RETriage",
+                "taskcache_software_regback",
+                "retriage_taskcache_software_regback",
+                &regback,
+                "Version,KeyName,Path,CreatedOn,LastStart,LastStop",
+                &["1,{0F3A6D5E},\\Updater,2026-01-05T02:18:20.0000000Z,,"],
+            ),
+        ],
+    )
+}
+
 /// A dataset of WS01 the suite types nothing of.
 fn untyped<'a>(
     tool: &'a str,
