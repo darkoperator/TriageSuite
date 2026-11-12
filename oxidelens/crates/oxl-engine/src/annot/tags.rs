@@ -188,6 +188,14 @@ impl<'a> TagBatch<'a> {
             &[SqlValue::Text(tag.to_string())],
             &self.removed,
         )?;
+        if !self.removed.is_empty() {
+            // A tag is defined while a row carries it.
+            conn.execute(
+                "DELETE FROM ox.tag WHERE name = ? \
+                 AND NOT EXISTS (SELECT 1 FROM ox.row_tag WHERE tag = ?)",
+                params![tag, tag],
+            )?;
+        }
         if !self.added.is_empty() {
             conn.execute(
                 "INSERT INTO ox.tag (name, created_by, created_at) VALUES (?, ?, ?) \
@@ -260,16 +268,18 @@ fn change(
     }
 }
 
-/// Up to `limit` of the tags the case has defined, from `offset`, by name,
-/// with the rows carrying each (a tag stays defined when its last row loses
-/// it). `Invalid` when `limit` is 0 or over `MAX_LIMIT`.
+/// Up to `limit` of the tags some row carries, from `offset`, by name, with
+/// the rows carrying each (rows out of the view included). A tag is defined
+/// while a row carries it: removing it from its last row drops it, and a
+/// definition an earlier build left without rows is not listed. `Invalid`
+/// when `limit` is 0 or over `MAX_LIMIT`.
 pub fn tags(case: &Case, limit: u32, offset: u64) -> Result<Listing<TagInfo>> {
     check_limit(limit)?;
     let fetched = case
         .conn()
         .prepare(
             "SELECT t.name, count(rt.row_id), t.created_by FROM ox.tag t \
-             LEFT JOIN ox.row_tag rt ON rt.tag = t.name \
+             JOIN ox.row_tag rt ON rt.tag = t.name \
              GROUP BY t.name, t.created_by ORDER BY t.name LIMIT ? OFFSET ?",
         )?
         .query_map(params![fetch_limit(limit), offset], |r| {

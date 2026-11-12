@@ -99,6 +99,41 @@ fn a_batch_costs_a_few_statements_whatever_its_size() {
     }
 }
 
+/// Found on the second real run: a tag removed from every row still listed,
+/// with 0 rows. No command defines a tag but using it, so a tag is now
+/// defined while some row carries it, and the list shows only those.
+#[test]
+fn a_tag_no_row_carries_is_not_listed() {
+    let (_d, mut case) = loaded();
+    let r = logon(&case);
+    assert!(add_tag(&mut case, &[r], "lateral", &analyst()).unwrap()[0].done);
+    assert_eq!(tags(&case, 50, 0).unwrap().items.len(), 1);
+    assert!(remove_tag(&mut case, &[r], "lateral", &analyst()).unwrap()[0].done);
+    assert!(tags(&case, 50, 0).unwrap().items.is_empty());
+    assert_eq!(n(&case, "select count(*) from ox.tag"), 0);
+    // Used again, it is defined again, by whoever used it.
+    let other = Actor::parse("analyst:other").unwrap();
+    assert!(add_tag(&mut case, &[r], "lateral", &other).unwrap()[0].done);
+    let listed = tags(&case, 50, 0).unwrap().items;
+    assert_eq!(
+        (listed.len(), listed[0].rows, listed[0].created_by.as_str()),
+        (1, 1, "analyst:other")
+    );
+    // A case written before this kept unused definitions; they are not listed.
+    case.scalar_i64(
+        "INSERT INTO ox.tag (name, created_by, created_at) \
+         VALUES ('stale', 'analyst:tester', '2026-01-01T00:00:00Z') RETURNING 1",
+    )
+    .unwrap();
+    let names: Vec<String> = tags(&case, 50, 0)
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(names, ["lateral"]);
+}
+
 #[test]
 fn an_analyst_marks_and_clears() {
     let (_d, mut case) = loaded();
@@ -355,16 +390,17 @@ fn tag_rules() {
     let all = tags(&case, 50, 0).unwrap();
     assert!(!all.truncated);
     let listed = all.items;
+    // The 64-character tag was removed from its one row, so it is gone.
     assert_eq!(
         listed.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-        ["a".repeat(64).as_str(), "ai:rdp", "initial-access"]
+        ["ai:rdp", "initial-access"]
     );
     let rdp = listed.iter().find(|t| t.name == "ai:rdp").unwrap();
     assert_eq!((rdp.rows, rdp.created_by.as_str()), (1, "agent:claude"));
     // Paged like every other list.
-    let first = tags(&case, 2, 0).unwrap();
-    assert_eq!((first.items.len(), first.truncated), (2, true));
-    let rest = tags(&case, 2, 2).unwrap();
+    let first = tags(&case, 1, 0).unwrap();
+    assert_eq!((first.items.len(), first.truncated), (1, true));
+    let rest = tags(&case, 1, 1).unwrap();
     assert_eq!(
         (rest.items[0].name.as_str(), rest.truncated),
         ("initial-access", false)

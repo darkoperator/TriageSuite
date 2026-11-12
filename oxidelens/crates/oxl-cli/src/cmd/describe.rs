@@ -95,7 +95,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "tag list",
-        "List the tags with the rows carrying each: tag list [--limit N] [--offset N]",
+        "List the tags some row carries, with how many rows carry each: tag list [--limit N] [--offset N]. A tag removed from its last row is gone",
     ),
     (
         "note add",

@@ -106,7 +106,7 @@ command and limit and needs no case.
 | `mark list [--by <actor>] [--limit N] [--offset N]` | List marked rows; `active` says whether each row is still in its relation's view |
 | `tag add --rows 1,2,3 --tag t` | Tag rows |
 | `tag remove --rows 1,2,3 --tag t` | Remove a tag from rows |
-| `tag list [--limit N] [--offset N]` | The tags and the rows carrying each |
+| `tag list [--limit N] [--offset N]` | The tags some row carries, and how many rows carry each; a tag removed from its last row is gone |
 | `note add --row <id> --text <text \| @file>` | Write a note on a row |
 | `note delete <note id>` | Delete a note (the history keeps a tombstone) |
 | `note list --row <id> [--limit N] [--offset N]` | A row's notes, with its `standing` and `current_row` as `row` gives them |
