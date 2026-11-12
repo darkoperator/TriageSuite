@@ -283,6 +283,18 @@ fn oxl_fixtures_copy(from: &std::path::Path, to: &std::path::Path, run_id: &str)
 }
 
 #[test]
+fn every_summary_entry_names_a_distinct_relation_and_some_columns() {
+    use oxl_engine::catalog::appmap::SUMMARY;
+    let distinct: BTreeSet<&str> = SUMMARY.iter().map(|(relation, _)| *relation).collect();
+    assert_eq!(distinct.len(), SUMMARY.len());
+    for (relation, columns) in SUMMARY {
+        assert!(!columns.is_empty(), "{relation}");
+        let unique: BTreeSet<&&str> = columns.iter().collect();
+        assert_eq!(unique.len(), columns.len(), "{relation}");
+    }
+}
+
+#[test]
 fn every_primary_time_entry_names_a_distinct_relation() {
     let distinct: BTreeSet<&str> = PRIMARY_TIME.iter().map(|(relation, _)| *relation).collect();
     assert_eq!(distinct.len(), PRIMARY_TIME.len(), "{PRIMARY_TIME:?}");

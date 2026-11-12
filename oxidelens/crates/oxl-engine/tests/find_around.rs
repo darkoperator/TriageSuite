@@ -198,6 +198,44 @@ fn a_host_matches_without_regard_to_case_and_an_unknown_one_is_not_found() {
     }
 }
 
+/// Found on the first real run: outside the event log and Hayabusa a
+/// merged row's summary was its first four values, which for the MFT are
+/// entry and sequence numbers. The relations a pivot reaches say what a row
+/// is: a path, a program, a task.
+#[test]
+fn merged_rows_outside_the_event_log_have_readable_summaries() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::app_timed(&d.path().join("run"));
+    let mut case = new_case(d.path());
+    load_run(&mut case, &run, &analyst()).unwrap();
+    let rows = merged_rows(
+        &case,
+        &MergedSource::Around {
+            host: "WS01".into(),
+            at: "2026-01-05T02:17:00Z".into(),
+            window_seconds: 300,
+        },
+        50,
+        0,
+    )
+    .unwrap()
+    .items;
+    let summary = |rel: &str| {
+        rows.iter()
+            .find(|r| r.relation == rel)
+            .unwrap_or_else(|| panic!("no {rel} row in {rows:#?}"))
+            .summary
+            .clone()
+    };
+    assert_eq!(
+        summary("appcompattriage_appcompat"),
+        r"C:\Tools\rclone.exe · Yes"
+    );
+    assert_eq!(summary("retriage_taskcache_software"), r"\Updater");
+    assert_eq!(summary("sbetriage_shellbags"), r"C:\Users\svc_backup\stage");
+    assert_eq!(summary("retriage_userassist_ntuser_dat"), "rclone.exe · 3");
+}
+
 #[test]
 fn every_pivot_says_how_its_times_are_zoned() {
     let (d, mut case) = loaded();

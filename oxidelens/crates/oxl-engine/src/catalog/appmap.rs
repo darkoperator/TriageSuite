@@ -84,9 +84,12 @@ pub const PRIMARY_TIME: &[(&str, &str)] = &[
 ];
 
 /// The columns whose texts make a row's one-line summary in the merged row
-/// list, in order. A relation not listed here is summarised by its first
-/// four non-empty values among columns that are neither metadata nor
-/// timestamps.
+/// list, in order: what the row is (a path, a program, a task), not the
+/// key paths, slots and counters the tools write first. A listed column a
+/// relation lacks is passed over. A relation not listed here is summarised
+/// by its first four non-empty values among columns that are neither
+/// metadata nor timestamps. The column names are the ones a real run's
+/// datasets carry.
 pub const SUMMARY: &[(&str, &[&str])] = &[
     (
         "evtxtriage_events",
@@ -95,6 +98,120 @@ pub const SUMMARY: &[(&str, &[&str])] = &[
     (
         "ext_hayabusa_csv_timeline",
         &["Level", "RuleTitle", "Details"],
+    ),
+    // File system.
+    ("mftriage_mft", &["ParentPath", "FileName", "FileSize"]),
+    ("mftriage_usn", &["ParentPath", "Name", "UpdateReasons"]),
+    ("sbetriage_shellbags", &["AbsolutePath", "ShellType"]),
+    (
+        "letriage_main",
+        &[
+            "LocalPath",
+            "NetworkPath",
+            "TargetIDAbsolutePath",
+            "Arguments",
+        ],
+    ),
+    ("jletriage_auto", &["AppIdDescription", "Path", "LocalPath"]),
+    (
+        "jletriage_custom",
+        &["AppIdDescription", "EntryName", "LocalPath"],
+    ),
+    // Execution.
+    ("petriage_main", &["ExecutableName", "RunCount"]),
+    ("appcompattriage_appcompat", &["Path", "Executed"]),
+    ("retriage_appcompatcache_system", &["ProgramName"]),
+    ("retriage_bamdam_system", &["Program"]),
+    (
+        "retriage_userassist_ntuser_dat",
+        &["ProgramName", "RunCounter"],
+    ),
+    (
+        "amcachetriage_associated_file_entries",
+        &["FullPath", "Name", "SHA1", "ProductName"],
+    ),
+    (
+        "amcachetriage_unassociated_file_entries",
+        &["FullPath", "Name", "SHA1", "ProductName"],
+    ),
+    (
+        "amcachetriage_program_entries",
+        &["Name", "Version", "Publisher"],
+    ),
+    ("amcachetriage_shortcuts", &["LnkName"]),
+    (
+        "amcachetriage_drive_binaries",
+        &["DriverName", "DriverCompany"],
+    ),
+    (
+        "amcachetriage_device_pnps",
+        &["Description", "Manufacturer"],
+    ),
+    (
+        "amcachetriage_device_containers",
+        &["FriendlyName", "Manufacturer"],
+    ),
+    // Persistence and configuration.
+    (
+        "retriage_taskcache_software",
+        &["Path", "Command", "Arguments"],
+    ),
+    (
+        "retriage_services_system",
+        &["Name", "ImagePath", "StartMode"],
+    ),
+    (
+        "retriage_uninstall_software",
+        &["DisplayName", "DisplayVersion", "Publisher"],
+    ),
+    (
+        "retriage_uninstall_ntuser_dat",
+        &["DisplayName", "DisplayVersion", "Publisher"],
+    ),
+    ("retriage_products_software", &["DisplayName", "Publisher"]),
+    ("retriage_batch", &["Description", "KeyPath", "ValueData"]),
+    ("retriage_apppaths_software", &["FileName", "Path1"]),
+    ("retriage_profilelist_software", &["ProfileImagePath"]),
+    ("retriage_radar_software", &["Filename"]),
+    ("retriage_typedurls_ntuser_dat", &["Url"]),
+    ("retriage_typedurls_ntuser_dat_default", &["Url"]),
+    ("retriage_typedurls_ntuser_dat_localservice", &["Url"]),
+    ("retriage_typedurls_ntuser_dat_networkservice", &["Url"]),
+    // Devices.
+    (
+        "retriage_scsi_system",
+        &["Manufacturer", "Title", "SerialNumber"],
+    ),
+    ("retriage_deviceclasses_system", &["Name", "SerialNumber"]),
+    ("retriage_networkadapters_system", &["DriverDesc"]),
+    (
+        "retriage_volumeinfocache_software",
+        &["DriveName", "VolumeLabel"],
+    ),
+    // SRUM: which program, for whom, and what it did.
+    ("srumetriage_app_resource_usage", &["ExeInfo", "UserName"]),
+    (
+        "srumetriage_app_timeline",
+        &["ExeInfo", "UserName", "DurationMs"],
+    ),
+    (
+        "srumetriage_network_usage",
+        &["ExeInfo", "UserName", "BytesSent", "BytesReceived"],
+    ),
+    (
+        "srumetriage_network_connections",
+        &["ExeInfo", "UserName", "InterfaceType"],
+    ),
+    (
+        "srumetriage_push_notifications",
+        &["ExeInfo", "UserName", "NotificationType"],
+    ),
+    ("srumetriage_energy_usage", &["ExeInfo", "UserName"]),
+    ("srumetriage_vfuprov", &["ExeInfo", "UserName"]),
+    // Windows Timeline.
+    (
+        "wxttriage_activity",
+        &["Executable", "DisplayText", "ActivityType"],
     ),
 ];
 
