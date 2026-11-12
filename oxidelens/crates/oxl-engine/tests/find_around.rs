@@ -40,6 +40,95 @@ fn svch0st_row(case: &oxl_engine::Case) -> i64 {
     )
 }
 
+/// How many statements `call` makes the case run.
+fn statements(case: &oxl_engine::Case, call: impl FnOnce(&oxl_engine::Case)) -> usize {
+    case.statements_during(|| call(case)).unwrap().1.len()
+}
+
+/// Found on the first real run: a find and a pivot read the catalog again
+/// for every relation, about ten statements each, so over 164 relations a
+/// pivot spent three quarters of its time on statements that count nothing.
+#[test]
+fn a_pivot_reads_the_catalog_once_however_many_relations_there_are() {
+    let (d, mut case) = loaded();
+    let costs = |case: &oxl_engine::Case| {
+        let find_req = || req("203.0.113.7", FindMode::Contains);
+        [
+            statements(case, |c| {
+                find(c, &find_req(), &mut |_, _| true).unwrap();
+            }),
+            statements(case, |c| {
+                around(c, "WS01", "2026-01-05T02:15:44.380000Z", 60).unwrap();
+            }),
+            statements(case, |c| {
+                merged_rows(c, &MergedSource::Find(find_req()), 50, 0).unwrap();
+            }),
+            statements(case, |c| {
+                merged_rows(c, &around_ws01(), 50, 0).unwrap();
+            }),
+        ]
+    };
+    let before = costs(&case);
+    // One relation more, with a host and a time, so every pivot covers it.
+    load_file(
+        &mut case,
+        &loose_fw_csv(d.path()),
+        FileOptions {
+            host: Some("WS01".into()),
+            ..FileOptions::default()
+        },
+        &analyst(),
+    )
+    .unwrap();
+    let after = costs(&case);
+    let grew: Vec<usize> = after.iter().zip(before).map(|(a, b)| a - b).collect();
+    // A find asks the new relation its one question and a pivot its one
+    // count. A merged list is one statement whatever it covers, and one more
+    // for each relation with rows on the page: the find's page has two rows
+    // of the new relation, the pivot's has none.
+    assert_eq!(grew, [1, 1, 1, 0], "before {before:?}, after {after:?}");
+}
+
+/// Found on the first real run: the merged list worked out a summary and
+/// looked up a mark for every row of the pivot before keeping the first
+/// page of them, which was 0.95 s of the 1.4 s a pivot's row list took.
+#[test]
+fn a_merged_list_reads_summaries_and_marks_for_its_page_only() {
+    let (_d, mut case) = loaded();
+    let row = svch0st_row(&case);
+    assert!(mark_suspicious(&mut case, &[row], &analyst()).unwrap()[0].done);
+    for source in [
+        around_ws01(),
+        MergedSource::Find(req("svc_backup", FindMode::Contains)),
+    ] {
+        let (page, statements) = case
+            .statements_during(|| merged_rows(&case, &source, 2, 0).unwrap())
+            .unwrap();
+        // The statement that orders every row and keeps a page of them.
+        let paging: Vec<&String> = statements
+            .iter()
+            .filter(|sql| sql.contains("UNION ALL"))
+            .collect();
+        assert_eq!(paging.len(), 1, "{statements:#?}");
+        assert!(
+            !paging[0].contains("ox.row_mark") && !paging[0].contains("array_to_string"),
+            "the paging statement reads marks or builds summaries: {}",
+            paging[0]
+        );
+        // The page has them all the same.
+        assert_eq!((page.items.len(), page.truncated), (2, true));
+        assert!(page.items.iter().all(|r| !r.summary.is_empty()));
+        assert!(page.items.iter().all(|r| r.host.is_some()));
+        let marked: Vec<i64> = page
+            .items
+            .iter()
+            .filter(|r| r.mark == Some(MarkState::Suspicious))
+            .map(|r| r.row_id)
+            .collect();
+        assert_eq!(marked, [row], "{source:?}");
+    }
+}
+
 #[test]
 fn every_pivot_says_how_its_times_are_zoned() {
     let (d, mut case) = loaded();

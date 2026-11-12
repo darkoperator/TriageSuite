@@ -19,6 +19,7 @@
 
 use crate::error::{EngineError, Result};
 use duckdb::{params, Connection};
+use std::collections::{BTreeMap, BTreeSet};
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The prefix of the columns the engine adds; a loaded relation may not
@@ -256,6 +257,35 @@ fn active_arms(conn: &Connection, name: &str) -> Result<Vec<(i64, String)>> {
         arms.push((source_id, sql));
     }
     Ok(arms)
+}
+
+/// The physical columns of every relation's view `main."<name>"`, lowercased
+/// (DuckDB resolves identifiers case-insensitively), in one statement. A
+/// relation with no view has no entry.
+///
+/// A view is the `UNION ALL BY NAME` of its arms, each a `SELECT *`, so its
+/// columns are those of the tables `active_arms` picks, and this reads them
+/// by the same rule: a non-removed source's table with at least one active
+/// host. Describing each view says the same and costs a statement per view.
+pub(crate) fn view_columns(conn: &Connection) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT st.relation, lower(c.column_name) \
+         FROM ox.source_table st \
+         JOIN ox.source s ON s.id = st.source_id AND NOT s.removed \
+         JOIN duckdb_columns() c \
+           ON c.database_name = current_database() \
+          AND c.schema_name = st.table_schema AND c.table_name = st.relation \
+         WHERE EXISTS (SELECT 1 FROM ox.source_dataset sd \
+                       WHERE sd.source_id = st.source_id AND sd.relation = st.relation \
+                         AND sd.active)",
+    )?;
+    let pairs = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for pair in pairs {
+        let (relation, column) = pair?;
+        out.entry(relation).or_default().insert(column);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

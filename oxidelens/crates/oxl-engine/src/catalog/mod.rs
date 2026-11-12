@@ -19,8 +19,8 @@ use crate::error::{EngineError, Result};
 use crate::load::stage::rebuild_relations;
 use crate::time::now_iso;
 use appmap::{primary_time_for, rule_for, AppRule, APP_TYPES};
-use duckdb::{params, Connection};
-use std::collections::BTreeSet;
+use duckdb::{params, params_from_iter, Connection};
+use std::collections::{BTreeMap, BTreeSet};
 use triage_core::output::duckdb::inventory::Dataset;
 use triage_core::output::duckdb::sql::{quote_ident, NameAllocator};
 
@@ -155,12 +155,7 @@ pub struct RelationInfo {
 
 /// Every relation in the case, sorted by name.
 pub fn relations(case: &Case) -> Result<Vec<RelationInfo>> {
-    let conn = case.conn();
-    let names: Vec<String> = conn
-        .prepare("SELECT name FROM ox.relation ORDER BY name")?
-        .query_map([], |r| r.get(0))?
-        .collect::<std::result::Result<_, _>>()?;
-    names.iter().map(|name| read_relation(conn, name)).collect()
+    read_relations(case.conn(), None)
 }
 
 /// The relation `name`; `NotFound` when the case has none.
@@ -729,50 +724,82 @@ fn require_relation(conn: &Connection, relation: &str) -> Result<()> {
 }
 
 fn read_relation(conn: &Connection, name: &str) -> Result<RelationInfo> {
+    read_relations(conn, Some(name))?
+        .pop()
+        .ok_or_else(|| EngineError::NotFound(format!("no relation {name}")))
+}
+
+/// The case's relations, or only the one named `only`, sorted by name. Two
+/// statements however many relations there are: every pivot reads them all,
+/// and a statement costs about a millisecond whatever it returns.
+fn read_relations(conn: &Connection, only: Option<&str>) -> Result<Vec<RelationInfo>> {
+    // The datasets that count: active ones of sources not removed.
+    const ACTIVE: &str = "ox.source_dataset sd JOIN ox.source s ON s.id = sd.source_id \
+                          WHERE sd.active AND NOT s.removed";
+    let (one_relation, one_dataset) = match only {
+        Some(_) => ("WHERE r.name = ?", "AND sd.relation = ?"),
+        None => ("", ""),
+    };
+
+    let mut hosts: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT sd.relation, sd.host FROM {ACTIVE} AND sd.host IS NOT NULL \
+         {one_dataset} ORDER BY sd.relation, sd.host"
+    ))?;
+    let pairs = stmt.query_map(params_from_iter(only), |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    for pair in pairs {
+        let (relation, host) = pair?;
+        hosts.entry(relation).or_default().push(host);
+    }
+
     type Row = (
+        String,
         String,
         Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
+        i64,
     );
-    let row: Row = conn
-        .query_row(
-            "SELECT kind, tool, primary_time, evidence_path_column, host_column \
-             FROM ox.relation WHERE name = ?",
-            params![name],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )
-        .map_err(|e| match e {
-            duckdb::Error::QueryReturnedNoRows => {
-                EngineError::NotFound(format!("no relation {name}"))
-            }
-            other => other.into(),
-        })?;
-    let (kind, tool, primary_time, evidence_path_column, host_column) = row;
-    let active = "FROM ox.source_dataset sd JOIN ox.source s ON s.id = sd.source_id \
-                  WHERE sd.relation = ? AND sd.active AND NOT s.removed";
-    let rows: i64 = conn.query_row(
-        &format!("SELECT CAST(coalesce(sum(sd.rows), 0) AS BIGINT) {active}"),
-        params![name],
-        |r| r.get(0),
-    )?;
-    let hosts: Vec<String> = conn
+    let rows: Vec<Row> = conn
         .prepare(&format!(
-            "SELECT DISTINCT sd.host {active} AND sd.host IS NOT NULL ORDER BY sd.host"
+            "SELECT r.name, r.kind, r.tool, r.primary_time, r.evidence_path_column, \
+                    r.host_column, CAST(coalesce(a.rows, 0) AS BIGINT) \
+             FROM ox.relation r LEFT JOIN \
+                  (SELECT sd.relation, sum(sd.rows) AS rows FROM {ACTIVE} GROUP BY sd.relation) a \
+                  ON a.relation = r.name \
+             {one_relation} ORDER BY r.name"
         ))?
-        .query_map(params![name], |r| r.get(0))?
+        .query_map(params_from_iter(only), |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })?
         .collect::<std::result::Result<_, _>>()?;
-    Ok(RelationInfo {
-        name: name.to_string(),
-        kind: RelationKind::parse(&kind)?,
-        tool,
-        rows: u64::try_from(rows).unwrap_or_default(),
-        hosts,
-        primary_time,
-        evidence_path_column,
-        host_column,
-    })
+    rows.into_iter()
+        .map(
+            |(name, kind, tool, primary_time, evidence_path_column, host_column, rows)| {
+                Ok(RelationInfo {
+                    kind: RelationKind::parse(&kind)?,
+                    tool,
+                    rows: u64::try_from(rows).unwrap_or_default(),
+                    hosts: hosts.remove(&name).unwrap_or_default(),
+                    primary_time,
+                    evidence_path_column,
+                    host_column,
+                    name,
+                })
+            },
+        )
+        .collect()
 }
 
 type CatalogRow = (
@@ -785,22 +812,44 @@ type CatalogRow = (
     String,
 );
 
-const CATALOG_SELECT: &str = "SELECT name, text_column, typed_column, sql_type, time_semantics, \
-                              origin, role FROM ox.column_catalog WHERE relation = ?";
+/// What `catalog_row` reads, in its order.
+const CATALOG_COLUMNS: &str =
+    "name, text_column, typed_column, sql_type, time_semantics, origin, role";
 
 fn read_columns(conn: &Connection, relation: &str) -> Result<Vec<ColumnInfo>> {
     let rows: Vec<CatalogRow> = conn
-        .prepare(&format!("{CATALOG_SELECT} ORDER BY ordinal"))?
+        .prepare(&format!(
+            "SELECT {CATALOG_COLUMNS} FROM ox.column_catalog WHERE relation = ? ORDER BY ordinal"
+        ))?
         .query_map(params![relation], catalog_row)?
         .collect::<std::result::Result<_, _>>()?;
     rows.into_iter().map(decode_column).collect()
+}
+
+/// The catalogued columns of every relation, each list in display order, in
+/// one statement. A relation with no catalogued column has no entry.
+pub(crate) fn all_columns(conn: &Connection) -> Result<BTreeMap<String, Vec<ColumnInfo>>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CATALOG_COLUMNS}, relation FROM ox.column_catalog ORDER BY relation, ordinal"
+    ))?;
+    let rows = stmt.query_map([], |r| Ok((catalog_row(r)?, r.get::<_, String>(7)?)))?;
+    let mut out: BTreeMap<String, Vec<ColumnInfo>> = BTreeMap::new();
+    for row in rows {
+        let (column, relation) = row?;
+        out.entry(relation)
+            .or_default()
+            .push(decode_column(column)?);
+    }
+    Ok(out)
 }
 
 /// One catalogued column; `NotFound` when `relation` has no such column.
 fn read_column(conn: &Connection, relation: &str, column: &str) -> Result<ColumnInfo> {
     let row = conn
         .query_row(
-            &format!("{CATALOG_SELECT} AND name = ?"),
+            &format!(
+                "SELECT {CATALOG_COLUMNS} FROM ox.column_catalog WHERE relation = ? AND name = ?"
+            ),
             params![relation, column],
             catalog_row,
         )

@@ -5,24 +5,28 @@
 //! rows of such a window, or of a find, across every relation at once, in
 //! time order, each with a one-line summary: the rows a pivot opens.
 //!
-//! The merged list is one query: each relation contributes a self-contained
-//! part with the same columns (row id, relation, time, host, summary, mark),
-//! the parts are joined with `UNION ALL`, and the union is ordered and paged
-//! in SQL, so a page never holds more than it shows.
+//! The merged list is ordered and paged by one query: each relation
+//! contributes a self-contained part with the same columns (row id,
+//! relation, time), the parts are joined with `UNION ALL`, and the union is
+//! ordered and paged in SQL, so a page never holds more than it shows. What
+//! a row shows besides (host, summary, mark) is then read for the rows of
+//! the page alone, from each relation the page has rows of: working it out
+//! for every row of the pivot before paging cost several times the paging.
 
+use super::fan::in_order;
 use super::find::{cells_sql, targets, FindRequest};
 use super::group::{as_count, primary_time_semantics, typed_primary_time};
 use super::page::{mark_sql, read_mark};
-use super::{scope, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS};
+use super::{scope, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS};
 use crate::annot::locate;
 use crate::case::Case;
 use crate::catalog::appmap::summary_for;
-use crate::catalog::{self, ColumnInfo, ColumnRole, SqlType, TimeSemantics};
+use crate::catalog::{ColumnInfo, ColumnRole, SqlType, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
-use duckdb::{params, params_from_iter};
+use duckdb::{params, params_from_iter, Connection};
 use std::collections::BTreeMap;
 use triage_core::output::duckdb::sql::quote_ident;
 
@@ -41,22 +45,33 @@ pub struct AroundCount {
 /// relation order; zero counts included. `Invalid` when `at` is not UTC
 /// text or the window does not fit the timestamp range.
 pub fn around(case: &Case, host: &str, at: &str, window_seconds: u64) -> Result<Vec<AroundCount>> {
+    let scopes = around_scopes(case, host, at, window_seconds)?;
     let mut out = Vec::new();
-    for scope in around_scopes(case, host, at, window_seconds)? {
-        let n: i64 = case.conn().query_row(
-            &format!(
-                "SELECT count(*) FROM {} WHERE {}",
-                scope.from_sql, scope.where_sql
-            ),
-            params_from_iter(&scope.params),
-            |r| r.get(0),
-        )?;
-        out.push(AroundCount {
-            time_semantics: primary_time_semantics(&scope.relation.primary_time, &scope.columns),
-            relation: scope.relation.name,
-            count: as_count(n),
-        });
-    }
+    in_order(
+        case.conn(),
+        &scopes,
+        |conn, scope| -> Result<i64> {
+            Ok(conn.query_row(
+                &format!(
+                    "SELECT count(*) FROM {} WHERE {}",
+                    scope.from_sql, scope.where_sql
+                ),
+                params_from_iter(&scope.params),
+                |r| r.get(0),
+            )?)
+        },
+        |scope, n| {
+            out.push(AroundCount {
+                time_semantics: primary_time_semantics(
+                    &scope.relation.primary_time,
+                    &scope.columns,
+                ),
+                relation: scope.relation.name.clone(),
+                count: as_count(n),
+            });
+            true
+        },
+    )?;
     Ok(out)
 }
 
@@ -162,18 +177,12 @@ pub fn merged_rows(
     check_limit(limit)?;
     let mut parts = Vec::new();
     let mut params = Vec::new();
-    // Each part's relation and how its primary time is zoned.
-    let mut zoning: BTreeMap<String, Option<TimeSemantics>> = BTreeMap::new();
-    let mut note = |scope: &Scope| {
-        zoning.insert(
-            scope.relation.name.clone(),
-            primary_time_semantics(&scope.relation.primary_time, &scope.columns),
-        );
-    };
+    // The scope of each part, by its relation's name.
+    let mut scopes: BTreeMap<String, Scope> = BTreeMap::new();
     match source {
         MergedSource::Find(req) => {
-            let relations = catalog::relations(case)?;
-            for target in targets(case, req, &relations)? {
+            let subjects = subjects(case)?;
+            for target in targets(case, req, &subjects)? {
                 let mut cell_params = Vec::new();
                 let Some(cells) = cells_sql(req, &target, &mut cell_params)? else {
                     continue;
@@ -182,7 +191,7 @@ pub fn merged_rows(
                     format!("{ROW_ALIAS}._ox_row IN (SELECT ox_c._ox_row FROM {cells} AS ox_c)");
                 parts.push(part_sql(&target.scope, &matched, &mut params));
                 params.extend(cell_params);
-                note(&target.scope);
+                scopes.insert(target.scope.relation.name.clone(), target.scope);
             }
         }
         MergedSource::Around {
@@ -192,8 +201,8 @@ pub fn merged_rows(
         } => {
             for scope in around_scopes(case, host, at, *window_seconds)? {
                 parts.push(part_sql(&scope, &scope.where_sql, &mut params));
-                note(&scope);
-                params.extend(scope.params);
+                params.extend(scope.params.iter().cloned());
+                scopes.insert(scope.relation.name.clone(), scope);
             }
         }
     }
@@ -204,56 +213,118 @@ pub fn merged_rows(
         });
     }
 
+    // Which rows the page holds, in order.
     let sql = format!(
-        "SELECT _ox_row, _ox_rel, strftime(_ox_t, '{ISO_FORMAT}'), _ox_h, _ox_s, _ox_m \
+        "SELECT _ox_row, _ox_rel, strftime(_ox_t, '{ISO_FORMAT}') \
          FROM ({}) AS ox_merged \
          ORDER BY _ox_t ASC NULLS LAST, _ox_rel ASC, _ox_row ASC LIMIT ? OFFSET ?",
         parts.join(" UNION ALL ")
     );
     params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
+    let keys: Vec<(i64, String, Option<String>)> = case
+        .conn()
+        .prepare(&sql)?
+        .query_map(params_from_iter(params), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+    let page = Listing::from_fetched(keys, limit);
 
-    let mut stmt = case.conn().prepare(&sql)?;
-    let mut rows = stmt.query(params_from_iter(params))?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next()? {
-        let relation: String = row.get(1)?;
-        out.push(MergedRow {
-            row_id: row.get(0)?,
-            time_semantics: zoning.get(&relation).copied().flatten(),
-            relation,
-            time: row.get(2)?,
-            host: row.get(3)?,
-            summary: row.get(4)?,
-            mark: read_mark(row.get(5)?)?,
-        });
+    // What those rows show, read from each relation the page has rows of.
+    let mut on_page: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
+    for (row_id, relation, _) in &page.items {
+        on_page.entry(relation).or_default().push(*row_id);
     }
-    Ok(Listing::from_fetched(out, limit))
+    let wanted: Vec<(&Scope, Vec<i64>)> = on_page
+        .into_iter()
+        .filter_map(|(relation, ids)| Some((scopes.get(relation)?, ids)))
+        .collect();
+    let mut shown: BTreeMap<i64, Shown> = BTreeMap::new();
+    in_order(
+        case.conn(),
+        &wanted,
+        |conn, (scope, ids)| shown_rows(conn, scope, ids),
+        |_, rows| {
+            shown.extend(rows);
+            true
+        },
+    )?;
+
+    let items = page
+        .items
+        .into_iter()
+        .map(|(row_id, relation, time)| {
+            let scope = scopes.get(&relation);
+            let (host, summary, mark) = shown.remove(&row_id).ok_or_else(|| {
+                EngineError::Invalid(format!(
+                    "row {row_id} of {relation} was listed but could not be read back"
+                ))
+            })?;
+            Ok(MergedRow {
+                row_id,
+                time_semantics: scope
+                    .and_then(|s| primary_time_semantics(&s.relation.primary_time, &s.columns)),
+                relation,
+                time,
+                host,
+                summary,
+                mark,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(Listing {
+        items,
+        truncated: page.truncated,
+    })
 }
 
 /// One relation's part of the merged union: its rows that satisfy
-/// `where_sql`, as row id, relation, time, host, summary and mark. Pushes
-/// the relation name, which the part binds before `where_sql`'s own
-/// parameters; the caller pushes those next.
+/// `where_sql`, as row id, relation and time, which is all that ordering
+/// and paging them takes. Pushes the relation name, which the part binds
+/// before `where_sql`'s own parameters; the caller pushes those next.
 fn part_sql(scope: &Scope, where_sql: &str, params: &mut Vec<SqlValue>) -> String {
     let relation = &scope.relation;
     let time = match typed_primary_time(&relation.primary_time, &scope.columns) {
         Some(t) => format!("CAST({ROW_ALIAS}.{} AS TIMESTAMP)", quote_ident(t)),
         None => "CAST(NULL AS TIMESTAMP)".into(),
     };
+    params.push(SqlValue::Text(relation.name.clone()));
+    format!(
+        "SELECT {ROW_ALIAS}._ox_row AS _ox_row, CAST(? AS VARCHAR) AS _ox_rel, \
+         {time} AS _ox_t FROM {from} WHERE {where_sql}",
+        from = scope.from_sql,
+    )
+}
+
+/// What a merged row shows besides its time: host, summary and mark.
+type Shown = (Option<String>, String, Option<MarkState>);
+
+/// The rows `ids` of `scope`'s relation as the merged list shows them.
+fn shown_rows(conn: &Connection, scope: &Scope, ids: &[i64]) -> Result<Vec<(i64, Shown)>> {
+    let relation = &scope.relation;
     let host = match &relation.host_column {
         Some(h) => format!("CAST({ROW_ALIAS}.{} AS VARCHAR)", quote_ident(h)),
         None => "CAST(NULL AS VARCHAR)".into(),
     };
-    params.push(SqlValue::Text(relation.name.clone()));
-    format!(
-        "SELECT {ROW_ALIAS}._ox_row AS _ox_row, CAST(? AS VARCHAR) AS _ox_rel, \
-         {time} AS _ox_t, {host} AS _ox_h, {summary} AS _ox_s, {mark} AS _ox_m \
-         FROM {from} WHERE {where_sql}",
+    let sql = format!(
+        "SELECT {ROW_ALIAS}._ox_row, {host}, {summary}, {mark} \
+         FROM {from} WHERE {ROW_ALIAS}._ox_row IN ({slots})",
         summary = summary_sql(&relation.name, &scope.columns),
         mark = mark_sql(),
         from = scope.from_sql,
-    )
+        slots = vec!["?"; ids.len()].join(", "),
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(params_from_iter(ids))?;
+    let mut out = Vec::with_capacity(ids.len());
+    while let Some(row) = rows.next()? {
+        out.push((
+            row.get(0)?,
+            (row.get(1)?, row.get(2)?, read_mark(row.get(3)?)?),
+        ));
+    }
+    Ok(out)
 }
 
 /// SQL for a row's summary: the `SUMMARY` columns' non-empty texts, or, for
@@ -332,14 +403,15 @@ fn around_scopes(case: &Case, host: &str, at: &str, window_seconds: u64) -> Resu
         .map_err(|_| out_of_range())?;
 
     let mut out = Vec::new();
-    for relation in catalog::relations(case)? {
-        if relation.host_column.is_none() {
+    for subject in subjects(case)? {
+        if subject.relation.host_column.is_none() {
             continue;
         }
-        let mut scope = scope(
+        let mut scope = scope_of(
             case,
+            &subject,
             &GridQuery {
-                relation: relation.name.clone(),
+                relation: subject.relation.name.clone(),
                 hosts: vec![host.to_string()],
                 ..Default::default()
             },

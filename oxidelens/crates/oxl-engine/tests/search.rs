@@ -215,7 +215,7 @@ fn hostile_terms_are_values_not_sql() {
     let hits = |q: &str| count_in(&case, &cols, q, SearchOptions::default());
     assert_eq!(hits(r#""' OR 1=1 --""#), 0);
     assert_eq!(hits(r#"Channel:"x') OR TRUE --""#), 0);
-    // Every SourceFile path has a backslash, the LIKE escape character.
+    // Every SourceFile path has a backslash, which is a plain character.
     assert_eq!(hits(r"\"), 11);
     // Channel and Computer are neighbours, so a term holding the separator
     // the cells are joined with must not match across the two.

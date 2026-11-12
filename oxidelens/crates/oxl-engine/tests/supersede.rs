@@ -6,8 +6,9 @@ mod common;
 
 use common::{agent, analyst, copy_tree, n};
 use oxl_engine::{
-    add_note, add_tag, delete_note, load_file, load_run, mark_suspicious, relation, relations,
-    remove_source, set_primary_time, sources, Case, FileOptions, LoadReport,
+    add_note, add_tag, around, delete_note, find, load_file, load_run, mark_suspicious,
+    merged_rows, relation, relations, remove_source, set_primary_time, sources, Case, FileOptions,
+    FindMode, FindRequest, LoadReport, MergedSource,
 };
 use std::path::{Path, PathBuf};
 
@@ -844,8 +845,9 @@ fn a_run_that_names_a_metadata_column_differently_is_refused() {
     assert_eq!(n(&case, "select count(*) from petriage_timeline"), 5);
 }
 
-#[test]
-fn the_raw_view_shows_a_column_only_a_superseded_run_had_as_null() {
+/// The two-host run, then the same run again with its prefetch files lacking
+/// `ExecutableName`: the catalog still has the column, and no active source.
+fn rerun_without_executable_name() -> (tempfile::TempDir, Case) {
     let (d, mut case) = setup();
     let original = oxl_fixtures::two_hosts(&d.path().join("a"));
     load_run(&mut case, &original, &analyst()).unwrap();
@@ -887,6 +889,12 @@ fn the_raw_view_shows_a_column_only_a_superseded_run_had_as_null() {
         std::fs::write(&csv, text).unwrap();
     }
     load_run(&mut case, &copy, &analyst()).unwrap();
+    (d, case)
+}
+
+#[test]
+fn the_raw_view_shows_a_column_only_a_superseded_run_had_as_null() {
+    let (_d, case) = rerun_without_executable_name();
     assert_eq!(
         n(
             &case,
@@ -895,6 +903,52 @@ fn the_raw_view_shows_a_column_only_a_superseded_run_had_as_null() {
         5
     );
     assert_eq!(n(&case, "select count(*) from raw_petriage_timeline"), 5);
+}
+
+/// A pivot reads the columns of every view at once instead of describing
+/// each view, and must come to the same answer: a column no active source
+/// has reads as empty, where naming it in the view would fail to bind.
+#[test]
+fn a_pivot_reads_a_column_only_a_superseded_run_had_as_empty() {
+    let (_d, case) = rerun_without_executable_name();
+    let request = FindRequest {
+        value: "SVCH0ST.EXE".into(),
+        mode: FindMode::Exact,
+        hosts: vec![],
+        from: None,
+        to: None,
+    };
+    let found = find(&case, &request, &mut |_, _| true).unwrap();
+    // The prefetch cell that held it is gone; the event log's is not.
+    assert_eq!(
+        found
+            .hits
+            .iter()
+            .map(|h| (h.relation.as_str(), h.column.as_str(), h.count))
+            .collect::<Vec<_>>(),
+        [("evtxtriage_events", "PayloadData1", 1)]
+    );
+    assert!(found.searched.contains(&"petriage_timeline".to_string()));
+
+    let (host, at) = ("WS01", "2026-01-05T02:15:44.380000Z");
+    let counts = around(&case, host, at, 60).unwrap();
+    let prefetch = counts
+        .iter()
+        .find(|c| c.relation == "petriage_timeline")
+        .unwrap();
+    assert_eq!(prefetch.count, 1);
+    let source = MergedSource::Around {
+        host: host.into(),
+        at: at.into(),
+        window_seconds: 60,
+    };
+    let rows = merged_rows(&case, &source, 50, 0).unwrap().items;
+    let row = rows
+        .iter()
+        .find(|r| r.relation == "petriage_timeline")
+        .unwrap();
+    // With the name it was "SVCH0ST.EXE · 1".
+    assert_eq!(row.summary, "1");
 }
 
 #[test]

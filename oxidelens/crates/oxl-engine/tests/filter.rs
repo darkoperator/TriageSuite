@@ -120,6 +120,103 @@ fn wildcard_characters_match_literally() {
 }
 
 #[test]
+fn the_start_and_the_end_of_a_cell_match_without_regard_to_case() {
+    let (_d, case, cols) = setup();
+    let count = |json: &str| count_in(&case, &cols, json);
+    // svch0st.exe, rclone.exe, wevtutil.exe twice, cmd.exe; not svch0st.exe:443.
+    assert_eq!(
+        count(r#"{"column":"PayloadData1","op":"ends_with","value":".EXE"}"#),
+        5
+    );
+    assert_eq!(
+        count(r#"{"column":"PayloadData1","op":"ends_with","value":".EXE","case_sensitive":true}"#),
+        0
+    );
+    assert_eq!(
+        count(r#"{"column":"PayloadData1","op":"starts_with","value":"logontype"}"#),
+        4
+    );
+    assert_eq!(
+        count(
+            r#"{"column":"PayloadData1","op":"starts_with","value":"logontype","case_sensitive":true}"#
+        ),
+        0
+    );
+    // \\*\finance$ ends in "e$"; '$' and '\' are plain characters.
+    assert_eq!(
+        count(r#"{"column":"PayloadData1","op":"ends_with","value":"E$"}"#),
+        1
+    );
+    assert_eq!(
+        count(r#"{"column":"PayloadData1","op":"contains","value":"*\\F"}"#),
+        1
+    );
+    // An empty cell neither starts nor ends with anything.
+    assert_eq!(
+        count(r#"{"column":"RemoteHost","op":"starts_with","value":""}"#),
+        6
+    );
+}
+
+#[test]
+fn matching_ignores_case_beyond_ascii() {
+    let (d, mut case) = loaded();
+    let csv = d.path().join("names.csv");
+    std::fs::write(
+        &csv,
+        "seen,name\n2026-01-05T00:00:00Z,CAFÉ.EXE\n2026-01-05T00:00:01Z,Ünïcode_50%.dll\n",
+    )
+    .unwrap();
+    let report = oxl_engine::load_file(
+        &mut case,
+        &csv,
+        oxl_engine::FileOptions::default(),
+        &analyst(),
+    )
+    .unwrap();
+    let relation = report.relations[0].name.clone();
+    let count = |json: &str, search: Option<&str>| {
+        let q = oxl_engine::GridQuery {
+            relation: relation.clone(),
+            filter: Some(parse_filter(json).unwrap()),
+            search: search.map(str::to_string),
+            ..Default::default()
+        };
+        oxl_engine::count(&case, &q).unwrap()
+    };
+    let leaf = |op: &str, value: &str| leaf("name", op, &format!("\"{value}\""));
+    assert_eq!(count(&leaf("contains", "café"), None), 1);
+    assert_eq!(count(&leaf("ends_with", "é.exe"), None), 1);
+    assert_eq!(count(&leaf("starts_with", "üNÏ"), None), 1);
+    assert_eq!(count(&leaf("eq", "café.exe"), None), 1);
+    // '%' and '_' in the cell are matched as themselves.
+    assert_eq!(count(&leaf("contains", "E_50%."), None), 1);
+    assert_eq!(count(&leaf("contains", "E_50_."), None), 0);
+    // The search box and a find fold case the same way.
+    assert_eq!(count(r#"{"and":[]}"#, Some("ÜNÏCODE")), 1);
+    let found = oxl_engine::find(
+        &case,
+        &oxl_engine::FindRequest {
+            value: "CAFé".into(),
+            mode: oxl_engine::FindMode::Contains,
+            hosts: vec![],
+            from: None,
+            to: None,
+        },
+        &mut |_, _| true,
+    )
+    .unwrap();
+    assert_eq!(
+        found
+            .hits
+            .iter()
+            .map(|h| (h.relation.as_str(), h.column.as_str(), h.count))
+            .collect::<Vec<_>>(),
+        [(relation.as_str(), "name", 1)]
+    );
+}
+
+#[test]
 fn hostile_documents_are_refused_not_executed() {
     let (_d, case, cols) = setup();
     for bad in [

@@ -20,7 +20,7 @@
 
 use crate::catalog::{ColumnInfo, ColumnRole};
 use crate::error::{EngineError, Result};
-use crate::filter::{like_sql, null_safe, regex_sql, LikeMatch, SqlFragment};
+use crate::filter::{literal_sql, null_safe, regex_sql, LiteralMatch, SqlFragment};
 use duckdb::types::Value as SqlValue;
 use triage_core::output::duckdb::sql::quote_ident;
 
@@ -285,7 +285,7 @@ fn scoped(token: &[Piece], columns: &[ColumnInfo]) -> Option<Term> {
     })
 }
 
-/// `term` as a substring test, with its pattern pushed as a parameter.
+/// `term` as a substring test, with its text pushed as a parameter.
 fn term_sql(
     term: &Term,
     columns: &[ColumnInfo],
@@ -294,10 +294,10 @@ fn term_sql(
     params: &mut Vec<SqlValue>,
 ) -> Result<String> {
     let mut test = |haystack: String| {
-        null_safe(&like_sql(
+        null_safe(&literal_sql(
             &haystack,
             &term.text,
-            LikeMatch::Contains,
+            LiteralMatch::Contains,
             opts.case_sensitive,
             params,
         ))

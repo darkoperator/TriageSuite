@@ -5,8 +5,8 @@
 //! after `FROM main."<relation>"`. Every value in the document becomes a
 //! bound parameter; the only text from the document written into the SQL is
 //! a column name, and only after it was found in the catalog, through
-//! `quote_ident`. The constants the engine itself writes (`''`, the `LIKE`
-//! escape character, the regex `'i'` flag) are not document values.
+//! `quote_ident`. The constants the engine itself writes (`''`, the regex
+//! `'i'` flag) are not document values.
 //!
 //! Every leaf is wrapped in `COALESCE(…, FALSE)`, so a condition on a NULL
 //! cell is false rather than unknown. That makes `not` the exact complement
@@ -102,32 +102,39 @@ pub(crate) fn null_safe(expr: &str) -> String {
     format!("COALESCE({expr}, FALSE)")
 }
 
-/// Where a literal `LIKE` needle must appear in the text.
+/// Where a literal needle must appear in the text.
 #[derive(Clone, Copy)]
-pub(crate) enum LikeMatch {
+pub(crate) enum LiteralMatch {
     Contains,
     StartsWith,
     EndsWith,
 }
 
-/// `haystack` (SQL) tested for the literal text `needle`, with the escaped
-/// pattern pushed as a parameter: `ILIKE`, or `LIKE` when case-sensitive.
-pub(crate) fn like_sql(
+/// `haystack` (SQL) tested for the literal text `needle`, which is pushed as
+/// a parameter as written. Unless `case_sensitive`, both sides are lowered
+/// first, which is what `ILIKE` does to them.
+///
+/// These are DuckDB's substring functions rather than `LIKE` with the needle
+/// escaped: the two select the same rows, but `LIKE … ESCAPE` runs the
+/// general pattern matcher over every row and costs about twice as much.
+pub(crate) fn literal_sql(
     haystack: &str,
     needle: &str,
-    shape: LikeMatch,
+    shape: LiteralMatch,
     case_sensitive: bool,
     params: &mut Vec<SqlValue>,
 ) -> String {
-    let needle = escape_like(needle);
-    let pattern = match shape {
-        LikeMatch::Contains => format!("%{needle}%"),
-        LikeMatch::StartsWith => format!("{needle}%"),
-        LikeMatch::EndsWith => format!("%{needle}"),
+    params.push(SqlValue::Text(needle.to_string()));
+    let function = match shape {
+        LiteralMatch::Contains => "contains",
+        LiteralMatch::StartsWith => "starts_with",
+        LiteralMatch::EndsWith => "ends_with",
     };
-    params.push(SqlValue::Text(pattern));
-    let like = if case_sensitive { "LIKE" } else { "ILIKE" };
-    format!("{haystack} {like} ? ESCAPE '\\'")
+    format!(
+        "{function}({}, {})",
+        fold(haystack, case_sensitive),
+        fold("?", case_sensitive)
+    )
 }
 
 /// `haystack` (SQL) tested against the regex `pattern`, which is pushed as a
@@ -171,11 +178,17 @@ fn positive_sql(
                 return Err(invalid(leaf, "expects a string value"));
             };
             let shape = match op {
-                Op::Contains => LikeMatch::Contains,
-                Op::StartsWith => LikeMatch::StartsWith,
-                _ => LikeMatch::EndsWith,
+                Op::Contains => LiteralMatch::Contains,
+                Op::StartsWith => LiteralMatch::StartsWith,
+                _ => LiteralMatch::EndsWith,
             };
-            Ok(like_sql(&text, &needle, shape, leaf.case_sensitive, params))
+            Ok(literal_sql(
+                &text,
+                &needle,
+                shape,
+                leaf.case_sensitive,
+                params,
+            ))
         }
         Op::Regex => {
             let SqlValue::Text(pattern) = string_value(leaf)? else {
@@ -236,19 +249,6 @@ fn fold(sql: &str, case_sensitive: bool) -> String {
     } else {
         format!("lower({sql})")
     }
-}
-
-/// `%`, `_` and the escape character itself, escaped so a `LIKE` pattern
-/// built around the text matches it literally. Pair it with `ESCAPE '\'`.
-fn escape_like(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if matches!(c, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
 }
 
 fn string_value(leaf: &Leaf) -> Result<SqlValue> {
@@ -406,5 +406,46 @@ fn mark_sql(leaf: &Leaf, params: &mut Vec<SqlValue>) -> Result<String> {
             Ok(format!("({})", parts.join(" OR ")))
         }
         _ => Err(invalid(leaf, &format!("{MARK_COLUMN} takes eq, ne or in"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Found on the first real run: `ILIKE ? ESCAPE '\'` sends every row
+    /// through DuckDB's general pattern matcher, which no rewrite reaches
+    /// once there is an `ESCAPE`. Searching 75,000 events for a word took
+    /// 640 ms that way and 300 ms as a substring test, with the same rows.
+    #[test]
+    fn a_literal_match_is_a_substring_test_not_a_pattern() {
+        let compiled = |shape, case_sensitive| {
+            let mut params = Vec::new();
+            let sql = literal_sql("\"c\"", "50%_a\\B", shape, case_sensitive, &mut params);
+            // The needle is bound as written: nothing in it is a wildcard.
+            assert_eq!(params, [SqlValue::Text("50%_a\\B".into())]);
+            sql
+        };
+        assert_eq!(
+            compiled(LiteralMatch::Contains, false),
+            "contains(lower(\"c\"), lower(?))"
+        );
+        assert_eq!(
+            compiled(LiteralMatch::StartsWith, false),
+            "starts_with(lower(\"c\"), lower(?))"
+        );
+        assert_eq!(
+            compiled(LiteralMatch::EndsWith, false),
+            "ends_with(lower(\"c\"), lower(?))"
+        );
+        assert_eq!(compiled(LiteralMatch::Contains, true), "contains(\"c\", ?)");
+        assert_eq!(
+            compiled(LiteralMatch::StartsWith, true),
+            "starts_with(\"c\", ?)"
+        );
+        assert_eq!(
+            compiled(LiteralMatch::EndsWith, true),
+            "ends_with(\"c\", ?)"
+        );
     }
 }

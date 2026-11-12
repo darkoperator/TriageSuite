@@ -157,6 +157,26 @@ impl Case {
             .conn()
             .query_row(sql, duckdb::params_from_iter(params), |r| r.get(0))?)
     }
+
+    /// Run `call` and return, with its result, the SQL of every statement
+    /// the case's database ran meanwhile, for integration tests that pin how
+    /// many statements a call costs. DuckDB's own query log does the
+    /// counting, so a statement run on any connection to the case is seen.
+    #[doc(hidden)]
+    pub fn statements_during<T>(&self, call: impl FnOnce() -> T) -> Result<(T, Vec<String>)> {
+        const STOP: &str = "CALL disable_logging()";
+        self.conn()
+            .execute_batch("CALL truncate_duckdb_logs(); CALL enable_logging('QueryLog');")?;
+        let out = call();
+        self.conn().execute_batch(STOP)?;
+        let statements = self
+            .conn()
+            .prepare("SELECT message FROM duckdb_logs WHERE type = 'QueryLog'")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .filter(|sql| sql.as_deref().map_or(true, |sql| sql.trim() != STOP))
+            .collect::<std::result::Result<_, _>>()?;
+        Ok((out, statements))
+    }
 }
 
 fn initialise(conn: &mut Connection, name: &str, actor: &Actor) -> Result<()> {

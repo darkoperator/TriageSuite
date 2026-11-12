@@ -14,16 +14,17 @@
 //! columns without the host column, since a hit there would only restate
 //! the host the hit is already attributed to.
 
+use super::fan::in_order;
 use super::group::{as_count, first_last_sql, primary_time_semantics, typed_primary_time};
-use super::{scope, GridQuery, Scope, ROW_ALIAS};
+use super::{scope_of, subjects, GridQuery, Scope, Subject, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, ColumnInfo, ColumnRole, RelationInfo, TimeSemantics};
+use crate::catalog::{ColumnInfo, ColumnRole, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::filter::{compile_filter, FilterNode, Leaf, Op};
 use crate::search::{compile_search, Search, SearchExpr, SearchOptions, Term};
 use crate::time::parse_utc_text;
-use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
+use duckdb::{params_from_iter, Connection};
 use std::collections::BTreeSet;
 use triage_core::output::duckdb::sql::quote_ident;
 
@@ -84,17 +85,18 @@ pub struct FindResult {
     pub cancelled: bool,
 }
 
-/// Find `req.value` in every relation in scope, in relation order.
-/// `progress` is called once per relation as it finishes; returning false
-/// cancels the rest. `Invalid` for an empty value, one over `MAX_VALUE`
-/// characters, or a `from`/`to` that is not UTC text.
+/// Find `req.value` in every relation in scope. Several relations are
+/// searched at a time; `progress` is called once per relation, in relation
+/// order, as soon as it and every relation before it is done, and returning
+/// false cancels the rest. `Invalid` for an empty value, one over
+/// `MAX_VALUE` characters, or a `from`/`to` that is not UTC text.
 pub fn find(
     case: &Case,
     req: &FindRequest,
     progress: &mut dyn FnMut(&str, &[FindHit]) -> bool,
 ) -> Result<FindResult> {
-    let relations = catalog::relations(case)?;
-    let targets = targets(case, req, &relations)?;
+    let subjects = subjects(case)?;
+    let targets = targets(case, req, &subjects)?;
     let mut out = FindResult {
         hits: Vec::new(),
         searched: Vec::new(),
@@ -102,25 +104,28 @@ pub fn find(
         hosts_not_seen: Vec::new(),
         cancelled: false,
     };
-    for target in &targets {
-        let hits = relation_hits(case, req, target)?;
-        let name = target.scope.relation.name.clone();
-        if hits.is_empty() {
-            out.no_hit.push(name.clone());
-        }
-        out.searched.push(name.clone());
-        out.hits.extend(hits.iter().cloned());
-        if !progress(&name, &hits) {
-            out.cancelled = true;
-            break;
-        }
-    }
-    // `relations` is sorted by name and each relation's hits by column and
+    let finished = in_order(
+        case.conn(),
+        &targets,
+        |conn, target| relation_hits(conn, req, target),
+        |target, hits| {
+            let name = &target.scope.relation.name;
+            if hits.is_empty() {
+                out.no_hit.push(name.clone());
+            }
+            out.searched.push(name.clone());
+            let more = progress(name, &hits);
+            out.hits.extend(hits);
+            more
+        },
+    )?;
+    out.cancelled = !finished;
+    // `subjects` is sorted by name and each relation's hits by column and
     // host, so the hits are already in their documented order.
     let seen: BTreeSet<&str> = out.hits.iter().filter_map(|h| h.host.as_deref()).collect();
-    let case_hosts: BTreeSet<&str> = relations
+    let case_hosts: BTreeSet<&str> = subjects
         .iter()
-        .flat_map(|r| r.hosts.iter().map(String::as_str))
+        .flat_map(|s| s.relation.hosts.iter().map(String::as_str))
         .collect();
     out.hosts_not_seen = case_hosts
         .into_iter()
@@ -138,13 +143,9 @@ pub(super) struct Target {
     pub searched: Vec<ColumnInfo>,
 }
 
-/// The relations `req` searches, from `relations`, in order. Checks the
-/// request first, so an invalid one fails before any query runs.
-pub(super) fn targets(
-    case: &Case,
-    req: &FindRequest,
-    relations: &[RelationInfo],
-) -> Result<Vec<Target>> {
+/// The relations `req` searches, from `subjects`, in order. Checks the
+/// request first, so an invalid one fails before any search runs.
+pub(super) fn targets(case: &Case, req: &FindRequest, subjects: &[Subject]) -> Result<Vec<Target>> {
     if req.value.is_empty() {
         return Err(EngineError::Invalid("find needs a value".into()));
     }
@@ -158,14 +159,15 @@ pub(super) fn targets(
     let timed = from.is_some() || to.is_some();
 
     let mut out = Vec::new();
-    for relation in relations {
-        if !req.hosts.is_empty() && relation.host_column.is_none() {
+    for subject in subjects {
+        if !req.hosts.is_empty() && subject.relation.host_column.is_none() {
             continue;
         }
-        let mut scope = scope(
+        let mut scope = scope_of(
             case,
+            subject,
             &GridQuery {
-                relation: relation.name.clone(),
+                relation: subject.relation.name.clone(),
                 hosts: req.hosts.clone(),
                 ..Default::default()
             },
@@ -293,7 +295,7 @@ pub(super) fn cells_sql(
 }
 
 /// The hits of `req` in one relation, ordered by column and host.
-fn relation_hits(case: &Case, req: &FindRequest, target: &Target) -> Result<Vec<FindHit>> {
+fn relation_hits(conn: &Connection, req: &FindRequest, target: &Target) -> Result<Vec<FindHit>> {
     let mut params = Vec::new();
     let Some(cells) = cells_sql(req, target, &mut params)? else {
         return Ok(Vec::new());
@@ -307,7 +309,7 @@ fn relation_hits(case: &Case, req: &FindRequest, target: &Target) -> Result<Vec<
          FROM {cells} AS {ROW_ALIAS} GROUP BY {ROW_ALIAS}._ox_i, {ROW_ALIAS}._ox_h"
     );
     let time_semantics = primary_time_semantics(&scope.relation.primary_time, &scope.columns);
-    let mut stmt = case.conn().prepare(&sql)?;
+    let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(params_from_iter(params))?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {

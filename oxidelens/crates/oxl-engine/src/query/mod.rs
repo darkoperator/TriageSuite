@@ -15,6 +15,7 @@
 //! which is what the `_mark` filter's correlated subquery relies on.
 
 mod around;
+mod fan;
 mod find;
 mod group;
 mod histogram;
@@ -35,6 +36,7 @@ use crate::case::Case;
 use crate::catalog::{self, ColumnInfo, RelationInfo};
 use crate::error::{EngineError, Result};
 use crate::filter::{compile_filter, FilterNode, Op};
+use crate::load::stage::view_columns;
 use crate::search::{compile_search, parse_search, Search, SearchOptions};
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection};
@@ -100,18 +102,56 @@ pub(crate) fn marked_sql() -> String {
 /// The alias of the projection `Scope::from_sql` reads from.
 pub(crate) const ROW_ALIAS: &str = "ox_r";
 
+/// What a scope is built over: a relation, every column the catalog has for
+/// it, and the physical columns its view has.
+pub(crate) struct Subject {
+    pub relation: RelationInfo,
+    all: Vec<ColumnInfo>,
+    /// Lowercased, as DuckDB compares names; empty when there is no view.
+    present: BTreeSet<String>,
+}
+
+/// Every relation of the case as a subject, in name order. A pivot covers
+/// them all, so they are read together, in a handful of statements however
+/// many there are, instead of each as `scope` reads its one.
+pub(crate) fn subjects(case: &Case) -> Result<Vec<Subject>> {
+    let conn = case.conn();
+    let mut columns = catalog::all_columns(conn)?;
+    let mut present = view_columns(conn)?;
+    Ok(catalog::relations(case)?
+        .into_iter()
+        .map(|relation| Subject {
+            all: columns.remove(&relation.name).unwrap_or_default(),
+            present: present.remove(&relation.name).unwrap_or_default(),
+            relation,
+        })
+        .collect())
+}
+
 /// Build the scope of `q`. `NotFound` for an unknown relation or a named
 /// column the relation lacks; `Invalid` for a bad filter or search, hosts on
 /// a relation without a host column, or a regex DuckDB will not compile.
 pub(crate) fn scope(case: &Case, q: &GridQuery) -> Result<Scope> {
-    let conn = case.conn();
     let relation = catalog::relation(case, &q.relation)?;
-    let all = catalog::columns(case, &q.relation)?;
+    let subject = Subject {
+        all: catalog::columns(case, &q.relation)?,
+        present: described_columns(case.conn(), &relation)?,
+        relation,
+    };
+    scope_of(case, &subject, q)
+}
+
+/// `scope` over a subject already read. `q.relation` is not looked up again:
+/// the subject is the relation.
+pub(crate) fn scope_of(case: &Case, subject: &Subject, q: &GridQuery) -> Result<Scope> {
+    let conn = case.conn();
+    let relation = subject.relation.clone();
+    let all = &subject.all;
     let columns = match &q.columns {
         None => all.clone(),
         Some(names) => names
             .iter()
-            .map(|name| find_column(&all, &relation.name, name).cloned())
+            .map(|name| find_column(all, &relation.name, name).cloned())
             .collect::<Result<_>>()?,
     };
 
@@ -130,7 +170,7 @@ pub(crate) fn scope(case: &Case, q: &GridQuery) -> Result<Scope> {
     }
     let mut patterns = Vec::new();
     if let Some(filter) = &q.filter {
-        let fragment = compile_filter(filter, &all)?;
+        let fragment = compile_filter(filter, all)?;
         regex_leaves(filter, &mut patterns);
         parts.push(fragment.sql);
         params.extend(fragment.params);
@@ -140,11 +180,11 @@ pub(crate) fn scope(case: &Case, q: &GridQuery) -> Result<Scope> {
             regex: q.search_regex,
             case_sensitive: q.search_case_sensitive,
         };
-        if let Some(search) = parse_search(text, opts, &all)? {
+        if let Some(search) = parse_search(text, opts, all)? {
             if let Search::Regex(pattern) = &search {
                 patterns.push((pattern.clone(), opts.case_sensitive));
             }
-            let fragment = compile_search(&search, opts, &all)?;
+            let fragment = compile_search(&search, opts, all)?;
             parts.push(fragment.sql);
             params.extend(fragment.params);
         }
@@ -159,7 +199,7 @@ pub(crate) fn scope(case: &Case, q: &GridQuery) -> Result<Scope> {
         parts.join(" AND ")
     };
     Ok(Scope {
-        from_sql: projection(conn, &relation, &all)?,
+        from_sql: projection(&relation, all, &subject.present),
         where_sql,
         params,
         columns,
@@ -246,25 +286,33 @@ fn probe_regex(conn: &Connection, pattern: &str, case_sensitive: bool) -> Result
     .map_err(|e| EngineError::Invalid(format!("{pattern:?} is not a valid regex: {e}")))
 }
 
-/// `(SELECT <catalogued physical columns>, _ox_row FROM main."<relation>")
-/// AS ox_r`. A relation whose view does not exist (it has no active source)
-/// projects the same columns over no rows.
-fn projection(conn: &Connection, relation: &RelationInfo, all: &[ColumnInfo]) -> Result<String> {
-    let view = format!("main.{}", quote_ident(&relation.name));
+/// The physical columns of `relation`'s view, lowercased, as DuckDB itself
+/// describes the view; empty when the relation has no view (it has no
+/// active source). `view_columns` reads the same for every relation at once.
+fn described_columns(conn: &Connection, relation: &RelationInfo) -> Result<BTreeSet<String>> {
     let exists: i64 = conn.query_row(
         "SELECT count(*) FROM duckdb_views() WHERE schema_name = 'main' AND view_name = ?",
         params![relation.name],
         |r| r.get(0),
     )?;
-    let present: BTreeSet<String> = if exists > 0 {
-        conn.prepare(&format!(
-            "SELECT lower(column_name) FROM (DESCRIBE SELECT * FROM {view})"
+    if exists == 0 {
+        return Ok(BTreeSet::new());
+    }
+    Ok(conn
+        .prepare(&format!(
+            "SELECT lower(column_name) FROM (DESCRIBE SELECT * FROM main.{})",
+            quote_ident(&relation.name)
         ))?
         .query_map([], |r| r.get(0))?
-        .collect::<std::result::Result<_, _>>()?
-    } else {
-        BTreeSet::new()
-    };
+        .collect::<std::result::Result<_, _>>()?)
+}
+
+/// `(SELECT <catalogued physical columns>, _ox_row FROM main."<relation>")
+/// AS ox_r`, given the columns the view has (`present`). A relation with no
+/// view (`present` is empty) projects the same columns over no rows.
+fn projection(relation: &RelationInfo, all: &[ColumnInfo], present: &BTreeSet<String>) -> String {
+    let view = format!("main.{}", quote_ident(&relation.name));
+    let exists = !present.is_empty();
 
     // (physical name, SQL type to stand in with when absent)
     let mut wanted: Vec<(String, String)> = Vec::new();
@@ -292,15 +340,12 @@ fn projection(conn: &Connection, relation: &RelationInfo, all: &[ColumnInfo]) ->
             format!("CAST(NULL AS {ty}) AS {ident}")
         });
     }
-    let source = if exists > 0 {
+    let source = if exists {
         select.push("_ox_row".into());
         format!("FROM {view}")
     } else {
         select.push("CAST(NULL AS BIGINT) AS _ox_row".into());
         "WHERE FALSE".into()
     };
-    Ok(format!(
-        "(SELECT {} {source}) AS {ROW_ALIAS}",
-        select.join(", ")
-    ))
+    format!("(SELECT {} {source}) AS {ROW_ALIAS}", select.join(", "))
 }
