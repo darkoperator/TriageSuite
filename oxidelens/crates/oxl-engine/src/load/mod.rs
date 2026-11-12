@@ -9,7 +9,7 @@ pub(crate) mod stage;
 mod supersede;
 
 pub use file::{load_file, relation_name_for_file, FileOptions};
-pub use run::load_run;
+pub use run::{load_run, load_run_with};
 
 use crate::actor::Actor;
 use crate::case::Case;
@@ -50,6 +50,32 @@ pub struct LoadReport {
     pub relations: Vec<LoadedRelation>,
     pub superseded: Vec<Superseded>,
     pub warnings: Vec<String>,
+    /// Datasets of the run whose files for some hosts were not loaded
+    /// because they copy another (see `RunOptions::per_channel`), in
+    /// inventory order.
+    pub skipped: Vec<SkippedDataset>,
+}
+
+/// A dataset of a run a load left out, for some or all of its hosts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedDataset {
+    /// The relation it would have fed.
+    pub relation: String,
+    pub tool: String,
+    pub dataset_id: String,
+    /// The hosts whose files were left out, sorted. A host the dataset has
+    /// a file for and that is not here was loaded.
+    pub hosts: Vec<String>,
+}
+
+/// How a run is loaded.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunOptions {
+    /// Also load EvtxTriage's per-channel datasets (`Individual/<channel>`)
+    /// when the run has its aggregate `events` dataset. The suite writes
+    /// every event to both, so by default the copies are left out: they add
+    /// no row, and each would show every event a second time.
+    pub per_channel: bool,
 }
 
 /// One loaded source, as `ox.source` records it.

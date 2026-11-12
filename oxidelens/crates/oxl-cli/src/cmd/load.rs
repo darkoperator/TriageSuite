@@ -1,14 +1,17 @@
 use super::{Ctx, Reply};
 use crate::envelope::wrap;
-use oxl_engine::{FileOptions, LoadReport, Result};
+use oxl_engine::{FileOptions, LoadReport, Result, RunOptions};
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-pub fn run(ctx: &Ctx, out_root: &Path) -> Result<Reply> {
+pub fn run(ctx: &Ctx, out_root: &Path, per_channel: bool) -> Result<Reply> {
     let mut case = ctx.open_case()?;
-    Ok(report_reply(oxl_engine::load_run(
-        &mut case, out_root, &ctx.actor,
+    Ok(report_reply(oxl_engine::load_run_with(
+        &mut case,
+        out_root,
+        RunOptions { per_channel },
+        &ctx.actor,
     )?))
 }
 
@@ -36,16 +39,28 @@ fn report_reply(report: LoadReport) -> Reply {
                    "moved": s.moved, "left_behind": s.left_behind})
         })
         .collect();
+    // A skipped dataset's id and relation name carry a channel name from
+    // the evidence, so the list goes inside the wrapper; its length does not.
+    let skipped: Vec<_> = report
+        .skipped
+        .iter()
+        .map(|s| {
+            json!({"relation": s.relation, "tool": s.tool, "dataset_id": s.dataset_id,
+                   "hosts": s.hosts})
+        })
+        .collect();
     Reply::new(json!({
         "source_id": report.source_id,
         "relations": relations.len(),
         "rows": rows,
         "superseded": superseded.len(),
+        "skipped": skipped.len(),
         "untrusted": wrap(&json!({
             "relations": relations,
             "hosts": hosts,
             "superseded": superseded,
             "warnings": report.warnings,
+            "skipped": skipped,
         })),
     }))
 }

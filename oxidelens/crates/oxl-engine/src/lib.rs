@@ -33,8 +33,9 @@ pub use error::{EngineError, Result};
 pub use filter::{compile_filter, parse_filter, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN};
 pub use listing::Listing;
 pub use load::{
-    load_file, load_run, relation_name_for_file, remove_source, sources, FileOptions, LoadReport,
-    LoadedRelation, RemoveReport, SourceInfo, Superseded,
+    load_file, load_run, load_run_with, relation_name_for_file, remove_source, sources,
+    FileOptions, LoadReport, LoadedRelation, RemoveReport, RunOptions, SkippedDataset, SourceInfo,
+    Superseded,
 };
 pub use query::{
     anchor_of, around, count, describe, find, group_filter, groups, histogram, merged_rows, page,

@@ -157,7 +157,7 @@ COMMENT ON COLUMN ox.inventory_file.path IS 'The file''s path relative to the ru
 COMMENT ON COLUMN ox.inventory_file.host IS 'The host the file describes.';
 COMMENT ON COLUMN ox.inventory_file.identity IS 'user:<name>, system or unknown; NULL for a merged file.';
 COMMENT ON COLUMN ox.inventory_file.role IS 'primary, merged or slice.';
-COMMENT ON COLUMN ox.inventory_file.included_in_view IS 'Whether the file''s rows were loaded.';
+COMMENT ON COLUMN ox.inventory_file.included_in_view IS 'Whether the suite included the file in its view. The case loaded it unless the load''s history row lists its dataset and host under skipped.';
 COMMENT ON COLUMN ox.inventory_file.derived_into IS 'For a slice: the merged file it was folded into.';
 COMMENT ON COLUMN ox.inventory_file.header_json IS 'The file''s own header as a JSON array; NULL when it could not be read.';
 COMMENT ON COLUMN ox.inventory_file.warnings_json IS 'The file''s warnings, as a JSON array.';

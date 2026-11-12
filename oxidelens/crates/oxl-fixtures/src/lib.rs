@@ -201,6 +201,85 @@ pub fn rerun_ws01_prefetch(dir: &Path) -> PathBuf {
     )
 }
 
+/// EvtxTriage's per-channel copy of some of WS01's events, as the suite
+/// writes it beside the aggregate: dataset `Individual/<channel>`, view
+/// `evtxtriage_individual_<channel lower-cased>`.
+fn evtx_channel<'a>(
+    dataset_id: &'a str,
+    view: &'a str,
+    path: &'a str,
+    rows: &'a [&'a str],
+) -> DatasetSpec<'a> {
+    DatasetSpec {
+        tool: "EvtxTriage",
+        dataset_id,
+        view,
+        source: "internal",
+        evidence_path_column: Some("SourceFile"),
+        typed: &[
+            ("TimeCreated", SqlType::Timestamp, Some(TimeSemantics::Utc)),
+            ("EventId", SqlType::BigInt, None),
+        ],
+        files: vec![FileSpec {
+            host: "WS01",
+            path,
+            header: EVTX_HEADER,
+            rows,
+        }],
+    }
+}
+
+/// WS01's event rows of one channel.
+fn ws01_channel(channel: &str) -> Vec<&'static str> {
+    EVTX_WS01
+        .iter()
+        .copied()
+        .filter(|row| row.split(',').nth(2) == Some(channel))
+        .collect()
+}
+
+/// A run of WS01 with EvtxTriage's aggregate `evtxtriage_events` (8 rows)
+/// and, as the suite writes by default, a per-channel copy of the same
+/// events: `evtxtriage_individual_security` (5 rows) and
+/// `evtxtriage_individual_sysmon` (3). With `aggregate` false the run has
+/// the per-channel datasets alone. Run id `20260106000000-eeee` (with the
+/// aggregate) or `20260107000000-ffff` (without).
+pub fn with_channels(dir: &Path, aggregate: bool) -> PathBuf {
+    let ws = "Processed-WS01-20260106000000/EventLogs";
+    let all = format!("{ws}/evtx.csv");
+    let security_path = format!("{ws}/Individual/Security.csv");
+    let sysmon_path = format!("{ws}/Individual/Sysmon.csv");
+    let security = ws01_channel("Security");
+    let sysmon = ws01_channel("Sysmon");
+    let mut specs = Vec::new();
+    if aggregate {
+        specs.push(evtx_events(vec![FileSpec {
+            host: "WS01",
+            path: &all,
+            header: EVTX_HEADER,
+            rows: EVTX_WS01,
+        }]));
+    }
+    specs.push(evtx_channel(
+        "Individual/Security",
+        "evtxtriage_individual_security",
+        &security_path,
+        &security,
+    ));
+    specs.push(evtx_channel(
+        "Individual/Sysmon",
+        "evtxtriage_individual_sysmon",
+        &sysmon_path,
+        &sysmon,
+    ));
+    let run_id = if aggregate {
+        "20260106000000-eeee"
+    } else {
+        "20260107000000-ffff"
+    };
+    write_run(&dir.join(format!("run-{run_id}")), run_id, specs)
+}
+
 /// A loose firewall export, `fw.csv`, with no inventory: three rows whose
 /// times are not in the Z form. Returns the file's path.
 pub fn loose_fw_csv(dir: &Path) -> PathBuf {

@@ -86,7 +86,7 @@ command and limit and needs no case.
 |---|---|
 | `case new <path> --name <name>` | Create a case file |
 | `case info` | Format, creator, creation time, name and path |
-| `load run <out_root>` | Load a run's output root; a later run for the same host supersedes the earlier one |
+| `load run <out_root> [--per-channel]` | Load a run's output root; a later run for the same host supersedes the earlier one. EvtxTriage's per-channel copies of the event log (`Individual/<channel>`, one relation per channel) repeat every event of its aggregate `evtxtriage_events`, so for each host the aggregate covers they are left out and listed under `skipped`; `--per-channel` loads them too. A per-channel relation an earlier load brought (an older build, or `--per-channel`) is not superseded by a later run that leaves them out; remove that source to drop it |
 | `load file <path> [--name N] [--host H]` | Load a loose CSV or TSV file as a relation |
 | `sources` | List loaded sources, removed ones included |
 | `source remove <id> [--confirm-orphans]` | Remove a source (analyst only) |

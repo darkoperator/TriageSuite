@@ -5,7 +5,7 @@
 mod common;
 
 use common::{analyst, loaded, long_dir, n};
-use oxl_engine::{load_run, sources, Case};
+use oxl_engine::{load_run, load_run_with, sources, Case, RunOptions};
 use std::path::{Path, PathBuf};
 
 fn code<T>(result: oxl_engine::Result<T>) -> (&'static str, String) {
@@ -13,6 +13,223 @@ fn code<T>(result: oxl_engine::Result<T>) -> (&'static str, String) {
         Ok(_) => ("ok", String::new()),
         Err(e) => (e.code(), e.to_string()),
     }
+}
+
+/// The relations of the case, by name.
+fn relation_names(case: &Case) -> Vec<String> {
+    oxl_engine::relations(case)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.name)
+        .collect()
+}
+
+/// Found on the first real run: EvtxTriage writes every event twice, once
+/// in its aggregate and once in a per-channel copy under `Individual/`, so
+/// 106 relations held nothing the aggregate lacked, took two thirds of a
+/// 57 s load, and doubled every find and pivot over the event log.
+#[test]
+fn per_channel_copies_of_the_event_log_are_left_out_unless_asked_for() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::with_channels(&d.path().join("run"), true);
+    let mut case = oxl_fixtures::new_case(d.path());
+    let report = load_run(&mut case, &run, &analyst()).unwrap();
+    assert_eq!(relation_names(&case), ["evtxtriage_events"]);
+    assert_eq!(
+        report
+            .skipped
+            .iter()
+            .map(|s| (s.relation.as_str(), s.dataset_id.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("evtxtriage_individual_security", "Individual/Security"),
+            ("evtxtriage_individual_sysmon", "Individual/Sysmon"),
+        ]
+    );
+    assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 8);
+    // The case still says what the run held, and what was left out.
+    assert_eq!(
+        n(&case, "select count(*) from ox.inventory_dataset"),
+        3,
+        "every dataset of the run is in the inventory"
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history \
+             where action = 'source_load' and after_json like '%Individual/Security%'"
+        ),
+        1
+    );
+
+    // Asked for, they load.
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::with_channels(&d.path().join("run"), true);
+    let mut case = oxl_fixtures::new_case(d.path());
+    let report = load_run_with(
+        &mut case,
+        &run,
+        RunOptions { per_channel: true },
+        &analyst(),
+    )
+    .unwrap();
+    assert!(report.skipped.is_empty());
+    assert_eq!(
+        relation_names(&case),
+        [
+            "evtxtriage_events",
+            "evtxtriage_individual_security",
+            "evtxtriage_individual_sysmon"
+        ]
+    );
+    assert_eq!(
+        n(&case, "select count(*) from evtxtriage_individual_security"),
+        5
+    );
+}
+
+/// Reviewed: a copy is left out host by host. A host the aggregate holds no
+/// included file for keeps its per-channel rows, the only ones it has.
+#[test]
+fn a_per_channel_file_loads_for_a_host_the_aggregate_lacks() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::with_channels(&d.path().join("run"), true);
+    // SRV01 has a Security copy (the same CSV, as SRV01's) and no aggregate.
+    let path = run.join("duckdb").join("datasets.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let security = json["datasets"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|ds| ds["dataset_id"] == "Individual/Security")
+        .unwrap();
+    let mut srv = security["files"][0].clone();
+    srv["host"] = "SRV01".into();
+    security["files"].as_array_mut().unwrap().push(srv);
+    std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+    let mut case = oxl_fixtures::new_case(d.path());
+    let report = load_run(&mut case, &run, &analyst()).unwrap();
+    assert_eq!(
+        relation_names(&case),
+        ["evtxtriage_events", "evtxtriage_individual_security"]
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from evtxtriage_individual_security where _triage_host = 'SRV01'"
+        ),
+        5
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from evtxtriage_individual_security where _triage_host = 'WS01'"
+        ),
+        0
+    );
+    assert_eq!(
+        report
+            .skipped
+            .iter()
+            .map(|s| (s.dataset_id.as_str(), s.hosts.clone()))
+            .collect::<Vec<_>>(),
+        [
+            ("Individual/Security", vec!["WS01".to_string()]),
+            ("Individual/Sysmon", vec!["WS01".to_string()]),
+        ]
+    );
+}
+
+/// Reviewed, and kept: a per-channel relation an earlier load brought (an
+/// older build, or `--per-channel`) is not superseded by a later run that
+/// leaves the copies out, since that run has no rows for it. Removing the
+/// earlier source takes it out.
+#[test]
+fn an_earlier_per_channel_load_stays_until_its_source_is_removed() {
+    let d = tempfile::tempdir().unwrap();
+    let first = oxl_fixtures::with_channels(&d.path().join("first"), true);
+    let mut case = oxl_fixtures::new_case(d.path());
+    let earlier = load_run_with(
+        &mut case,
+        &first,
+        RunOptions { per_channel: true },
+        &analyst(),
+    )
+    .unwrap();
+    // The same run under another id: a later run of WS01.
+    let later = d.path().join("later");
+    copy_tree(&first, &later);
+    let path = later.join("duckdb").join("datasets.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    json["run_id"] = "20260108000000-gggg".into();
+    std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    load_run(&mut case, &later, &analyst()).unwrap();
+    assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 8);
+    assert_eq!(
+        n(&case, "select count(*) from evtxtriage_individual_security"),
+        5
+    );
+    oxl_engine::remove_source(&mut case, earlier.source_id, false, &analyst()).unwrap();
+    assert_eq!(relation_names(&case), ["evtxtriage_events"]);
+    assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 8);
+}
+
+/// Reviewed: a left-out copy is in the inventory but feeds no relation, so
+/// it does not bind how a later source names the relation's metadata
+/// columns.
+#[test]
+fn a_left_out_copy_does_not_bind_a_later_load() {
+    let d = tempfile::tempdir().unwrap();
+    let first = oxl_fixtures::with_channels(&d.path().join("first"), true);
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_run(&mut case, &first, &analyst()).unwrap();
+    // A later run whose Security copy names its host column differently.
+    let later = d.path().join("later");
+    copy_tree(&first, &later);
+    let path = later.join("duckdb").join("datasets.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    json["run_id"] = "20260109000000-hhhh".into();
+    for ds in json["datasets"].as_array_mut().unwrap() {
+        if ds["dataset_id"] == "Individual/Security" {
+            ds["metadata_columns"]["host"] = "_triage_host_1".into();
+        }
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    load_run_with(
+        &mut case,
+        &later,
+        RunOptions { per_channel: true },
+        &analyst(),
+    )
+    .unwrap();
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from evtxtriage_individual_security where _triage_host_1 = 'WS01'"
+        ),
+        5
+    );
+}
+
+/// Without the aggregate a per-channel dataset is no copy of anything.
+#[test]
+fn per_channel_datasets_load_when_the_run_has_no_aggregate() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::with_channels(&d.path().join("run"), false);
+    let mut case = oxl_fixtures::new_case(d.path());
+    let report = load_run(&mut case, &run, &analyst()).unwrap();
+    assert!(report.skipped.is_empty());
+    assert_eq!(
+        relation_names(&case),
+        [
+            "evtxtriage_individual_security",
+            "evtxtriage_individual_sysmon"
+        ]
+    );
 }
 
 /// Copy a run tree, so a test can alter the copy and never the run the

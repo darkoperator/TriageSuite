@@ -53,6 +53,41 @@ fn case_new_info_and_load_run() {
 }
 
 #[test]
+fn load_run_leaves_out_per_channel_copies_unless_asked() {
+    let d = tempfile::tempdir().unwrap();
+    for (flag, relations, skipped) in [(None, 1, 2), (Some("--per-channel"), 3, 0)] {
+        let p = d
+            .path()
+            .join(format!("{relations}.case.duckdb"))
+            .to_string_lossy()
+            .into_owned();
+        let run = oxl_fixtures::with_channels(&d.path().join(format!("run{relations}")), true)
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(ox(&["case", "new", &p, "--name", "C"]).0, 0);
+        let mut args = vec!["--case", p.as_str(), "load", "run", run.as_str()];
+        args.extend(flag);
+        let (raw_code, raw) = ox_raw(&args);
+        assert_eq!(raw_code, 0, "{raw}");
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            (
+                v["data"]["relations"].as_u64(),
+                v["data"]["skipped"].as_u64()
+            ),
+            (Some(relations), Some(skipped)),
+            "{flag:?}: {v}"
+        );
+        if skipped > 0 {
+            // The left-out names carry channel names from the evidence.
+            assert_only_inside(&raw, "Individual/Security");
+            let list = inner(&v["data"]["untrusted"])["skipped"].clone();
+            assert_eq!(list[0]["relation"], "evtxtriage_individual_security");
+        }
+    }
+}
+
+#[test]
 fn load_file_and_sources() {
     let (d, p, run) = setup();
     let p = p.as_str();

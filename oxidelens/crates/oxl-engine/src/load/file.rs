@@ -344,6 +344,7 @@ fn load_in(
         }],
         superseded: Vec::new(),
         warnings,
+        skipped: Vec::new(),
     })
 }
 

@@ -69,7 +69,10 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
     match &cli.command {
         Command::Case(CaseCmd::New { path, name }) => case::new(&ctx, path, name),
         Command::Case(CaseCmd::Info) => case::info(&ctx),
-        Command::Load(LoadCmd::Run { out_root }) => load::run(&ctx, out_root),
+        Command::Load(LoadCmd::Run {
+            out_root,
+            per_channel,
+        }) => load::run(&ctx, out_root, *per_channel),
         Command::Load(LoadCmd::File { path, name, host }) => {
             load::file(&ctx, path, name.clone(), host.clone())
         }

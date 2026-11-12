@@ -248,7 +248,14 @@ pub enum CaseCmd {
 #[derive(Subcommand, Debug)]
 pub enum LoadCmd {
     /// Load a TriageSuite run output root.
-    Run { out_root: PathBuf },
+    Run {
+        out_root: PathBuf,
+        /// Also load EvtxTriage's per-channel copies of the event log
+        /// (Individual/<channel>), which repeat every event of its
+        /// aggregate and are left out by default.
+        #[arg(long)]
+        per_channel: bool,
+    },
     /// Load a loose CSV or TSV file.
     File {
         path: PathBuf,

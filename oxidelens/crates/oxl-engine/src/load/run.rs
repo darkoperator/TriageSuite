@@ -9,7 +9,7 @@
 
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::supersede::supersede;
-use super::{LoadReport, LoadedRelation};
+use super::{LoadReport, LoadedRelation, RunOptions, SkippedDataset};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::catalog::{catalog_dataset, check_typing};
@@ -38,8 +38,19 @@ const STAGE: &str = "ox_stage";
 /// from the case's catalog, or names a relation's metadata columns
 /// differently from the live sources already feeding it. For each relation and host the run has rows for,
 /// an earlier run's rows are superseded (see `supersede`). Any failure leaves
-/// the case exactly as it was.
+/// the case exactly as it was. EvtxTriage's per-channel copies are left out
+/// (see `RunOptions`).
 pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadReport> {
+    load_run_with(case, out_root, RunOptions::default(), actor)
+}
+
+/// `load_run`, with `options`.
+pub fn load_run_with(
+    case: &mut Case,
+    out_root: &Path,
+    options: RunOptions,
+    actor: &Actor,
+) -> Result<LoadReport> {
     let root = canonical_path(out_root)?;
     let mut inventory = read_inventory(&root)?;
     check_inventory(&inventory)?;
@@ -50,10 +61,17 @@ pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadR
         Err(e) => return Err(e.into()),
     };
 
+    let skipped = copies(&inventory, options);
     let conn = case.conn_mut();
     let mut source_id = None;
     let tx = conn.transaction()?;
-    match load_in(&tx, &inventory, &root, manifest, actor, &mut source_id) {
+    let load = Load {
+        inventory: &inventory,
+        skipped,
+        root: &root,
+        actor,
+    };
+    match load_in(&tx, &load, manifest, &mut source_id) {
         Ok(report) => {
             tx.commit()?;
             Ok(report)
@@ -227,16 +245,98 @@ fn check_inventory(inventory: &Inventory) -> Result<()> {
     Ok(())
 }
 
+/// What a load with `options` leaves out of `inventory`: EvtxTriage's
+/// per-channel copies (`Individual/<channel>`), unless asked for, host by
+/// host. A per-channel file is a copy only when the aggregate (`events`)
+/// holds an included file for the same host; for any other host it holds
+/// that host's only event rows, and loads.
+fn copies(inventory: &Inventory, options: RunOptions) -> Vec<SkippedDataset> {
+    const TOOL: &str = "EvtxTriage";
+    if options.per_channel {
+        return Vec::new();
+    }
+    let covered: BTreeSet<&str> = inventory
+        .datasets
+        .iter()
+        .filter(|d| d.tool == TOOL && d.dataset_id == "events")
+        .flat_map(|d| &d.files)
+        .filter(|f| f.included_in_view)
+        .map(|f| f.host.as_str())
+        .collect();
+    inventory
+        .datasets
+        .iter()
+        .filter(|d| d.tool == TOOL && d.dataset_id.starts_with("Individual/"))
+        .filter_map(|d| {
+            let hosts: BTreeSet<&str> = d
+                .files
+                .iter()
+                .filter(|f| f.included_in_view && covered.contains(f.host.as_str()))
+                .map(|f| f.host.as_str())
+                .collect();
+            (!hosts.is_empty()).then(|| SkippedDataset {
+                relation: d.view.clone(),
+                tool: d.tool.clone(),
+                dataset_id: d.dataset_id.clone(),
+                hosts: hosts.into_iter().map(str::to_string).collect(),
+            })
+        })
+        .collect()
+}
+
+/// What one load works from.
+struct Load<'a> {
+    inventory: &'a Inventory,
+    /// What of the inventory not to load.
+    skipped: Vec<SkippedDataset>,
+    root: &'a Path,
+    actor: &'a Actor,
+}
+
+impl Load<'_> {
+    /// What this load leaves out of `dataset`, if anything. Matched on the
+    /// dataset's tool, id and view together, so another dataset that happens
+    /// to share one of them is untouched.
+    fn skipped_of(&self, dataset: &Dataset) -> Option<&SkippedDataset> {
+        self.skipped.iter().find(|s| {
+            s.tool == dataset.tool
+                && s.dataset_id == dataset.dataset_id
+                && s.relation == dataset.view
+        })
+    }
+
+    /// The inventory as this load reads it: a left-out file is no longer
+    /// included, and a dataset left with no included file is dropped. The
+    /// suite's views are rendered from this, so a left-out file is not even
+    /// read.
+    fn loaded(&self) -> Inventory {
+        let mut inventory = self.inventory.clone();
+        inventory.datasets.retain_mut(|d| {
+            let Some(skipped) = self.skipped_of(d) else {
+                return true;
+            };
+            let hosts = skipped.hosts.clone();
+            for file in &mut d.files {
+                if hosts.contains(&file.host) {
+                    file.included_in_view = false;
+                }
+            }
+            loads(d)
+        });
+        inventory
+    }
+}
+
 /// Everything a load writes, inside the caller's transaction. `source_id`
 /// is set as soon as the id is allocated, so the caller can clean up.
 fn load_in(
     conn: &Connection,
-    inventory: &Inventory,
-    root: &Path,
+    load: &Load<'_>,
     manifest: Option<String>,
-    actor: &Actor,
     source_id: &mut Option<i64>,
 ) -> Result<LoadReport> {
+    let (full, root, actor) = (load.inventory, load.root, load.actor);
+    let inventory = &load.loaded();
     let present: i64 = conn.query_row(
         "SELECT count(*) FROM ox.source WHERE run_id = ? AND NOT removed",
         params![inventory.run_id],
@@ -303,7 +403,8 @@ fn load_in(
         catalog_dataset(conn, dataset)?;
     }
 
-    record_inventory(conn, id, inventory)?;
+    // The whole inventory: the case says what the run held, loaded or not.
+    record_inventory(conn, id, full)?;
 
     let after = serde_json::json!({
         "kind": "run",
@@ -312,6 +413,9 @@ fn load_in(
         "generation": inventory.generation,
         "relations": relations.iter().map(|r| serde_json::json!({
             "name": r.name, "hosts": r.hosts, "rows": r.rows,
+        })).collect::<Vec<_>>(),
+        "skipped": load.skipped.iter().map(|s| serde_json::json!({
+            "relation": s.relation, "tool": s.tool, "dataset_id": s.dataset_id, "hosts": s.hosts,
         })).collect::<Vec<_>>(),
     });
     conn.execute(
@@ -330,6 +434,7 @@ fn load_in(
         relations,
         superseded,
         warnings,
+        skipped: load.skipped.clone(),
     })
 }
 
@@ -339,11 +444,15 @@ fn load_in(
 /// of that name; merging two namings would give the relation two host
 /// columns, so the disagreement is refused, as a typing one is. Live sources
 /// of a relation always agree, so checking against any one of them is enough.
+/// Only a source with a table for the relation feeds it: one whose dataset
+/// was left out (a per-channel copy) or had no file to load is in the
+/// inventory and binds nothing.
 fn check_metadata_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
     let recorded: Option<String> = conn
         .query_row(
             "SELECT i.metadata_columns_json FROM ox.inventory_dataset i \
              JOIN ox.source s ON s.id = i.source_id \
+             JOIN ox.source_table st ON st.source_id = i.source_id AND st.relation = i.view \
              WHERE i.view = ? AND NOT s.removed ORDER BY i.source_id LIMIT 1",
             params![dataset.view],
             |r| r.get(0),
