@@ -103,7 +103,6 @@
 //! as they are to the engine itself. Attaching takes the file's lock, so the
 //! caller must not hold the case open read-write meanwhile.
 
-use super::fan::in_order;
 use super::page::clip_text;
 use super::ISO_FORMAT;
 use crate::case::{check_format, is_lock_conflict};
@@ -114,6 +113,10 @@ use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
 use serde_json::Value;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The alias the case is attached under.
@@ -217,10 +220,187 @@ pub struct Described {
 /// one SELECT (with DuckDB's message) or a `limit` of 0 or over `MAX_LIMIT`;
 /// `CaseLocked` when another connection holds the file.
 pub fn query_sql(case_path: &Path, sql: &str, limit: u32, offset: u64) -> Result<SqlResult> {
+    query_sql_within(case_path, sql, limit, offset, SQL_TIME_LIMIT)
+}
+
+/// The time a query may run unless its caller sets another.
+pub const SQL_TIME_LIMIT: Duration = Duration::from_secs(30);
+/// The most time a caller may give a query.
+pub const SQL_TIME_LIMIT_MAX: Duration = Duration::from_secs(600);
+
+/// The least time a caller may give a query.
+const SQL_TIME_LIMIT_MIN: Duration = Duration::from_secs(1);
+
+/// Characters in one query's SQL. Binding cannot be interrupted, and takes
+/// about a millisecond per relation the SQL names per source that relation
+/// holds (each relation's view has one arm per active source), so this cap
+/// is one of the two things that bound how far past its time a query can
+/// run; the other, the number of sources, is the case's. On a 32-thread
+/// machine, binding the slowest query this long found (a union of some
+/// 2,400 references to the widest view of a one-run case) took about 3 s.
+/// It leaves room for an `IN` list of a thousand hashes.
+pub const SQL_TEXT_MAX: usize = 100_000;
+
+/// When a query's time is up, and the limit it was given.
+struct Budget {
+    deadline: Instant,
+    limit: Duration,
+}
+
+impl Budget {
+    /// The error a query that ran out of time ends with.
+    fn spent(&self) -> EngineError {
+        EngineError::Invalid(format!(
+            "the query ran past its time limit of {} and was stopped; narrow it, or give it \
+             more time (at most {})",
+            seconds(self.limit),
+            seconds(SQL_TIME_LIMIT_MAX)
+        ))
+    }
+}
+
+/// `query_sql` with a time limit of the caller's, `SQL_TIME_LIMIT_MIN` to
+/// `SQL_TIME_LIMIT_MAX` (`Invalid` outside it, as is SQL over
+/// `SQL_TEXT_MAX` characters). A query still running when its time is up
+/// is interrupted and is `Invalid`, as one needing more than
+/// `SQL_MEMORY_LIMIT` is: it asked for more than a query may have here.
+///
+/// The time counts from when the case is open; parsing happens before, on
+/// its own instance, and attaching and probing the case cost a small fixed
+/// time. A query can run past its time by one bind of its SQL: DuckDB does
+/// not stop a bind when interrupted (measured: an interrupted 1.6 s bind
+/// took 1.6 s), so a bind under way at the deadline finishes, and only then
+/// is the query stopped. `SQL_TEXT_MAX` bounds that bind.
+pub fn query_sql_within(
+    case_path: &Path,
+    sql: &str,
+    limit: u32,
+    offset: u64,
+    time_limit: Duration,
+) -> Result<SqlResult> {
     check_limit(limit)?;
+    if !(SQL_TIME_LIMIT_MIN..=SQL_TIME_LIMIT_MAX).contains(&time_limit) {
+        return Err(EngineError::Invalid(format!(
+            "a query's time limit is {} to {}, not {}",
+            seconds(SQL_TIME_LIMIT_MIN),
+            seconds(SQL_TIME_LIMIT_MAX),
+            seconds(time_limit)
+        )));
+    }
+    let chars = sql.chars().count();
+    if chars > SQL_TEXT_MAX {
+        return Err(EngineError::Invalid(format!(
+            "a query is at most {SQL_TEXT_MAX} characters, not {chars}"
+        )));
+    }
     let select = the_select(sql)?;
     let conn = locked(case_path)?;
-    run_select(&conn, &select, limit, offset)
+    let budget = Budget {
+        deadline: Instant::now() + time_limit,
+        limit: time_limit,
+    };
+    // Declared after `conn`, so on a panic it is dropped, and its thread
+    // stopped, before the connection it interrupts is closed.
+    let watchdog = Watchdog::start(&conn, budget.deadline);
+    let result = run_select(&conn, &select, limit, offset, &budget);
+    timed(watchdog.stop(), &budget, result)
+}
+
+/// `result` as the call reports it: the time-limit error when the watchdog
+/// `fired` and the query failed because DuckDB was interrupted, and as it
+/// is otherwise. A query that finished, or failed on its own, as its time
+/// ran out keeps its own outcome.
+fn timed(fired: bool, budget: &Budget, result: Result<SqlResult>) -> Result<SqlResult> {
+    match result {
+        Err(EngineError::Db(e)) if fired && e.to_string().starts_with("INTERRUPT Error") => {
+            Err(budget.spent())
+        }
+        other => other,
+    }
+}
+
+/// `d` as the CLI spells a time limit: whole seconds, or tenths below that.
+fn seconds(d: Duration) -> String {
+    if d.subsec_nanos() == 0 {
+        format!("{} s", d.as_secs())
+    } else {
+        format!("{:.1} s", d.as_secs_f64())
+    }
+}
+
+/// Interrupts a connection's running statement once a time limit passes.
+///
+/// DuckDB clears an interrupt when the next statement starts, and a call
+/// runs several (the DESCRIBE that names the columns, then the page), so
+/// once the time is up the watchdog keeps interrupting until it is stopped:
+/// a statement started after the first interrupt is interrupted too.
+///
+/// Its thread is stopped and joined when it is stopped or dropped, so it
+/// never outlives the call and never interrupts a connection being closed.
+struct Watchdog {
+    stop: Option<mpsc::Sender<()>>,
+    fired: Arc<AtomicBool>,
+    /// Set by the thread as it returns; what a test reads to see that the
+    /// thread is gone once the watchdog is.
+    #[cfg_attr(not(test), allow(dead_code))]
+    finished: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Watchdog {
+    /// How often an expired watchdog interrupts again.
+    const REPEAT: Duration = Duration::from_millis(50);
+
+    /// Watch `conn` until `deadline`. The deadline is fixed by the caller, so
+    /// however late the thread first runs, the time counts from the call.
+    fn start(conn: &Connection, deadline: Instant) -> Watchdog {
+        let handle = conn.interrupt_handle();
+        let (stop, stopped) = mpsc::channel::<()>();
+        let fired = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (flag, done) = (Arc::clone(&fired), Arc::clone(&finished));
+        let thread = std::thread::spawn(move || {
+            let left = deadline.saturating_duration_since(Instant::now());
+            // A message or a dropped sender both mean the call is over.
+            if stopped.recv_timeout(left) == Err(RecvTimeoutError::Timeout) {
+                flag.store(true, Ordering::SeqCst);
+                loop {
+                    handle.interrupt();
+                    if stopped.recv_timeout(Self::REPEAT) != Err(RecvTimeoutError::Timeout) {
+                        break;
+                    }
+                }
+            }
+            done.store(true, Ordering::SeqCst);
+        });
+        Watchdog {
+            stop: Some(stop),
+            fired,
+            finished,
+            thread: Some(thread),
+        }
+    }
+
+    /// Stop watching; whether the time ran out first.
+    fn stop(mut self) -> bool {
+        self.halt();
+        self.fired.load(Ordering::SeqCst)
+    }
+
+    /// End the thread and wait for it.
+    fn halt(&mut self) {
+        // Dropping the sender ends the thread's wait at once.
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        self.halt();
+    }
 }
 
 /// The relation views in `main` and the case tables in `ox`, with their
@@ -559,16 +739,24 @@ const CALLER_MISTAKES: [&str; 13] = [
     "Syntax",
 ];
 
-/// The kinds on `CALLER_MISTAKES` that a view of the case's own raises
-/// when it no longer binds, just as a caller's misspelt name does.
-const BINDING: [&str; 2] = ["Binder", "Catalog"];
-
 /// A failure of the caller's SELECT, as the error it is: `Invalid` with
 /// DuckDB's own reason when the query asked for something it cannot have
 /// (`CALLER_MISTAKES`, or more memory than `SQL_MEMORY_LIMIT`), and the
-/// engine error it is otherwise. A binding failure is the caller's only
-/// while every view of the case binds on its own (`broken_view`).
-fn query_failure(conn: &Connection, e: duckdb::Error) -> EngineError {
+/// engine error it is otherwise.
+///
+/// A view of the case that no longer binds fails with the same `Binder` and
+/// `Catalog` errors as a caller's misspelt name, and is reported the same
+/// way here; DuckDB's reason then names a table the caller never wrote.
+/// Telling the two apart was tried and dropped: checking only the views a
+/// query reached means redoing DuckDB's name resolution (CTE scope and
+/// order, lazily bound CTEs, catalog search), and checking every view means
+/// binds that no interrupt stops (DuckDB does not look for one while
+/// binding: an interrupted 1.6 s bind took 1.6 s), which could hold the case
+/// past the query's time limit. The engine rebuilds its views in the same
+/// transaction as every change, so such a view means a damaged case, which
+/// every other command, reading through the engine's own path, reports as
+/// `engine`.
+fn query_failure(e: duckdb::Error) -> EngineError {
     let message = e.to_string();
     if message.starts_with("Out of Memory Error") {
         return EngineError::Invalid(format!(
@@ -576,72 +764,11 @@ fn query_failure(conn: &Connection, e: duckdb::Error) -> EngineError {
              narrow it or aggregate it further"
         ));
     }
-    let Some(kind) = message.split_once(" Error: ").map(|(kind, _)| kind) else {
-        return e.into();
-    };
-    if !CALLER_MISTAKES.contains(&kind) {
-        return e.into();
+    let kind = message.split_once(" Error: ").map(|(kind, _)| kind);
+    if kind.is_some_and(|kind| CALLER_MISTAKES.contains(&kind)) {
+        return EngineError::Invalid(format!("the query failed: {}", without_pointer(&message)));
     }
-    if BINDING.contains(&kind) {
-        match broken_view(conn) {
-            Ok(None) => {}
-            Ok(Some(fault)) => return fault,
-            // The check itself failing says nothing about the query.
-            Err(_) => return e.into(),
-        }
-    }
-    EngineError::Invalid(format!("the query failed: {}", without_pointer(&message)))
-}
-
-/// The first view of the case, in name order, that does not bind on its
-/// own, as the engine error that names it and says why; `None` when every
-/// view binds.
-///
-/// Every view, not only those the query names: the engine builds its views
-/// from the case tables in the same transaction as every change, so one
-/// that no longer binds means the case is damaged, and that comes first
-/// whatever else the query got wrong. Telling which views a failing query
-/// actually reached would mean redoing DuckDB's name resolution (CTE scope
-/// and order, lazily bound CTEs, catalog search), which a review showed
-/// cannot be approximated safely. This runs only after a binding failure,
-/// and checks several views at a time: about 0.1 s over 328 views.
-fn broken_view(conn: &Connection) -> Result<Option<EngineError>> {
-    let views: Vec<(String, String)> = conn
-        .prepare(
-            "SELECT schema_name, view_name FROM duckdb_views() \
-             WHERE database_name = current_database() AND NOT internal ORDER BY 1, 2",
-        )?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<std::result::Result<_, _>>()?;
-    let mut broken = None;
-    in_order(
-        conn,
-        &views,
-        |conn, (schema, view)| {
-            // A cloned connection starts in the in-memory catalog, not the
-            // case's (`USE` is per connection), so the name is qualified.
-            let sql = format!(
-                "DESCRIBE SELECT * FROM {CASE_ALIAS}.{}.{}",
-                quote_ident(schema),
-                quote_ident(view)
-            );
-            Ok(conn.prepare(&sql).err().map(|e| e.to_string()))
-        },
-        |(schema, view), failure| match failure {
-            None => true,
-            Some(why) => {
-                broken = Some(EngineError::Db(duckdb::Error::DuckDBFailure(
-                    duckdb::ffi::Error::new(1),
-                    Some(format!(
-                        "the case is damaged: its view {schema}.{view} no longer binds: {}",
-                        without_pointer(&why)
-                    )),
-                )));
-                false
-            }
-        },
-    )?;
-    Ok(broken)
+    e.into()
 }
 
 /// `message` without the `LINE n:` pointer DuckDB ends it with, which points
@@ -667,9 +794,14 @@ fn without_pointer(message: &str) -> &str {
 }
 
 /// `select` (from `the_select`) on `conn`: up to `limit` rows from `offset`,
-/// every cell as text.
-fn run_select(conn: &Connection, select: &str, limit: u32, offset: u64) -> Result<SqlResult> {
-    let query_failure = |e| query_failure(conn, e);
+/// every cell as text, within `budget`.
+fn run_select(
+    conn: &Connection,
+    select: &str,
+    limit: u32,
+    offset: u64,
+    budget: &Budget,
+) -> Result<SqlResult> {
     // The binder alone names and types the columns, so an empty result
     // still has them.
     let mut columns = Vec::new();
@@ -683,6 +815,12 @@ fn run_select(conn: &Connection, select: &str, limit: u32, offset: u64) -> Resul
             columns.push(r.get::<_, String>(0)?);
             types.push(r.get::<_, String>(1)?);
         }
+    }
+    // The page binds the SELECT again, and a bind runs to its end however
+    // often it is interrupted: once the first used up the time, the second
+    // is not begun.
+    if Instant::now() >= budget.deadline {
+        return Err(budget.spent());
     }
 
     // The result's columns are renamed by position, which reaches each one
@@ -753,10 +891,8 @@ mod tests {
         duckdb::Error::DuckDBFailure(duckdb::ffi::Error::new(1), Some(message.to_string()))
     }
 
-    /// `query_failure` on a connection with no view to check.
     fn classify(message: &str) -> EngineError {
-        let conn = Connection::open_in_memory().unwrap();
-        query_failure(&conn, failure(message))
+        query_failure(failure(message))
     }
 
     /// Only a mistake in the query is the caller's: a fault on this side,
@@ -820,6 +956,101 @@ mod tests {
         ] {
             assert_eq!(without_pointer(message), reason, "{message:?}");
         }
+    }
+
+    /// Reviewed: only DuckDB's interrupt, after the watchdog fired, is a
+    /// time-out; an error the query met on its own stays what it was, even
+    /// when the time ran out before the call returned.
+    #[test]
+    fn only_an_interrupt_after_the_time_ran_out_is_a_time_out() {
+        let limit = Budget {
+            deadline: Instant::now(),
+            limit: Duration::from_secs(3),
+        };
+        let interrupted = || Err(EngineError::Db(failure("INTERRUPT Error: Interrupted!")));
+        let mistake = || {
+            Err(EngineError::Invalid(
+                "the query failed: Binder Error: x".into(),
+            ))
+        };
+        let fault = || Err(EngineError::Db(failure("IO Error: disk")));
+        let code = |r: Result<SqlResult>| r.map(|_| "ok").unwrap_or_else(|e| e.code());
+        let message = |r: Result<SqlResult>| r.err().map(|e| e.to_string()).unwrap_or_default();
+
+        assert!(message(timed(true, &limit, interrupted())).contains("time limit of 3 s"));
+        assert_eq!(code(timed(true, &limit, interrupted())), "invalid");
+        assert!(message(timed(true, &limit, mistake())).contains("Binder Error"));
+        assert_eq!(code(timed(true, &limit, fault())), "engine");
+        // Not fired: an interrupt is not ours to explain.
+        assert_eq!(code(timed(false, &limit, interrupted())), "engine");
+        let done = Ok(SqlResult {
+            columns: vec![],
+            types: vec![],
+            rows: vec![],
+            truncated: false,
+            cells_clipped: false,
+        });
+        assert_eq!(code(timed(true, &limit, done)), "ok");
+    }
+
+    /// Reviewed: the time counts from when the call fixed its deadline, not
+    /// from whenever the watchdog's thread first runs.
+    #[test]
+    fn a_watchdog_counts_from_its_deadline() {
+        let conn = Connection::open_in_memory().unwrap();
+        let watchdog = Watchdog::start(&conn, Instant::now() - Duration::from_secs(1));
+        let fired = Arc::clone(&watchdog.fired);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            fired.load(Ordering::SeqCst),
+            "a passed deadline did not fire"
+        );
+        assert!(watchdog.stop());
+    }
+
+    /// Reviewed: DuckDB does not stop a bind when interrupted, and a call
+    /// binds the caller's SELECT twice (to name the columns, then to page
+    /// it). When the first bind ran past the deadline the second is not
+    /// begun.
+    #[test]
+    fn no_page_is_begun_once_the_time_is_up() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CALL enable_logging('QueryLog');")
+            .unwrap();
+        let budget = Budget {
+            deadline: Instant::now() - Duration::from_millis(1),
+            limit: Duration::from_secs(1),
+        };
+        let e = run_select(&conn, "SELECT 42 AS answer", 10, 0, &budget).unwrap_err();
+        assert!(e.to_string().contains("time limit of 1 s"), "{e}");
+        conn.execute_batch("CALL disable_logging();").unwrap();
+        let ran: Vec<String> = conn
+            .prepare("SELECT message FROM duckdb_logs WHERE type = 'QueryLog'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert!(ran.iter().any(|s| s.starts_with("DESCRIBE")), "{ran:#?}");
+        assert!(!ran.iter().any(|s| s.contains("OFFSET")), "{ran:#?}");
+    }
+
+    /// Reviewed: a watchdog that is dropped, as on a panic, stops its thread
+    /// before it returns, so nothing interrupts a connection being closed.
+    #[test]
+    fn a_dropped_watchdog_stops_its_thread() {
+        let conn = Connection::open_in_memory().unwrap();
+        let watchdog = Watchdog::start(&conn, Instant::now() + Duration::from_millis(1));
+        let fired = Arc::clone(&watchdog.fired);
+        let finished = Arc::clone(&watchdog.finished);
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(fired.load(Ordering::SeqCst), "the watchdog never fired");
+        drop(watchdog);
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "dropping the watchdog left its thread running"
+        );
+        drop(conn);
     }
 
     #[test]

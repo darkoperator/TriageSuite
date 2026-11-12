@@ -223,7 +223,7 @@ process exit codes:
 | 4 | `refused` | a rule forbids it for this actor or in this state of the case (an agent doing what only an analyst may, a source already loaded, a colliding relation name, a removal that needs `--confirm-orphans`) |
 | 5 | `case_locked` | another process is changing the case, or this command would change it while another process has it open |
 | 6 | `needs_upgrade` | the case file is a newer or older format |
-| 10 | `engine`, `io` | an internal failure, including a damaged case (a `query` that fails to bind while a view of the case no longer binds is reported this way, naming the view) |
+| 10 | `engine`, `io` | an internal failure |
 
 Any number of commands that only read the case run at once. A command that
 changes it (`load`, `source remove`, `mark set` and `clear`, `tag add` and
@@ -271,7 +271,7 @@ remain.
 | Tag | 64 characters of `a-z 0-9 : _ . -` (stored lower-case) |
 | Note | 10,000 characters |
 | `around` window | at most 24h (`30s`, `5m`, `1h`) |
-| `query` rows, memory | 1,000 rows at a time, 2 GiB |
+| `query` rows, memory, time, length | 1,000 rows at a time, 2 GiB, 30 s (`--timeout`, 1 to 600 s), 100,000 characters |
 
 `oxidelens capabilities` reports the same numbers from the build itself.
 
@@ -289,8 +289,22 @@ that read files or the environment (`read_*`, `parquet_*`, `getenv`, `glob`
 and the like), and any table outside the case (a name that spells a file path,
 or a catalog other than `ox_case`, `system` and `temp`, or a schema other
 than `main`, `ox`, `src_<n>`, `information_schema` and `pg_catalog`). It returns at most 1,000 rows at a
-time. The case is opened read-only for it, so it cannot run while another
-process has the case open for writing.
+time. A query still running after 30 seconds (or the `--timeout` given, at
+most 600) is stopped and reported `invalid`, as one needing more than 2 GiB
+is. The time counts once the case is open. A query can run past it by the time
+DuckDB takes to bind it, which DuckDB cannot interrupt. That time grows with
+the length of the SQL and with how many sources the relations it names hold:
+each relation's view has one part per loaded source. Measured on a 32-thread
+machine, it is about a millisecond for each relation the SQL names, per
+source: well under a second for ordinary queries, about 3 s for the slowest
+100,000-character query found over a case of one run. The case is opened
+read-only for `query`, so it cannot run while another process has the case
+open for writing.
+
+A mistake in the SELECT comes back `invalid` with DuckDB's reason. So does a
+view of the case that no longer binds, which only a damaged case has: the
+reason then names a table you never wrote, and the other commands report the
+same damage as `engine`.
 
 What stays reachable beyond the case's own tables and views is DuckDB's own
 system views and settings: views such as `duckdb_databases` (by bare

@@ -169,6 +169,9 @@ pub fn capabilities() -> Reply {
             "around_window_seconds_max": MAX_WINDOW_SECONDS,
             "query_rows_max": MAX_LIMIT,
             "query_memory": SQL_MEMORY_LIMIT,
+            "query_seconds_default": crate::args::QUERY_SECONDS_DEFAULT,
+            "query_seconds_max": crate::args::QUERY_SECONDS_MAX,
+            "query_chars_max": oxl_engine::SQL_TEXT_MAX,
         },
         "untrusted_wrapper": UNTRUSTED,
     }))

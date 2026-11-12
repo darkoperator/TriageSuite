@@ -6,9 +6,13 @@
 mod common;
 
 use common::{analyst, loaded, Holder};
-use oxl_engine::{describe, load_file, query_sql, Case, FileOptions, CELL_CAP, MAX_LIMIT};
+use oxl_engine::{
+    describe, load_file, query_sql, query_sql_within, Case, FileOptions, CELL_CAP, MAX_LIMIT,
+    SQL_TEXT_MAX, SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
+};
 use oxl_fixtures::loose_fw_csv;
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// A loaded case, closed so that `query_sql` and `describe` can attach it.
 fn closed() -> (tempfile::TempDir, PathBuf) {
@@ -123,13 +127,13 @@ fn a_mistake_in_the_query_is_invalid_with_duckdbs_reason() {
     assert!(e.to_string().contains("LINE 7: x"), "{e}");
 }
 
-/// Reviewed: a view of the case's own that no longer binds fails with the
-/// same kinds of error as a caller's typo. While one does the case is
-/// damaged, and a binding failure is reported as the engine's, naming the
-/// view, whatever else the query got wrong: working out whether the query
-/// reached the view would mean redoing DuckDB's name resolution.
+/// A known limit, kept on purpose: a view of the case's own that no longer
+/// binds fails with the same kinds of error as a caller's typo, and `query`
+/// reports it the same way. DuckDB's reason then names the table the view
+/// lost, which the caller never wrote. Telling the two apart was tried and
+/// dropped (see `query_failure`); this pins what the caller sees instead.
 #[test]
-fn a_binding_failure_in_a_case_with_a_broken_view_is_an_engine_failure() {
+fn a_view_of_a_damaged_case_fails_with_duckdbs_reason() {
     let (_d, path) = closed();
     let damage = "CREATE TABLE ox.scratch (a INTEGER); \
                   CREATE VIEW main.broken AS SELECT a FROM ox.scratch; \
@@ -138,45 +142,78 @@ fn a_binding_failure_in_a_case_with_a_broken_view_is_an_engine_failure() {
         .unwrap()
         .execute_batch(damage)
         .unwrap();
-    let failing = [
-        "select * from broken",
-        "select count(*) from evtxtriage_events, broken",
-        "select * from ox_case.main.BROKEN",
-        "with x as (select * from broken), broken as (select 1) select * from x",
-        "with unused as (select * from broken) select NoSuchColumn from evtxtriage_events",
-        "select NoSuchColumn from evtxtriage_events",
-        "select * from system.main.broken",
-    ];
-    for sql in failing {
-        let e = query_sql(&path, sql, 10, 0).unwrap_err();
-        assert_eq!(e.code(), "engine", "{sql}: {e}");
-        assert!(e.to_string().contains("broken"), "{sql}: {e}");
-    }
-    // A failure that is not about binding is the caller's all the same.
-    let e = query_sql(
+    let e = query_sql(&path, "select * from broken", 10, 0).unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
+    assert!(e.to_string().contains("scratch"), "{e}");
+    // The rest of the case reads as before.
+    assert!(query_sql(&path, "select count(*) from evtxtriage_events", 10, 0).is_ok());
+}
+
+/// Billions of row pairs and no row out: runs for minutes unless stopped.
+const RUNAWAY: &str = "select a.range from range(300000) a, range(300000) b \
+                       where a.range * b.range = -1";
+
+/// Found on the first real run: nothing bounded how long a query ran, so
+/// a cross join an agent wrote by mistake held the case open for minutes.
+#[test]
+fn a_query_that_runs_past_its_time_limit_is_stopped_and_invalid() {
+    let (_d, path) = closed();
+    let started = std::time::Instant::now();
+    let e = query_sql_within(&path, RUNAWAY, 10, 0, Duration::from_secs(1)).unwrap_err();
+    let took = started.elapsed();
+    assert_eq!(e.code(), "invalid", "{e}");
+    assert!(e.to_string().contains("1 s"), "{e}");
+    assert!(
+        took < Duration::from_secs(10),
+        "stopped only after {took:?}"
+    );
+
+    // A query inside its limit runs, with the default limit and a set one.
+    assert!(query_sql(&path, "select count(*) from evtxtriage_events", 10, 0).is_ok());
+    assert!(query_sql_within(
         &path,
-        "select CAST(Channel AS INTEGER) from evtxtriage_events",
+        "select count(*) from evtxtriage_events",
         10,
         0,
+        Duration::from_secs(1)
     )
-    .unwrap_err();
-    assert_eq!(e.code(), "invalid", "{e}");
-    // A query that binds runs.
-    assert!(query_sql(&path, "select count(*) from evtxtriage_events", 10, 0).is_ok());
+    .is_ok());
+    // Stopping one query does not leave the next one stopped.
+    assert!(query_sql_within(&path, "select 1", 10, 0, Duration::from_secs(1)).is_ok());
+}
 
-    // Repaired, the same mistakes are the caller's again.
-    duckdb::Connection::open(&path)
-        .unwrap()
-        .execute_batch("DROP VIEW main.broken")
-        .unwrap();
-    for sql in [
-        "select * from broken",
-        "select NoSuchColumn from evtxtriage_events",
-        "select * from system.main.broken",
+/// Reviewed: binding cannot be interrupted, and how long a bind takes grows
+/// with the SQL's length, so the length is capped: that bounds how far past
+/// its time a query can run.
+#[test]
+fn a_query_longer_than_the_cap_is_invalid() {
+    let (_d, path) = closed();
+    let padded = |chars: usize| {
+        let head = "select 1 as one -- ";
+        format!("{head}{}", "x".repeat(chars - head.chars().count()))
+    };
+    assert!(query_sql(&path, &padded(SQL_TEXT_MAX), 10, 0).is_ok());
+    let e = query_sql(&path, &padded(SQL_TEXT_MAX + 1), 10, 0).unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
+    assert!(e.to_string().contains("100000"), "{e}");
+    // The cap counts characters, not bytes.
+    let e = query_sql(&path, &format!("{}é", padded(SQL_TEXT_MAX)), 10, 0).unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
+}
+
+#[test]
+fn a_time_limit_outside_its_range_is_invalid() {
+    let (_d, path) = closed();
+    for limit in [
+        Duration::ZERO,
+        Duration::from_millis(999),
+        SQL_TIME_LIMIT_MAX + Duration::from_secs(1),
     ] {
-        let e = query_sql(&path, sql, 10, 0).unwrap_err();
-        assert_eq!(e.code(), "invalid", "{sql}: {e}");
+        let e = query_sql_within(&path, "select 1", 10, 0, limit).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{limit:?}: {e}");
     }
+    assert!(query_sql_within(&path, "select 1", 10, 0, SQL_TIME_LIMIT_MAX).is_ok());
+    assert!(SQL_TIME_LIMIT <= SQL_TIME_LIMIT_MAX);
 }
 
 #[test]

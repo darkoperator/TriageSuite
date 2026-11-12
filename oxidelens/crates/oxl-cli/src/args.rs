@@ -5,6 +5,10 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use oxl_engine::DEFAULT_LIMIT;
 use std::path::PathBuf;
 
+/// `query --timeout` when not given, and the most it may be: the engine's.
+pub const QUERY_SECONDS_DEFAULT: u64 = oxl_engine::SQL_TIME_LIMIT.as_secs();
+pub const QUERY_SECONDS_MAX: u64 = oxl_engine::SQL_TIME_LIMIT_MAX.as_secs();
+
 #[derive(Parser, Debug)]
 #[command(
     name = "oxidelens",
@@ -132,6 +136,10 @@ pub enum Command {
     Query {
         /// The SQL, or @file to read it from a file.
         sql: String,
+        /// Seconds the query may run before it is stopped, 1 to 600.
+        #[arg(long, default_value_t = QUERY_SECONDS_DEFAULT,
+              value_parser = clap::value_parser!(u64).range(1..=QUERY_SECONDS_MAX))]
+        timeout: u64,
         #[command(flatten)]
         page: PageArgs,
     },

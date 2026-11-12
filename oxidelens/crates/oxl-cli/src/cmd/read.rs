@@ -400,9 +400,15 @@ pub fn row(ctx: &Ctx, id: i64) -> Result<Reply> {
 
 /// No `Case` is opened here: `query_sql` takes its own locked connection to
 /// the file, and a second open handle would defeat the lock.
-pub fn query(ctx: &Ctx, sql: &str, page: &PageArgs) -> Result<Reply> {
+pub fn query(ctx: &Ctx, sql: &str, timeout_seconds: u64, page: &PageArgs) -> Result<Reply> {
     let sql = text_arg(sql)?;
-    let r = oxl_engine::query_sql(ctx.case_path()?, &sql, page.limit, page.offset)?;
+    let r = oxl_engine::query_sql_within(
+        ctx.case_path()?,
+        &sql,
+        page.limit,
+        page.offset,
+        std::time::Duration::from_secs(timeout_seconds),
+    )?;
     Ok(Reply {
         data: json!({
             "rows_returned": r.rows.len(),

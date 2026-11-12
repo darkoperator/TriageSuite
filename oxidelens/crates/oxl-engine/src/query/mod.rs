@@ -29,7 +29,10 @@ pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
 pub(crate) use page::{read_mark, MARK_SUSPICIOUS};
-pub use sql::{describe, query_sql, Described, DescribedColumn, SqlResult, SQL_MEMORY_LIMIT};
+pub use sql::{
+    describe, query_sql, query_sql_within, Described, DescribedColumn, SqlResult, SQL_MEMORY_LIMIT,
+    SQL_TEXT_MAX, SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
+};
 pub use stack::{stack, Stack, StackOrder, StackRow};
 
 use crate::case::Case;

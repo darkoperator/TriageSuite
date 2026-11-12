@@ -109,7 +109,7 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
         Command::Find(args) => read::find(&ctx, args),
         Command::Around(args) => read::around(&ctx, args),
         Command::Row { id } => read::row(&ctx, *id),
-        Command::Query { sql, page } => read::query(&ctx, sql, page),
+        Command::Query { sql, timeout, page } => read::query(&ctx, sql, *timeout, page),
         Command::Mark(MarkCmd::Set(a)) => annot::mark_set(&ctx, &a.rows),
         Command::Mark(MarkCmd::Clear(a)) => annot::mark_clear(&ctx, &a.rows),
         Command::Mark(MarkCmd::List { by, page }) => annot::mark_list(&ctx, by.as_deref(), page),

@@ -38,10 +38,11 @@ pub use load::{
 };
 pub use query::{
     anchor_of, around, count, describe, find, group_filter, groups, histogram, merged_rows, page,
-    query_sql, stack, AroundCount, Bucket, Cell, Described, DescribedColumn, FindHit, FindMode,
-    FindRequest, FindResult, GridQuery, GroupRow, Histogram, MarkState, MergedRow, MergedSource,
-    Page, SortKey, SqlResult, Stack, StackOrder, StackRow, BUCKET_LADDER, CELL_CAP, DEFAULT_LIMIT,
-    MAX_LIMIT, MAX_VALUE, SQL_MEMORY_LIMIT,
+    query_sql, query_sql_within, stack, AroundCount, Bucket, Cell, Described, DescribedColumn,
+    FindHit, FindMode, FindRequest, FindResult, GridQuery, GroupRow, Histogram, MarkState,
+    MergedRow, MergedSource, Page, SortKey, SqlResult, Stack, StackOrder, StackRow, BUCKET_LADDER,
+    CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_VALUE, SQL_MEMORY_LIMIT, SQL_TEXT_MAX, SQL_TIME_LIMIT,
+    SQL_TIME_LIMIT_MAX,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};

@@ -480,6 +480,43 @@ fn query_runs_a_select_and_refuses_the_rest() {
 }
 
 #[test]
+fn query_stops_at_its_time_limit() {
+    let (_d, p) = loaded();
+    let p = p.as_str();
+    let runaway = "select a.range from range(300000) a, range(300000) b \
+                   where a.range * b.range = -1";
+    let started = std::time::Instant::now();
+    let (c, v) = ox(&["--case", p, "query", runaway, "--timeout", "1"]);
+    assert_eq!(
+        (c, v["error"]["code"].as_str()),
+        (2, Some("invalid")),
+        "{v}"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(15));
+    for bad in ["0", "601", "1.5", "-1", "x"] {
+        assert_invalid(&["--case", p, "query", "select 1", "--timeout", bad]);
+    }
+    let (c, v) = ox(&["--case", p, "query", "select 1", "--timeout", "600"]);
+    assert_eq!(c, 0, "{v}");
+    // The default and the most a caller may set are in the contract.
+    let (_, v) = ox(&["capabilities"]);
+    let limits = &v["data"]["limits"];
+    assert_eq!(
+        (
+            limits["query_seconds_default"].as_u64(),
+            limits["query_seconds_max"].as_u64()
+        ),
+        (Some(30), Some(600)),
+        "{limits}"
+    );
+    assert_eq!(
+        limits["query_chars_max"].as_u64(),
+        Some(100_000),
+        "{limits}"
+    );
+}
+
+#[test]
 fn schema_lists_relations_and_columns() {
     let (_d, p) = loaded();
     let p = p.as_str();
