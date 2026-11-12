@@ -323,6 +323,14 @@ fn browser_sum_mru_and_regback_rows_have_readable_summaries() {
         "stage.zip · stage.lnk"
     );
     assert_eq!(summary("retriage_taskcache_software_regback"), r"\Updater");
+    assert_eq!(
+        summary("retriage_office_mru_ntuser_dat"),
+        r"C:\Users\svc_backup\stage\list.xlsx"
+    );
+    assert_eq!(
+        summary("retriage_first_folder_ntuser_dat"),
+        r"C:\Tools\rclone.exe · C:\Users\svc_backup\stage\"
+    );
     // The MRU slot without a time is not on the timeline.
     assert_eq!(
         rows.iter()

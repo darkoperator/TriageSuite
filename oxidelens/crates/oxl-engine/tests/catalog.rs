@@ -247,6 +247,10 @@ fn browser_sum_mru_and_regback_relations_get_a_timeline() {
         ("browsertriage_timeline", "Timestamp"),
         ("sumetriage_clients", "InsertDate"),
         ("retriage_recent_documents_ntuser_dat", "OpenedOn"),
+        // Found on the third real run, a client: neither relation was on
+        // the earlier captures.
+        ("retriage_office_mru_ntuser_dat", "LastOpened"),
+        ("retriage_first_folder_ntuser_dat", "OpenedOn"),
         ("retriage_taskcache_software_regback", "CreatedOn"),
     ] {
         assert_eq!(

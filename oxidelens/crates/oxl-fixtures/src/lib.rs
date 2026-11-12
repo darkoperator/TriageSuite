@@ -365,7 +365,8 @@ pub fn app_timed(dir: &Path) -> PathBuf {
 /// and whose times are text in the Z form: `browsertriage_history` and
 /// `browsertriage_timeline` (column names with spaces, as BrowserTriage
 /// writes them), `sumetriage_clients`, `retriage_recent_documents_ntuser_dat`
-/// (one MRU slot with a time, one without), and
+/// (one MRU slot with a time, one without), `retriage_office_mru_ntuser_dat`
+/// (opened, never closed), `retriage_first_folder_ntuser_dat`, and
 /// `retriage_taskcache_software_regback`, RETriage's copy of the TaskCache
 /// read from the hive's RegBack backup. Run id `20260112000000-kkkk`.
 pub fn app_timed_more(dir: &Path) -> PathBuf {
@@ -375,6 +376,8 @@ pub fn app_timed_more(dir: &Path) -> PathBuf {
     let clients = format!("{ws}/SUM/clients.csv");
     let recent = format!("{ws}/Registry/recentdocs.csv");
     let regback = format!("{ws}/Registry/taskcache_regback.csv");
+    let office = format!("{ws}/Registry/office_mru.csv");
+    let first_folder = format!("{ws}/Registry/first_folder.csv");
     write_run(
         &dir.join("run-20260112000000-kkkk"),
         "20260112000000-kkkk",
@@ -413,6 +416,22 @@ pub fn app_timed_more(dir: &Path) -> PathBuf {
                     "RecentDocs,RecentDocs,0,0,stage.zip,stage.lnk,0,2026-01-05T02:18:10.0000000Z",
                     "RecentDocs,RecentDocs,1,1,notes.txt,notes.lnk,1,",
                 ],
+            ),
+            untyped(
+                "RETriage",
+                "office_mru_ntuser_dat",
+                "retriage_office_mru_ntuser_dat",
+                &office,
+                "ValueName,BatchKeyPath,LastOpened,BatchValueName,LastClosed,FileName",
+                &["Item 1,Excel\\User MRU,2026-01-05T02:17:40.0000000Z,Item 1,,C:\\Users\\svc_backup\\stage\\list.xlsx"],
+            ),
+            untyped(
+                "RETriage",
+                "first_folder_ntuser_dat",
+                "retriage_first_folder_ntuser_dat",
+                &first_folder,
+                "Executable,BatchKeyPath,FolderName,BatchValueName,MRUPosition,OpenedOn",
+                &["C:\\Tools\\rclone.exe,ComDlg32\\FirstFolder,C:\\Users\\svc_backup\\stage\\,0,0,2026-01-05T02:17:50.0000000Z"],
             ),
             untyped(
                 "RETriage",

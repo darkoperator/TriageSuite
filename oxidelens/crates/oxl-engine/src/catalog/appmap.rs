@@ -49,7 +49,8 @@ const fn utc_z(relation: &'static str, column: &'static str) -> AppType {
 /// and stop, UserAssist's last execution, a shellbag's key write and first
 /// and last interaction, the times BrowserTriage decodes from each
 /// browser's own clock, the common dialogs' and recent documents' last
-/// opening (set on the most recent slot alone), and the times SumETriage
+/// opening (set on the most recent slot alone), an Office file's last
+/// opening and closing, and the times SumETriage
 /// decodes from the User Access Logging databases. A column whose name says
 /// local time, or whose values are written another way, is not here. Nor
 /// are SUM's per-day client rows: their times are the client's for the
@@ -96,6 +97,11 @@ pub const APP_TYPES: &[AppType] = &[
     ),
     utc_z("retriage_comdlg32_opensavepidlmru_ntuser_dat", "OpenedOn"),
     utc_z("retriage_recent_documents_ntuser_dat", "OpenedOn"),
+    utc_z("retriage_first_folder_ntuser_dat", "OpenedOn"),
+    // LastClosed was empty on the real run; RETriage writes it the way it
+    // writes LastOpened, and only the Z form is cast.
+    utc_z("retriage_office_mru_ntuser_dat", "LastOpened"),
+    utc_z("retriage_office_mru_ntuser_dat", "LastClosed"),
     utc_z("sumetriage_clients", "InsertDate"),
     utc_z("sumetriage_clients", "LastAccess"),
     utc_z("sumetriage_dns_info", "LastSeen"),
@@ -294,6 +300,11 @@ pub const SUMMARY: &[(&str, &[&str])] = &[
         "retriage_recent_documents_ntuser_dat",
         &["TargetName", "LnkName"],
     ),
+    (
+        "retriage_first_folder_ntuser_dat",
+        &["Executable", "FolderName"],
+    ),
+    ("retriage_office_mru_ntuser_dat", &["FileName"]),
     // User Access Logging: who reached which role from where.
     (
         "sumetriage_clients",
