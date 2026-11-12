@@ -44,6 +44,13 @@ pub(crate) fn source_schema(source_id: i64) -> String {
 /// `src_<source_id>."<relation>"` with `_ox_row`, `_ox_hash` and `_ox_occ`
 /// added. Returns the row count and the first and last `_ox_row`; both ids
 /// are 0 when the table has no rows (the caller records them as NULL).
+///
+/// The copy gives every row occurrence 1, and a second statement numbers
+/// the rows whose hash repeats. Numbering every row with one window over
+/// the hash sorts the whole table by a value almost always unique: found
+/// on a real run, a 3.75 M-row USN journal with no repeated row spent
+/// 14 s of 30 in that window, against 1 s for finding and numbering the
+/// repeats afterwards.
 pub(crate) fn materialize(
     conn: &Connection,
     source_id: i64,
@@ -80,14 +87,22 @@ pub(crate) fn materialize(
     conn.execute_batch(&format!(
         "CREATE SCHEMA IF NOT EXISTS {schema};
          CREATE TABLE {target} AS
-         SELECT *, row_number() OVER (PARTITION BY _ox_hash ORDER BY _ox_row) AS _ox_occ
+         SELECT *,
+                nextval('ox.row_seq') AS _ox_row,
+                {hash} AS _ox_hash,
+                CAST(1 AS BIGINT) AS _ox_occ
+         FROM {staged}
+         ORDER BY _ox_row;
+         UPDATE {target} AS ox_t SET _ox_occ = ox_d.occ
          FROM (
-             SELECT *,
-                    nextval('ox.row_seq') AS _ox_row,
-                    {hash} AS _ox_hash
-             FROM {staged}
-         )
-         ORDER BY _ox_row;",
+             SELECT _ox_row,
+                    row_number() OVER (PARTITION BY _ox_hash ORDER BY _ox_row) AS occ
+             FROM {target}
+             WHERE _ox_hash IN (
+                 SELECT _ox_hash FROM {target} GROUP BY _ox_hash HAVING count(*) > 1
+             )
+         ) AS ox_d
+         WHERE ox_t._ox_row = ox_d._ox_row AND ox_d.occ > 1;",
         schema = quote_ident(&source_schema(source_id)),
         hash = row_hash_sql(hash_columns),
     ))?;
@@ -314,6 +329,55 @@ mod tests {
             |r| r.get(0),
         )
         .unwrap()
+    }
+
+    /// Repeats of a row are numbered 1, 2, 3 in the order the rows were
+    /// read, however they interleave with other rows; every other row is 1.
+    #[test]
+    fn occurrences_count_repeats_in_row_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE SCHEMA ox; CREATE SEQUENCE ox.row_seq START 100;
+             CREATE SCHEMA stage;
+             CREATE TABLE stage.t AS SELECT * FROM (VALUES
+               (1, 'a'), (2, 'b'), (3, 'a'), (4, 'a'), (5, 'c'), (6, 'b')) v(k, x);",
+        )
+        .unwrap();
+        let columns = [HashColumn {
+            name: "x".into(),
+            text_expr: "x".into(),
+        }];
+        let (rows, first, last) = materialize(&conn, 7, "t", "stage.t", &columns).unwrap();
+        assert_eq!((rows, first, last), (6, 100, 105));
+        let got: Vec<(i64, i64, i64)> = conn
+            .prepare("SELECT k, _ox_row, _ox_occ FROM src_7.t")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        // Stored in row order, ids in the order read.
+        assert_eq!(
+            got,
+            [
+                (1, 100, 1),
+                (2, 101, 1),
+                (3, 102, 2),
+                (4, 103, 3),
+                (5, 104, 1),
+                (6, 105, 2)
+            ]
+        );
+        // The type every earlier load gave it, so sources stay one relation.
+        let ty: String = conn
+            .query_row(
+                "SELECT data_type FROM duckdb_columns() \
+                 WHERE schema_name = 'src_7' AND table_name = 't' AND column_name = '_ox_occ'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ty, "BIGINT");
     }
 
     #[test]
