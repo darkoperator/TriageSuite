@@ -443,6 +443,19 @@ fn query_runs_a_select_and_refuses_the_rest() {
     assert_eq!(inner(&v["data"]["untrusted"])["rows"], json!([["11"]]));
     assert_eq!(v["data"]["rows_returned"], 1);
     assert_invalid(&["--case", p, "query", "drop table ox.meta"]);
+    // A mistake in a SELECT is the caller's, not the tool's.
+    assert_invalid(&[
+        "--case",
+        p,
+        "query",
+        "select NoSuchColumn from evtxtriage_events",
+    ]);
+    assert_invalid(&[
+        "--case",
+        p,
+        "query",
+        "select CAST(Channel AS INTEGER) from evtxtriage_events",
+    ]);
     // The SQL can come from a file.
     let file = d.path().join("q.sql");
     std::fs::write(&file, "select 1 as one").unwrap();

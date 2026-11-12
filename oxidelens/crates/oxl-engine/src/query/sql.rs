@@ -103,6 +103,7 @@
 //! as they are to the engine itself. Attaching takes the file's lock, so the
 //! caller must not hold the case open read-write meanwhile.
 
+use super::fan::in_order;
 use super::page::clip_text;
 use super::ISO_FORMAT;
 use crate::case::{check_format, is_lock_conflict};
@@ -534,30 +535,151 @@ fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
     Ok(())
 }
 
-/// DuckDB's out-of-memory failure, which here means the query needs more
-/// than `SQL_MEMORY_LIMIT`, as `Invalid`; any other error as it is.
-fn out_of_memory(e: duckdb::Error) -> EngineError {
-    if e.to_string().contains("Out of Memory Error") {
-        EngineError::Invalid(format!(
+/// The kinds of DuckDB error, as its messages begin (`Binder Error: …`),
+/// that a mistake in the query's own text or in what it asks of the data
+/// causes: a name that does not exist, a type that does not fit, a value
+/// that does not convert or overflows, a bad regex, a function DuckDB does
+/// not have here. Any other kind (`INTERNAL`, `IO`, `Connection`, and
+/// `Not implemented`, `Invalid type` and `Unknown Type`, which DuckDB's own
+/// internals raise as often as a query does) is a fault on this side and
+/// stays `engine`.
+const CALLER_MISTAKES: [&str; 13] = [
+    "Binder",
+    "Catalog",
+    "Conversion",
+    "Decimal",
+    "Divide by Zero",
+    "Invalid Input",
+    "Mismatch Type",
+    "Missing Extension",
+    "Out of Range",
+    "Parameter Not Allowed",
+    "Parameter Not Resolved",
+    "Parser",
+    "Syntax",
+];
+
+/// The kinds on `CALLER_MISTAKES` that a view of the case's own raises
+/// when it no longer binds, just as a caller's misspelt name does.
+const BINDING: [&str; 2] = ["Binder", "Catalog"];
+
+/// A failure of the caller's SELECT, as the error it is: `Invalid` with
+/// DuckDB's own reason when the query asked for something it cannot have
+/// (`CALLER_MISTAKES`, or more memory than `SQL_MEMORY_LIMIT`), and the
+/// engine error it is otherwise. A binding failure is the caller's only
+/// while every view of the case binds on its own (`broken_view`).
+fn query_failure(conn: &Connection, e: duckdb::Error) -> EngineError {
+    let message = e.to_string();
+    if message.starts_with("Out of Memory Error") {
+        return EngineError::Invalid(format!(
             "the query needs more memory than a query may use here ({SQL_MEMORY_LIMIT}); \
              narrow it or aggregate it further"
-        ))
+        ));
+    }
+    let Some(kind) = message.split_once(" Error: ").map(|(kind, _)| kind) else {
+        return e.into();
+    };
+    if !CALLER_MISTAKES.contains(&kind) {
+        return e.into();
+    }
+    if BINDING.contains(&kind) {
+        match broken_view(conn) {
+            Ok(None) => {}
+            Ok(Some(fault)) => return fault,
+            // The check itself failing says nothing about the query.
+            Err(_) => return e.into(),
+        }
+    }
+    EngineError::Invalid(format!("the query failed: {}", without_pointer(&message)))
+}
+
+/// The first view of the case, in name order, that does not bind on its
+/// own, as the engine error that names it and says why; `None` when every
+/// view binds.
+///
+/// Every view, not only those the query names: the engine builds its views
+/// from the case tables in the same transaction as every change, so one
+/// that no longer binds means the case is damaged, and that comes first
+/// whatever else the query got wrong. Telling which views a failing query
+/// actually reached would mean redoing DuckDB's name resolution (CTE scope
+/// and order, lazily bound CTEs, catalog search), which a review showed
+/// cannot be approximated safely. This runs only after a binding failure,
+/// and checks several views at a time: about 0.1 s over 328 views.
+fn broken_view(conn: &Connection) -> Result<Option<EngineError>> {
+    let views: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT schema_name, view_name FROM duckdb_views() \
+             WHERE database_name = current_database() AND NOT internal ORDER BY 1, 2",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    let mut broken = None;
+    in_order(
+        conn,
+        &views,
+        |conn, (schema, view)| {
+            // A cloned connection starts in the in-memory catalog, not the
+            // case's (`USE` is per connection), so the name is qualified.
+            let sql = format!(
+                "DESCRIBE SELECT * FROM {CASE_ALIAS}.{}.{}",
+                quote_ident(schema),
+                quote_ident(view)
+            );
+            Ok(conn.prepare(&sql).err().map(|e| e.to_string()))
+        },
+        |(schema, view), failure| match failure {
+            None => true,
+            Some(why) => {
+                broken = Some(EngineError::Db(duckdb::Error::DuckDBFailure(
+                    duckdb::ffi::Error::new(1),
+                    Some(format!(
+                        "the case is damaged: its view {schema}.{view} no longer binds: {}",
+                        without_pointer(&why)
+                    )),
+                )));
+                false
+            }
+        },
+    )?;
+    Ok(broken)
+}
+
+/// `message` without the `LINE n:` pointer DuckDB ends it with, which points
+/// into the SQL it ran (the caller's SELECT wrapped in the engine's own),
+/// not into anything the caller wrote. Only a trailing block of that shape
+/// is cut: a blank line, `LINE <digits>:`, then a caret line at the end.
+fn without_pointer(message: &str) -> &str {
+    let Some(at) = message.rfind("\n\nLINE ") else {
+        return message;
+    };
+    let pointer = &message[at + "\n\nLINE ".len()..];
+    let numbered = pointer
+        .split_once(':')
+        .is_some_and(|(n, _)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    let caret = pointer
+        .rsplit_once('\n')
+        .is_some_and(|(_, last)| last.trim() == "^");
+    if numbered && caret {
+        message[..at].trim_end()
     } else {
-        e.into()
+        message
     }
 }
 
 /// `select` (from `the_select`) on `conn`: up to `limit` rows from `offset`,
 /// every cell as text.
 fn run_select(conn: &Connection, select: &str, limit: u32, offset: u64) -> Result<SqlResult> {
+    let query_failure = |e| query_failure(conn, e);
     // The binder alone names and types the columns, so an empty result
     // still has them.
     let mut columns = Vec::new();
     let mut types = Vec::new();
     {
-        let mut stmt = conn.prepare(&format!("DESCRIBE {select}"))?;
-        let mut rows = stmt.query([])?;
-        while let Some(r) = rows.next()? {
+        let mut stmt = conn
+            .prepare(&format!("DESCRIBE {select}"))
+            .map_err(query_failure)?;
+        let mut rows = stmt.query([]).map_err(query_failure)?;
+        while let Some(r) = rows.next().map_err(query_failure)? {
             columns.push(r.get::<_, String>(0)?);
             types.push(r.get::<_, String>(1)?);
         }
@@ -603,11 +725,11 @@ fn run_select(conn: &Connection, select: &str, limit: u32, offset: u64) -> Resul
         cells_clipped: false,
     };
     let width = out.columns.len();
-    let mut stmt = conn.prepare(&sql).map_err(out_of_memory)?;
+    let mut stmt = conn.prepare(&sql).map_err(query_failure)?;
     let mut rows = stmt
         .query(params_from_iter(page_params))
-        .map_err(out_of_memory)?;
-    while let Some(r) = rows.next().map_err(out_of_memory)? {
+        .map_err(query_failure)?;
+    while let Some(r) = rows.next().map_err(query_failure)? {
         if out.rows.len() == limit as usize {
             out.truncated = true;
             break;
@@ -626,6 +748,79 @@ fn run_select(conn: &Connection, select: &str, limit: u32, offset: u64) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failure(message: &str) -> duckdb::Error {
+        duckdb::Error::DuckDBFailure(duckdb::ffi::Error::new(1), Some(message.to_string()))
+    }
+
+    /// `query_failure` on a connection with no view to check.
+    fn classify(message: &str) -> EngineError {
+        let conn = Connection::open_in_memory().unwrap();
+        query_failure(&conn, failure(message))
+    }
+
+    /// Only a mistake in the query is the caller's: a fault on this side,
+    /// or a message that names no kind, stays `engine`.
+    #[test]
+    fn only_the_callers_mistakes_are_invalid() {
+        for message in [
+            "Binder Error: Referenced column \"x\" not found",
+            "Catalog Error: Table with name t does not exist!",
+            "Conversion Error: Could not convert string 'a' to INT32",
+            "Out of Range Error: Overflow in addition",
+            "Invalid Input Error: Regex compile error",
+        ] {
+            let e = classify(message);
+            assert_eq!(e.code(), "invalid", "{message}");
+            assert!(e.to_string().contains(message), "{e}");
+        }
+        assert!(classify("Out of Memory Error: x")
+            .to_string()
+            .contains(SQL_MEMORY_LIMIT));
+        for message in [
+            "INTERNAL Error: Attempted to access index 3",
+            "IO Error: Could not read from file",
+            "Connection Error: closed",
+            "FATAL Error: database invalidated",
+            "something without a kind",
+            // A kind is the text before the first " Error: ", whole.
+            "Binderish Error: x",
+            "IO Error: Binder Error: x",
+            // Reviewed: these come from DuckDB's own internals as often as
+            // from a query, so they are not taken as the caller's.
+            "Not implemented Error: Unimplemented type for cast",
+            "Invalid type Error: Invalid Type [unknown]",
+            "Unknown Type Error: x",
+        ] {
+            assert_eq!(classify(message).code(), "engine", "{message}");
+        }
+    }
+
+    #[test]
+    fn only_a_trailing_pointer_is_cut() {
+        for (message, reason) in [
+            (
+                "Binder Error: no x\n\nLINE 1: SELECT x\n               ^",
+                "Binder Error: no x",
+            ),
+            ("Binder Error: no x", "Binder Error: no x"),
+            (
+                "Conversion Error: 'a\nLINE 2: b' to INT32\n\nLINE 1: SELECT y\n       ^",
+                "Conversion Error: 'a\nLINE 2: b' to INT32",
+            ),
+            // Not a pointer: no caret line after it, or no line number.
+            (
+                "Conversion Error: 'a\n\nLINE 2: b' to INT32",
+                "Conversion Error: 'a\n\nLINE 2: b' to INT32",
+            ),
+            (
+                "Conversion Error: 'a\n\nLINE x: b'\n ^",
+                "Conversion Error: 'a\n\nLINE x: b'\n ^",
+            ),
+        ] {
+            assert_eq!(without_pointer(message), reason, "{message:?}");
+        }
+    }
 
     #[test]
     fn the_probe_catches_an_open_connection() {

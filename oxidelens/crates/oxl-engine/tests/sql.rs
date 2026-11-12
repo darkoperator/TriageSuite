@@ -74,6 +74,111 @@ fn a_page_over_the_maximum_is_invalid() {
     );
 }
 
+/// Found on the first real run: a typo in a column name came back as
+/// `engine`, exit 10, the code for a fault in the tool itself, so a caller
+/// could not tell its own mistake from a broken build.
+#[test]
+fn a_mistake_in_the_query_is_invalid_with_duckdbs_reason() {
+    let (_d, path) = closed();
+    for (sql, says) in [
+        // Found by the binder, before a row is read.
+        ("select * from no_such_relation", "no_such_relation"),
+        ("select NoSuchColumn from evtxtriage_events", "NoSuchColumn"),
+        ("select no_such_function(1)", "no_such_function"),
+        ("select 1 + 'a'::BLOB", "BLOB"),
+        // Found while the rows are read.
+        (
+            "select CAST(Channel AS INTEGER) from evtxtriage_events",
+            "Security",
+        ),
+        ("select 9223372036854775807::BIGINT + 1", "overflow"),
+        (
+            "select regexp_matches(Channel, '(') from evtxtriage_events",
+            "(",
+        ),
+    ] {
+        let e = query_sql(&path, sql, 10, 0).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{sql}: {e}");
+        let message = e.to_string();
+        assert!(
+            message.to_lowercase().contains(&says.to_lowercase()),
+            "{sql}: the reason does not name {says:?}: {message}"
+        );
+        // DuckDB points into the SQL it ran, which wraps the caller's; a
+        // pointer into text the caller never wrote would mislead.
+        for wrapper in ["DESCRIBE", "ox_c0", "ox_q", "LINE 1"] {
+            assert!(!message.contains(wrapper), "{sql}: {message}");
+        }
+    }
+    // Only DuckDB's trailing pointer is cut: text that merely looks like one
+    // inside a quoted value stays.
+    let e = query_sql(
+        &path,
+        "select CAST(Channel || chr(10) || 'LINE 7: x' AS INTEGER) from evtxtriage_events",
+        10,
+        0,
+    )
+    .unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
+    assert!(e.to_string().contains("LINE 7: x"), "{e}");
+}
+
+/// Reviewed: a view of the case's own that no longer binds fails with the
+/// same kinds of error as a caller's typo. While one does the case is
+/// damaged, and a binding failure is reported as the engine's, naming the
+/// view, whatever else the query got wrong: working out whether the query
+/// reached the view would mean redoing DuckDB's name resolution.
+#[test]
+fn a_binding_failure_in_a_case_with_a_broken_view_is_an_engine_failure() {
+    let (_d, path) = closed();
+    let damage = "CREATE TABLE ox.scratch (a INTEGER); \
+                  CREATE VIEW main.broken AS SELECT a FROM ox.scratch; \
+                  DROP TABLE ox.scratch;";
+    duckdb::Connection::open(&path)
+        .unwrap()
+        .execute_batch(damage)
+        .unwrap();
+    let failing = [
+        "select * from broken",
+        "select count(*) from evtxtriage_events, broken",
+        "select * from ox_case.main.BROKEN",
+        "with x as (select * from broken), broken as (select 1) select * from x",
+        "with unused as (select * from broken) select NoSuchColumn from evtxtriage_events",
+        "select NoSuchColumn from evtxtriage_events",
+        "select * from system.main.broken",
+    ];
+    for sql in failing {
+        let e = query_sql(&path, sql, 10, 0).unwrap_err();
+        assert_eq!(e.code(), "engine", "{sql}: {e}");
+        assert!(e.to_string().contains("broken"), "{sql}: {e}");
+    }
+    // A failure that is not about binding is the caller's all the same.
+    let e = query_sql(
+        &path,
+        "select CAST(Channel AS INTEGER) from evtxtriage_events",
+        10,
+        0,
+    )
+    .unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
+    // A query that binds runs.
+    assert!(query_sql(&path, "select count(*) from evtxtriage_events", 10, 0).is_ok());
+
+    // Repaired, the same mistakes are the caller's again.
+    duckdb::Connection::open(&path)
+        .unwrap()
+        .execute_batch("DROP VIEW main.broken")
+        .unwrap();
+    for sql in [
+        "select * from broken",
+        "select NoSuchColumn from evtxtriage_events",
+        "select * from system.main.broken",
+    ] {
+        let e = query_sql(&path, sql, 10, 0).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{sql}: {e}");
+    }
+}
+
 #[test]
 fn everything_that_is_not_one_select_is_refused() {
     let (_d, path) = closed();

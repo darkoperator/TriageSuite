@@ -218,12 +218,12 @@ process exit codes:
 | Exit | Code | Meaning |
 |---|---|---|
 | 0 | | success |
-| 2 | `invalid` | the input is wrong: malformed, out of range, naming something of the wrong kind, or a type that does not fit; usage errors too |
+| 2 | `invalid` | the input is wrong: malformed, out of range, naming something of the wrong kind, or a type that does not fit; usage errors too, and a mistake in a `query` SELECT (an unknown table, column or function, a type that does not fit, a value that does not convert or overflows, a bad regex), with DuckDB's reason |
 | 3 | `not_found` | a relation, row, note or source does not exist |
 | 4 | `refused` | a rule forbids it for this actor or in this state of the case (an agent doing what only an analyst may, a source already loaded, a colliding relation name, a removal that needs `--confirm-orphans`) |
 | 5 | `case_locked` | another process is changing the case, or this command would change it while another process has it open |
 | 6 | `needs_upgrade` | the case file is a newer or older format |
-| 10 | `engine`, `io` | an internal failure |
+| 10 | `engine`, `io` | an internal failure, including a damaged case (a `query` that fails to bind while a view of the case no longer binds is reported this way, naming the view) |
 
 Any number of commands that only read the case run at once. A command that
 changes it (`load`, `source remove`, `mark set` and `clear`, `tag add` and
