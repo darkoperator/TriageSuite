@@ -149,7 +149,12 @@ row (in the order of the wrapped list); `histogram` and `stack` print one for
 the time they show. `null` means the relation has no primary time.
 
 A column the suite already typed keeps its type, so `column declare` on it is
-`invalid`. A relation's primary time must be a typed timestamp column.
+`invalid`. A relation's primary time must be a typed timestamp column. After a
+`column declare` on a relation that has no primary time, and whose primary
+time no analyst chose (choosing none counts), the relation takes one by the
+rule a load uses: its listed primary time if that is a typed timestamp, else
+its first catalogued timestamp, usually the one just declared. The
+declaration's history row records the primary time before and after.
 
 ## Filter documents
 

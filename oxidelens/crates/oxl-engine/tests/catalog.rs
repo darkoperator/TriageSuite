@@ -111,6 +111,64 @@ fn primary_time_defaults() {
     );
 }
 
+/// Found on the first real run: declaring a column a timestamp on a
+/// relation with no primary time left it with none, though a later load of
+/// the same relation then picked that column. The declaration applies the
+/// load's own default, which never overrides an analyst's choice.
+#[test]
+fn declaring_a_timestamp_gives_a_relation_without_one_its_primary_time() {
+    let (d, mut case) = loaded();
+    // One value that is no time keeps the column from being typed on load.
+    let csv = d.path().join("logins.csv");
+    std::fs::write(
+        &csv,
+        "user,stamp\nalice,2026-01-05T02:14:00Z\nbob,not recorded\n",
+    )
+    .unwrap();
+    let name = oxl_engine::load_file(
+        &mut case,
+        &csv,
+        oxl_engine::FileOptions::default(),
+        &analyst(),
+    )
+    .unwrap()
+    .relations[0]
+        .name
+        .clone();
+    assert_eq!(relation(&case, &name).unwrap().primary_time, None);
+    let declare = |case: &mut oxl_engine::Case| {
+        declare_type(
+            case,
+            &name,
+            "stamp",
+            SqlType::Timestamp,
+            Some(oxl_engine::TimeSemantics::Utc),
+            &analyst(),
+        )
+        .unwrap()
+    };
+    declare(&mut case);
+    assert_eq!(
+        relation(&case, &name).unwrap().primary_time.as_deref(),
+        Some("stamp")
+    );
+    // The declaration's history row says what it did to the primary time.
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'declare_type' \
+             and json_extract(before_json, '$.primary_time') = 'null' \
+             and json_extract_string(after_json, '$.primary_time') = 'stamp'"
+        ),
+        1
+    );
+
+    // An analyst who chose no primary time keeps that choice.
+    set_primary_time(&mut case, &name, None, &analyst()).unwrap();
+    declare(&mut case);
+    assert_eq!(relation(&case, &name).unwrap().primary_time, None);
+}
+
 #[test]
 fn every_primary_time_entry_names_a_distinct_relation() {
     let distinct: BTreeSet<&str> = PRIMARY_TIME.iter().map(|(relation, _)| *relation).collect();

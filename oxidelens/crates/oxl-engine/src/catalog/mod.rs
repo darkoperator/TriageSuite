@@ -283,14 +283,26 @@ fn declare_in(
         TypeOrigin::Analyst,
     )?;
     sync_companions(conn, relation)?;
+    // As a load would: a relation with no primary time, and none an analyst
+    // chose (none counts), takes one by the load's rule, its listed primary
+    // time or else its first catalogued timestamp; usually the one just
+    // declared. The history row says what it became.
+    default_primary_time(conn, relation)?;
     let after = read_column(conn, relation, column)?;
+    let with_primary_time = |mut json: serde_json::Value, primary: Option<String>| {
+        json["primary_time"] = serde_json::json!(primary);
+        json
+    };
     record(
         conn,
         actor,
         relation,
         "declare_type",
-        column_json(&before),
-        column_json(&after),
+        with_primary_time(column_json(&before), info.primary_time.clone()),
+        with_primary_time(
+            column_json(&after),
+            read_relation(conn, relation)?.primary_time,
+        ),
     )?;
     rebuild_relations(conn)
 }
