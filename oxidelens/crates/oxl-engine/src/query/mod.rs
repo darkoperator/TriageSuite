@@ -131,9 +131,10 @@ pub(crate) fn subjects(case: &Case) -> Result<Vec<Subject>> {
         .collect())
 }
 
-/// Build the scope of `q`. `NotFound` for an unknown relation or a named
-/// column the relation lacks; `Invalid` for a bad filter or search, hosts on
-/// a relation without a host column, or a regex DuckDB will not compile.
+/// Build the scope of `q`. `NotFound` for an unknown relation, a named
+/// column the relation lacks or a host the case lacks (`resolve_hosts`);
+/// `Invalid` for a bad filter or search, hosts on a relation without a host
+/// column, or a regex DuckDB will not compile.
 pub(crate) fn scope(case: &Case, q: &GridQuery) -> Result<Scope> {
     let relation = catalog::relation(case, &q.relation)?;
     let subject = Subject {
@@ -141,7 +142,76 @@ pub(crate) fn scope(case: &Case, q: &GridQuery) -> Result<Scope> {
         present: described_columns(case.conn(), &relation)?,
         relation,
     };
-    scope_of(case, &subject, q)
+    let q = GridQuery {
+        hosts: resolve_hosts(case, &q.hosts)?,
+        ..q.clone()
+    };
+    scope_of(case, &subject, &q)
+}
+
+/// Hosts of the case a caller named, as the case spells them. A host name
+/// is matched without regard to case, as Windows host names are: the case's
+/// own spelling when one is exactly the name, else every host of the case
+/// that differs from it only in case. `NotFound`, naming the case's hosts,
+/// for a name no host of the case matches; a host the case has but one
+/// relation lacks is not an error, only no rows there.
+pub(crate) fn resolve_hosts(case: &Case, hosts: &[String]) -> Result<Vec<String>> {
+    if hosts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let known: Vec<String> = case
+        .conn()
+        .prepare(
+            "SELECT DISTINCT sd.host FROM ox.source_dataset sd \
+             JOIN ox.source s ON s.id = sd.source_id \
+             WHERE sd.active AND NOT s.removed AND sd.host IS NOT NULL ORDER BY sd.host",
+        )?
+        .query_map([], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    let mut out: Vec<String> = Vec::new();
+    for name in hosts {
+        let matched: Vec<&String> = match known.iter().find(|k| *k == name) {
+            Some(exact) => vec![exact],
+            None => {
+                let folded = name.to_lowercase();
+                known
+                    .iter()
+                    .filter(|k| k.to_lowercase() == folded)
+                    .collect()
+            }
+        };
+        if matched.is_empty() {
+            return Err(EngineError::NotFound(format!(
+                "no host {name:?} in the case; its hosts are {}",
+                host_list(&known)
+            )));
+        }
+        for host in matched {
+            if !out.contains(host) {
+                out.push(host.clone());
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The case's hosts for a message: all of them, or the first twenty and
+/// how many more.
+fn host_list(known: &[String]) -> String {
+    const SHOWN: usize = 20;
+    if known.is_empty() {
+        return "none".into();
+    }
+    let mut text = known
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if known.len() > SHOWN {
+        text.push_str(&format!(" and {} more", known.len() - SHOWN));
+    }
+    text
 }
 
 /// `scope` over a subject already read. `q.relation` is not looked up again:

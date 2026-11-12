@@ -129,6 +129,75 @@ fn a_merged_list_reads_summaries_and_marks_for_its_page_only() {
     }
 }
 
+/// Found on the first real run: `--host desktop-…` matched nothing on a case
+/// whose host is `DESKTOP-…`, and a host the case does not have gave zero
+/// counts with no word of why.
+#[test]
+fn a_host_matches_without_regard_to_case_and_an_unknown_one_is_not_found() {
+    let (_d, case) = loaded();
+    let at = "2026-01-05T02:15:44.380000Z";
+    let exact = around(&case, "WS01", at, 60).unwrap();
+    let lower = around(&case, "ws01", at, 60).unwrap();
+    let counts = |c: &[oxl_engine::AroundCount]| c.iter().map(|x| x.count).collect::<Vec<_>>();
+    assert_eq!(counts(&lower), counts(&exact));
+    let rows = merged_rows(
+        &case,
+        &MergedSource::Around {
+            host: "Ws01".into(),
+            at: at.into(),
+            window_seconds: 60,
+        },
+        50,
+        0,
+    )
+    .unwrap();
+    assert_eq!(rows.items.len(), 4);
+    // Rows show the case's own spelling.
+    assert!(rows.items.iter().all(|r| r.host.as_deref() == Some("WS01")));
+
+    let mut by_host = req("svc_backup", FindMode::Exact);
+    by_host.hosts = s(&["srv01"]);
+    let found = find(&case, &by_host, &mut |_, _| true).unwrap();
+    assert_eq!(found.hits.len(), 1);
+    assert_eq!(found.hits[0].host.as_deref(), Some("SRV01"));
+    assert!(
+        found.hosts_not_seen.is_empty(),
+        "{:?}",
+        found.hosts_not_seen
+    );
+
+    for e in [
+        around(&case, "NOPE", at, 60).unwrap_err(),
+        find(
+            &case,
+            &FindRequest {
+                hosts: s(&["WS01", "NOPE"]),
+                ..req("x", FindMode::Contains)
+            },
+            &mut |_, _| true,
+        )
+        .unwrap_err(),
+        merged_rows(
+            &case,
+            &MergedSource::Around {
+                host: "NOPE".into(),
+                at: at.into(),
+                window_seconds: 60,
+            },
+            50,
+            0,
+        )
+        .unwrap_err(),
+    ] {
+        assert_eq!(e.code(), "not_found", "{e}");
+        let message = e.to_string();
+        assert!(
+            message.contains("NOPE") && message.contains("SRV01, WS01"),
+            "{message}"
+        );
+    }
+}
+
 #[test]
 fn every_pivot_says_how_its_times_are_zoned() {
     let (d, mut case) = loaded();

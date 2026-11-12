@@ -14,10 +14,12 @@
 //! for every row of the pivot before paging cost several times the paging.
 
 use super::fan::in_order;
-use super::find::{cells_sql, targets, FindRequest};
+use super::find::{cells_sql, resolved, targets, FindRequest};
 use super::group::{as_count, primary_time_semantics, typed_primary_time};
 use super::page::{mark_sql, read_mark};
-use super::{scope, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS};
+use super::{
+    resolve_hosts, scope, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS,
+};
 use crate::annot::locate;
 use crate::case::Case;
 use crate::catalog::appmap::summary_for;
@@ -181,6 +183,7 @@ pub fn merged_rows(
     let mut scopes: BTreeMap<String, Scope> = BTreeMap::new();
     match source {
         MergedSource::Find(req) => {
+            let req = &resolved(case, req)?;
             let subjects = subjects(case)?;
             for target in targets(case, req, &subjects)? {
                 let mut cell_params = Vec::new();
@@ -402,6 +405,8 @@ fn around_scopes(case: &Case, host: &str, at: &str, window_seconds: u64) -> Resu
         )
         .map_err(|_| out_of_range())?;
 
+    // As the case spells it, once for every relation.
+    let hosts = resolve_hosts(case, &[host.to_string()])?;
     let mut out = Vec::new();
     for subject in subjects(case)? {
         if subject.relation.host_column.is_none() {
@@ -412,7 +417,7 @@ fn around_scopes(case: &Case, host: &str, at: &str, window_seconds: u64) -> Resu
             &subject,
             &GridQuery {
                 relation: subject.relation.name.clone(),
-                hosts: vec![host.to_string()],
+                hosts: hosts.clone(),
                 ..Default::default()
             },
         )?;

@@ -178,7 +178,11 @@ fn sort_filter_search_hosts_and_columns_compose() {
     };
     assert_eq!(count(&case, &hosts(&["SRV01"])).unwrap(), 3);
     assert_eq!(count(&case, &hosts(&["SRV01", "WS01"])).unwrap(), 11);
-    assert_eq!(count(&case, &hosts(&["nope"])).unwrap(), 0);
+    // A host the case does not have is not an empty narrowing but a mistake.
+    assert_eq!(
+        count(&case, &hosts(&["nope"])).unwrap_err().code(),
+        "not_found"
+    );
     let search = GridQuery {
         search: Some("^svch0st".into()),
         search_regex: true,
@@ -295,6 +299,23 @@ fn a_page_reads_cells_and_marks_for_its_own_rows_only() {
             .map(|row| row.iter().map(|c| c.text.clone()).collect::<Vec<_>>())
             .collect::<Vec<_>>()
     );
+}
+
+/// Found on the first real run: a host given in another case matched no
+/// row, and a host the case lacks gave an empty page with no word of why.
+#[test]
+fn a_page_matches_its_hosts_without_regard_to_case() {
+    let (_d, case) = loaded();
+    let q = |hosts: &[&str]| GridQuery {
+        hosts: hosts.iter().map(|h| h.to_string()).collect(),
+        ..events()
+    };
+    assert_eq!(count(&case, &q(&["srv01"])).unwrap(), 3);
+    assert_eq!(count(&case, &q(&["SRV01", "ws01"])).unwrap(), 11);
+    let e = count(&case, &q(&["srv02"])).unwrap_err();
+    assert_eq!(e.code(), "not_found", "{e}");
+    let e = page(&case, &q(&["srv02"]), 50, 0).unwrap_err();
+    assert_eq!(e.code(), "not_found", "{e}");
 }
 
 /// A filtered, sorted page against the same rows asked of the view directly.

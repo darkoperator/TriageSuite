@@ -279,7 +279,13 @@ fn bad_arguments_are_invalid() {
 fn a_filter_that_excludes_every_row_gives_an_empty_stack() {
     let (_d, case) = loaded();
     let mut query = q("petriage_timeline");
-    query.hosts = vec!["NOPE".into()];
+    // An unknown host is `not_found` now; a filter is what excludes rows.
+    query.filter = Some(
+        oxl_engine::parse_filter(
+            r#"{"column":"ExecutableName","op":"eq","value":"no-such-program.exe"}"#,
+        )
+        .unwrap(),
+    );
     let st = stack(
         &case,
         &query,

@@ -16,7 +16,7 @@
 
 use super::fan::in_order;
 use super::group::{as_count, first_last_sql, primary_time_semantics, typed_primary_time};
-use super::{scope_of, subjects, GridQuery, Scope, Subject, ROW_ALIAS};
+use super::{resolve_hosts, scope_of, subjects, GridQuery, Scope, Subject, ROW_ALIAS};
 use crate::case::Case;
 use crate::catalog::{ColumnInfo, ColumnRole, TimeSemantics};
 use crate::error::{EngineError, Result};
@@ -95,6 +95,7 @@ pub fn find(
     req: &FindRequest,
     progress: &mut dyn FnMut(&str, &[FindHit]) -> bool,
 ) -> Result<FindResult> {
+    let req = &resolved(case, req)?;
     let subjects = subjects(case)?;
     let targets = targets(case, req, &subjects)?;
     let mut out = FindResult {
@@ -134,6 +135,14 @@ pub fn find(
         .map(str::to_string)
         .collect();
     Ok(out)
+}
+
+/// `req` with its hosts as the case spells them (`resolve_hosts`).
+pub(super) fn resolved(case: &Case, req: &FindRequest) -> Result<FindRequest> {
+    Ok(FindRequest {
+        hosts: resolve_hosts(case, &req.hosts)?,
+        ..req.clone()
+    })
 }
 
 /// One relation a find searches: its scope, narrowed to the request's hosts

@@ -124,6 +124,12 @@ command and limit and needs no case.
 `@file` reads the text from a file. Every `--help` prints an envelope, and
 the `help` subcommand does not exist.
 
+`--host` (on `QUERY`, `find` and `around`) is matched against the case's
+hosts without regard to case, as Windows host names are, and the case's own
+spelling is what comes back. A host the case does not have is `not_found`,
+and the message names the hosts it has; a host the case has but a relation
+lacks is no rows there.
+
 Batch commands (`mark set`, `mark clear`, `tag add`, `tag remove`) take `--rows` as a
 comma-separated list of integers; anything else (an empty entry, a sign, a
 decimal) is `invalid`. They exit 0 when the call was accepted, even if some
