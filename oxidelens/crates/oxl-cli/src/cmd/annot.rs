@@ -133,11 +133,16 @@ pub fn note_delete(ctx: &Ctx, id: i64) -> Result<Reply> {
     Ok(Reply::new(json!({"id": id})))
 }
 
+/// The notes on a row, with where the row stands: a superseded row's notes
+/// usually moved to `current_row`, which an empty list would not say.
 pub fn note_list(ctx: &Ctx, row: i64, page: &PageArgs) -> Result<Reply> {
     let case = ctx.read_case()?;
     let notes = oxl_engine::notes(&case, row, page.limit, page.offset)?;
+    let place = oxl_engine::row_place(&case, row)?;
     Ok(Reply {
         data: json!({
+            "standing": place.map(|p| p.standing),
+            "current_row": place.and_then(|p| p.current_row),
             "notes": notes.items.len(),
             "untrusted": wrap(&json!({"notes": notes.items})),
         }),

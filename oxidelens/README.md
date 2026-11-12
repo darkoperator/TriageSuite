@@ -99,7 +99,7 @@ command and limit and needs no case.
 | `stack <relation> --by a,b [--order rarest\|commonest] [QUERY] [--limit N] [--offset N]` | Distinct value combinations and how many hosts show them |
 | `find <value> [--mode exact\|contains] [--host H]... [--from T] [--to T] [--rows] [--limit N] [--offset N]` | Look a value up in every relation (default `exact`) |
 | `around (--row <id> \| --host H --at T) --window 5m [--rows] [--limit N] [--offset N]` | What happened near a row or a moment |
-| `row <id>` | One row in full, with its mark, tags and notes |
+| `row <id>` | One row in full, with its mark, tags and notes; `standing` says whether it is `active`, `superseded` or `removed`, and for a superseded row `current_row` names the row now in the view with the same content, where supersession usually moved its annotations (a run in between that lacked the row leaves them on an earlier superseded copy; each `supersede` history entry lists what it moved, with `from_row` and `to_row`, and what it left behind, with `from_row`) |
 | `query <sql \| @file> [--limit N] [--offset N]` | One read-only SELECT over the case |
 | `mark set --rows 1,2,3` | Mark rows suspicious |
 | `mark clear --rows 1,2,3` | Clear marks |
@@ -109,7 +109,7 @@ command and limit and needs no case.
 | `tag list [--limit N] [--offset N]` | The tags and the rows carrying each |
 | `note add --row <id> --text <text \| @file>` | Write a note on a row |
 | `note delete <note id>` | Delete a note (the history keeps a tombstone) |
-| `note list --row <id> [--limit N] [--offset N]` | A row's notes |
+| `note list --row <id> [--limit N] [--offset N]` | A row's notes, with its `standing` and `current_row` as `row` gives them |
 | `column declare <relation> <column> --type TIMESTAMP\|BIGINT\|UBIGINT\|BOOLEAN [--semantics utc\|unknown]` | Type a column (analyst only) |
 | `column primary-time <relation> (<column> \| --none)` | Set or clear the time a relation's timeline runs on (analyst only) |
 | `history [--kind K] [--limit N] [--offset N]` | Every change, newest first; `K` is `source`, `relation`, `row_mark`, `row_tag` or `note` |

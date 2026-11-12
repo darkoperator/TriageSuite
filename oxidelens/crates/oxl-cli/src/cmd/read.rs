@@ -384,6 +384,8 @@ pub fn row(ctx: &Ctx, id: i64) -> Result<Reply> {
         "source_id": d.source_id,
         "hash": d.hash,
         "active": d.active,
+        "standing": d.standing,
+        "current_row": d.current_row,
         "mark": d.mark,
         "marked_by": d.marked_by,
         "tags": d.tags,

@@ -68,6 +68,178 @@ fn superseded_pairs(report: &LoadReport) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Found on the second real run: a superseded row's id listed no notes and
+/// a removed source's row opened with no fields, and neither said why. A
+/// row now says where it stands, and a superseded one which row in the view
+/// has its content: here the one its note moved to.
+#[test]
+fn a_row_says_where_it_stands_and_which_row_replaced_it() {
+    use oxl_engine::{notes, row_detail, row_place, RowStanding};
+    let (d, mut case) = setup();
+    let first = load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap()
+    .source_id;
+    let old = n(&case, SVCH0ST_WS01);
+    add_note(&mut case, old, "seen first here", &analyst()).unwrap();
+    let place = row_place(&case, old).unwrap().unwrap();
+    assert_eq!(
+        (place.standing, place.current_row),
+        (RowStanding::Active, None)
+    );
+
+    let later = load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap()
+    .source_id;
+    let new = n(&case, SVCH0ST_WS01);
+    assert_ne!(old, new);
+    let place = row_place(&case, old).unwrap().unwrap();
+    assert_eq!(
+        (place.standing, place.current_row),
+        (RowStanding::Superseded, Some(new))
+    );
+    // The note went with the row, and the old id says where.
+    assert!(notes(&case, old, 50, 0).unwrap().items.is_empty());
+    assert_eq!(notes(&case, new, 50, 0).unwrap().items.len(), 1);
+    let detail = row_detail(&case, old).unwrap();
+    assert_eq!(
+        (detail.standing, detail.current_row, detail.active),
+        (Some(RowStanding::Superseded), Some(new), false)
+    );
+
+    // Removing the later run reinstates the first; then removing the first
+    // leaves its rows with no data but their place.
+    remove_source(&mut case, later, true, &analyst()).unwrap();
+    assert_eq!(
+        row_place(&case, old).unwrap().unwrap().standing,
+        RowStanding::Active
+    );
+    let removed = row_place(&case, new).unwrap().unwrap();
+    assert_eq!(
+        (removed.standing, removed.current_row),
+        (RowStanding::Removed, None)
+    );
+    remove_source(&mut case, first, true, &analyst()).unwrap();
+    let detail = row_detail(&case, old).unwrap();
+    assert_eq!(
+        (detail.standing, detail.current_row, detail.fields.len()),
+        (Some(RowStanding::Removed), None, 0)
+    );
+    // An id no source loaded has no place.
+    assert!(row_place(&case, 999_999_999).unwrap().is_none());
+}
+
+/// Reviewed: `current_row` is the row with the same content now in the
+/// view, not necessarily where the annotations went. A run in between that
+/// lacked the row left them on it, and a later run that has the row again
+/// supersedes only that run, so they stay; the old row still lists them.
+#[test]
+fn current_row_is_the_same_content_now_in_view_and_left_behind_annotations_stay_listed() {
+    use oxl_engine::{row_detail, row_place, RowStanding};
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    let s1_x = mark(&mut case, SVCH0ST_WS01);
+    let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
+    load_run(
+        &mut case,
+        &without_svch0st(&rerun, &d.path().join("s2"), "20260102000000-bbbb"),
+        &analyst(),
+    )
+    .unwrap();
+    // No run in the view has the row: no current row, the mark stays.
+    let place = row_place(&case, s1_x).unwrap().unwrap();
+    assert_eq!(
+        (place.standing, place.current_row),
+        (RowStanding::Superseded, None)
+    );
+    load_run(
+        &mut case,
+        &copy_run(&rerun, &d.path().join("s3"), "20260105000000-eeee", |_| {}),
+        &analyst(),
+    )
+    .unwrap();
+    let s3_x = n(&case, SVCH0ST_WS01);
+    let detail = row_detail(&case, s1_x).unwrap();
+    assert_eq!(
+        (detail.standing, detail.current_row),
+        (Some(RowStanding::Superseded), Some(s3_x))
+    );
+    // The mark was left on the old row, and its detail says so.
+    assert!(detail.mark.is_some());
+    assert!(row_detail(&case, s3_x).unwrap().mark.is_none());
+}
+
+/// Reviewed: over four runs a note can move from the first copy to the
+/// second, stay there when the third lacks the row, and the fourth has it
+/// again. The first copy's `current_row` is then the fourth's, neither
+/// lists the note, and the history's supersede entry says where it stayed.
+#[test]
+fn a_note_left_on_an_intermediate_copy_is_traced_through_the_history() {
+    use oxl_engine::{notes, row_place};
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    let a_x = n(&case, SVCH0ST_WS01);
+    add_note(&mut case, a_x, "first seen", &analyst()).unwrap();
+    let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
+    load_run(&mut case, &rerun, &analyst()).unwrap();
+    let b_x = n(&case, SVCH0ST_WS01);
+    assert_eq!(notes(&case, b_x, 50, 0).unwrap().items.len(), 1);
+    load_run(
+        &mut case,
+        &without_svch0st(&rerun, &d.path().join("c"), "20260103000000-cccc"),
+        &analyst(),
+    )
+    .unwrap();
+    load_run(
+        &mut case,
+        &copy_run(&rerun, &d.path().join("d"), "20260105000000-eeee", |_| {}),
+        &analyst(),
+    )
+    .unwrap();
+    let d_x = n(&case, SVCH0ST_WS01);
+    for old in [a_x, b_x] {
+        assert_eq!(
+            row_place(&case, old).unwrap().unwrap().current_row,
+            Some(d_x),
+            "{old}"
+        );
+    }
+    assert!(notes(&case, a_x, 50, 0).unwrap().items.is_empty());
+    assert!(notes(&case, d_x, 50, 0).unwrap().items.is_empty());
+    assert_eq!(notes(&case, b_x, 50, 0).unwrap().items.len(), 1);
+    // The supersession that lacked the row recorded the note left on b.
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.history, \
+                 unnest(from_json(json_extract(after_json, '$.left_behind'), '[\"JSON\"]')) AS e(entry) \
+                 where action = 'supersede' \
+                   and json_extract_string(entry, '$.kind') = 'note' \
+                   and cast(json_extract(entry, '$.from_row') as bigint) = {b_x}"
+            )
+        ),
+        1
+    );
+}
+
 #[test]
 fn a_retry_of_one_tool_replaces_only_that_dataset_for_that_host() {
     let (d, mut case) = setup();

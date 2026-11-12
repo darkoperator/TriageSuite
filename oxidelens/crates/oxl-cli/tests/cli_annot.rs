@@ -484,6 +484,80 @@ fn row_ids_can_come_from_a_file() {
     assert_eq!(c, 2, "{v}");
 }
 
+/// Found on the second real run: `note list` on a superseded row's id was
+/// silently empty, the note having moved with the row. `row` and
+/// `note list` now say where the row stands and which row is in its place.
+#[test]
+fn a_superseded_row_points_at_the_row_in_its_place() {
+    let (d, p) = loaded();
+    let p = p.as_str();
+    let pf = |p: &str| {
+        let (c, v) = ox(&[
+            "--case",
+            p,
+            "rows",
+            "petriage_timeline",
+            "--host",
+            "WS01",
+            "--filter",
+            r#"{"column":"ExecutableName","op":"eq","value":"SVCH0ST.EXE"}"#,
+        ]);
+        assert_eq!(c, 0, "{v}");
+        v["data"]["row_ids"][0].as_i64().unwrap()
+    };
+    let old = pf(p);
+    let r = old.to_string();
+    assert_eq!(
+        ox(&[
+            "--case",
+            p,
+            "note",
+            "add",
+            "--row",
+            &r,
+            "--text",
+            "first seen"
+        ])
+        .0,
+        0
+    );
+    let (c, v) = ox(&["--case", p, "note", "list", "--row", &r]);
+    assert_eq!(
+        (
+            c,
+            v["data"]["standing"].clone(),
+            v["data"]["current_row"].clone()
+        ),
+        (0, json!("active"), json!(null)),
+        "{v}"
+    );
+    let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("rerun"));
+    assert_eq!(
+        ox(&["--case", p, "load", "run", &rerun.to_string_lossy()]).0,
+        0
+    );
+    let new = pf(p);
+    for command in [vec!["note", "list", "--row", &r], vec!["row", &r]] {
+        let mut args = vec!["--case", p];
+        args.extend(command.iter().copied());
+        let (c, v) = ox(&args);
+        assert_eq!(
+            (
+                c,
+                v["data"]["standing"].clone(),
+                v["data"]["current_row"].clone()
+            ),
+            (0, json!("superseded"), json!(new)),
+            "{command:?}: {v}"
+        );
+    }
+    let (_, v) = ox(&["--case", p, "note", "list", "--row", &new.to_string()]);
+    assert_eq!(v["data"]["notes"], 1, "{v}");
+    // An id no source loaded has no standing.
+    let (c, v) = ox(&["--case", p, "note", "list", "--row", "999999999"]);
+    assert_eq!((c, v["data"]["standing"].clone()), (0, json!(null)), "{v}");
+}
+
 #[test]
 fn whole_call_refusals_exit_4_and_empty_input_exits_2() {
     let (_d, p) = loaded();

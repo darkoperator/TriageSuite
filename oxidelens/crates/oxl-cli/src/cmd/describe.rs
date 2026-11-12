@@ -72,7 +72,7 @@ const COMMANDS: &[(&str, &str)] = &[
         "around",
         "What happened near a row or a moment: around (--row <id> | --host <h> --at <utc>) --window <30s|1m|5m|1h> [--rows] [--limit N] [--offset N]. time_semantics says, per count or row, whether its time is utc or unknown (written without a zone, compared as written)",
     ),
-    ("row", "One row in full: row <id>"),
+    ("row", "One row in full: row <id>. standing is active, superseded or removed; for a superseded row current_row names the row now in the view with the same content, where its annotations usually moved (a run in between that lacked the row leaves them on an earlier superseded copy; each supersede history entry lists what it moved, with from_row and to_row, and what it left behind, with from_row)"),
     (
         "mark set",
         "Mark rows suspicious: mark set --rows <1,2,3 | @file>. An agent may mark at most 1,000 rows per call and never changes a mark that exists",
@@ -107,7 +107,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "note list",
-        "List the notes on a row: note list --row <id> [--limit N] [--offset N]",
+        "List the notes on a row: note list --row <id> [--limit N] [--offset N]. Says the row's standing and current_row as row does",
     ),
     (
         "column declare",

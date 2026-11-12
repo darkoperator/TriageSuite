@@ -21,7 +21,7 @@ mod tags;
 pub use history::{history, HistoryRow};
 pub use marks::{clear_suspicious, mark_suspicious, marks, MarkedRow};
 pub use notes::{add_note, delete_note, notes, Note, MAX_NOTE};
-pub use row::{row_detail, RowDetail};
+pub use row::{row_detail, row_place, RowDetail, RowPlace, RowStanding};
 pub use tags::{add_tag, remove_tag, tags, TagInfo, AGENT_TAG_PREFIX, MAX_TAG};
 
 use crate::actor::Actor;

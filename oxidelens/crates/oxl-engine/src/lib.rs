@@ -21,8 +21,8 @@ pub mod time;
 pub use actor::Actor;
 pub use annot::{
     add_note, add_tag, clear_suspicious, delete_note, history, mark_suspicious, marks, notes,
-    remove_tag, row_detail, tags, HistoryRow, MarkedRow, Note, RowDetail, RowOutcome, TagInfo,
-    AGENT_ROWS_PER_CALL, AGENT_TAG_PREFIX, MAX_NOTE, MAX_TAG,
+    remove_tag, row_detail, row_place, tags, HistoryRow, MarkedRow, Note, RowDetail, RowOutcome,
+    RowPlace, RowStanding, TagInfo, AGENT_ROWS_PER_CALL, AGENT_TAG_PREFIX, MAX_NOTE, MAX_TAG,
 };
 pub use case::{Case, CaseInfo, CASE_FORMAT};
 pub use catalog::{
