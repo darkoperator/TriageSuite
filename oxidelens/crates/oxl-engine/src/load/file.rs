@@ -13,7 +13,7 @@
 
 use super::run::{canonical_path, discard, read_path};
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
-use super::{LoadReport, LoadedRelation};
+use super::{LoadReport, LoadThreads, LoadedRelation};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::catalog::{catalog_file, ColumnRole, FileColumn, SqlType, TimeSemantics};
@@ -104,14 +104,19 @@ pub fn load_file(
     let conn = case.conn_mut();
     let mut source_id = None;
     let tx = conn.transaction()?;
+    // Within the transaction, so a failure to bound rolls back nothing.
+    let threads = LoadThreads::bound(&tx)?;
     match load_in(&tx, &canonical, delim, &opts, actor, &mut source_id) {
         Ok(report) => {
+            // Before the commit: a failure here rolls the load back.
+            threads.restore(&tx)?;
             tx.commit()?;
             Ok(report)
         }
         Err(e) => {
             drop(tx);
             discard(conn, source_id);
+            let _ = threads.restore(conn);
             Err(e)
         }
     }

@@ -28,6 +28,36 @@ fn relation_names(case: &Case) -> Vec<String> {
 /// in its aggregate and once in a per-channel copy under `Individual/`, so
 /// 106 relations held nothing the aggregate lacked, took two thirds of a
 /// 57 s load, and doubled every find and pivot over the event log.
+/// Found on the second real run: a load on all 32 threads of the machine
+/// held 7.2 GB, each thread with its own buffers; on 8 it held 4.7 GB and
+/// was faster. Both loads run on at most 8, and leave the setting as it was.
+#[test]
+fn a_load_runs_on_at_most_eight_threads_and_leaves_the_setting_as_it_was() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = oxl_fixtures::new_case(d.path());
+    let threads = |c: &Case| c.scalar_i64("SELECT current_setting('threads')").unwrap();
+    let before = threads(&case);
+    let run = oxl_fixtures::two_hosts(&d.path().join("run"));
+    let fw = oxl_fixtures::loose_fw_csv(d.path());
+    let (_, ran_run) = case
+        .statements_during_mut(|c| load_run(c, &run, &analyst()).unwrap())
+        .unwrap();
+    let (_, ran_file) = case
+        .statements_during_mut(|c| {
+            oxl_engine::load_file(c, &fw, oxl_engine::FileOptions::default(), &analyst()).unwrap()
+        })
+        .unwrap();
+    assert_eq!(threads(&case), before);
+    // A load that fails (the run is already in the case) puts it back too.
+    assert!(load_run(&mut case, &run, &analyst()).is_err());
+    assert_eq!(threads(&case), before);
+    for ran in [&ran_run, &ran_file] {
+        let bounded = ran.iter().any(|s| s.contains("SET threads = 8"));
+        // A machine with 8 threads or fewer keeps its own.
+        assert_eq!(bounded, before > 8, "{before} threads: {ran:#?}");
+    }
+}
+
 #[test]
 fn per_channel_copies_of_the_event_log_are_left_out_unless_asked_for() {
     let d = tempfile::tempdir().unwrap();

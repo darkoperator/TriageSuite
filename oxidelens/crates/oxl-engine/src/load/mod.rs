@@ -20,6 +20,44 @@ use stage::{rebuild_relations, source_schema};
 use supersede::reinstate;
 use triage_core::output::duckdb::sql::quote_ident;
 
+/// The most threads a load runs DuckDB on. Found on the second real run,
+/// 5.5 M rows on a 32-thread machine: each thread holds its own CSV and sort
+/// buffers, so on all 32 the load peaked at 7.2 GB; on 8 it peaked at 4.7 GB
+/// and took 41 s instead of 62 s (12 and 16 threads were slower than 8, and
+/// 4 no lighter). A memory limit was not the answer: under one, DuckDB 1.5
+/// failed some of the same loads out of memory and crashed others.
+pub(crate) const LOAD_THREADS: i64 = 8;
+
+/// The database's threads, bounded at `LOAD_THREADS` for the length of a
+/// load; `restore` puts the setting back. A load restores it before it
+/// commits, so a failure to restore rolls the load back and the case is as
+/// it was; a load that failed restores it after its rollback.
+pub(super) struct LoadThreads {
+    /// The setting to put back; `None` when the database was already on
+    /// `LOAD_THREADS` or fewer and nothing was changed.
+    previous: Option<i64>,
+}
+
+impl LoadThreads {
+    pub(super) fn bound(conn: &Connection) -> Result<LoadThreads> {
+        let current: i64 = conn.query_row("SELECT current_setting('threads')", [], |r| r.get(0))?;
+        if current <= LOAD_THREADS {
+            return Ok(LoadThreads { previous: None });
+        }
+        conn.execute_batch(&format!("SET threads = {LOAD_THREADS};"))?;
+        Ok(LoadThreads {
+            previous: Some(current),
+        })
+    }
+
+    pub(super) fn restore(self, conn: &Connection) -> Result<()> {
+        if let Some(threads) = self.previous {
+            conn.execute_batch(&format!("SET threads = {threads};"))?;
+        }
+        Ok(())
+    }
+}
+
 /// One relation a load fed, and how much.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedRelation {
@@ -313,4 +351,31 @@ pub fn sources(case: &Case) -> Result<Vec<SourceInfo>> {
             Ok(source)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn threads(conn: &Connection) -> i64 {
+        conn.query_row("SELECT current_setting('threads')", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_load_runs_on_at_most_load_threads_and_the_setting_comes_back() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("SET threads = 16;").unwrap();
+        let bound = LoadThreads::bound(&conn).unwrap();
+        assert_eq!(threads(&conn), LOAD_THREADS);
+        bound.restore(&conn).unwrap();
+        assert_eq!(threads(&conn), 16);
+        // Fewer threads than the bound are kept, and nothing is put back.
+        conn.execute_batch("SET threads = 4;").unwrap();
+        let bound = LoadThreads::bound(&conn).unwrap();
+        assert_eq!(threads(&conn), 4);
+        conn.execute_batch("SET threads = 6;").unwrap();
+        bound.restore(&conn).unwrap();
+        assert_eq!(threads(&conn), 6);
+    }
 }

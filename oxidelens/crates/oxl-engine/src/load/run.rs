@@ -9,7 +9,7 @@
 
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::supersede::supersede;
-use super::{LoadReport, LoadedRelation, RunOptions, SkippedDataset};
+use super::{LoadReport, LoadThreads, LoadedRelation, RunOptions, SkippedDataset};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::catalog::{catalog_dataset, check_typing};
@@ -62,23 +62,28 @@ pub fn load_run_with(
     };
 
     let skipped = copies(&inventory, options);
-    let conn = case.conn_mut();
-    let mut source_id = None;
-    let tx = conn.transaction()?;
     let load = Load {
         inventory: &inventory,
         skipped,
         root: &root,
         actor,
     };
+    let conn = case.conn_mut();
+    let mut source_id = None;
+    let tx = conn.transaction()?;
+    // Within the transaction, so a failure to bound rolls back nothing.
+    let threads = LoadThreads::bound(&tx)?;
     match load_in(&tx, &load, manifest, &mut source_id) {
         Ok(report) => {
+            // Before the commit: a failure here rolls the load back.
+            threads.restore(&tx)?;
             tx.commit()?;
             Ok(report)
         }
         Err(e) => {
             drop(tx);
             discard(conn, source_id);
+            let _ = threads.restore(conn);
             Err(e)
         }
     }
