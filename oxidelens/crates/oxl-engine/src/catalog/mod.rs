@@ -173,6 +173,22 @@ pub fn columns(case: &Case, relation: &str) -> Result<Vec<ColumnInfo>> {
     read_columns(conn, relation)
 }
 
+/// The comments DuckDB holds on the columns of `relation`'s view, by column
+/// name; a column without one has no entry. `NotFound` for an unknown
+/// relation. Read on the case's own connection, which any open serves.
+pub fn column_comments(case: &Case, relation: &str) -> Result<BTreeMap<String, String>> {
+    let conn = case.conn();
+    require_relation(conn, relation)?;
+    Ok(conn
+        .prepare(
+            "SELECT column_name, comment FROM duckdb_columns() \
+             WHERE database_name = current_database() AND schema_name = 'main' \
+               AND table_name = ? AND comment IS NOT NULL AND comment <> ''",
+        )?
+        .query_map(params![relation], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?)
+}
+
 /// Type `column` of `relation` as `sql_type`, in a companion column filled
 /// from its text. An agent may not; a timestamp needs semantics `Utc` or
 /// `Unknown` (step 1 has no zone conversion, so `Local` is `Invalid`). A

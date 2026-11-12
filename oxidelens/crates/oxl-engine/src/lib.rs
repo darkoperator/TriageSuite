@@ -26,8 +26,8 @@ pub use annot::{
 };
 pub use case::{Case, CaseInfo, CASE_FORMAT};
 pub use catalog::{
-    columns, declare_type, relation, relations, set_primary_time, ColumnInfo, ColumnRole,
-    RelationInfo, RelationKind, SqlType, TimeSemantics, TypeOrigin,
+    column_comments, columns, declare_type, relation, relations, set_primary_time, ColumnInfo,
+    ColumnRole, RelationInfo, RelationKind, SqlType, TimeSemantics, TypeOrigin,
 };
 pub use error::{EngineError, Result};
 pub use filter::{compile_filter, parse_filter, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN};

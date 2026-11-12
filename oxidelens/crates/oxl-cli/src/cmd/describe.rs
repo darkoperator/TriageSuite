@@ -7,7 +7,7 @@ use super::{Ctx, Reply};
 use crate::envelope::wrap;
 use oxl_engine::filter::{MAX_DEPTH, MAX_IN, MAX_LEAVES, MAX_REGEX};
 use oxl_engine::search::{MAX_SEARCH, MAX_TERMS};
-use oxl_engine::{Described, RelationKind, Result};
+use oxl_engine::{RelationKind, Result};
 use oxl_engine::{
     AGENT_ROWS_PER_CALL, CASE_FORMAT, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_NOTE, MAX_TAG,
     MAX_VALUE, SQL_MEMORY_LIMIT,
@@ -177,19 +177,19 @@ pub fn capabilities() -> Reply {
     }))
 }
 
-/// `schema`: every relation, or one relation's columns with the comments
-/// DuckDB holds for them.
+/// `schema`: every relation, or one relation (alone in the list) and its
+/// columns with the comments DuckDB holds for them.
 pub fn schema(ctx: &Ctx, relation: Option<&str>) -> Result<Reply> {
-    // The case is closed before `describe`, which opens its own locked
-    // connection to the same file.
-    let (relations, catalog_columns) = {
-        let case = ctx.read_case()?;
-        let relations = oxl_engine::relations(&case)?;
-        let columns = match relation {
-            Some(name) => Some(oxl_engine::columns(&case, name)?),
-            None => None,
-        };
-        (relations, columns)
+    let case = ctx.read_case()?;
+    let (relations, catalog_columns) = match relation {
+        Some(name) => (
+            vec![oxl_engine::relation(&case, name)?],
+            Some((
+                oxl_engine::columns(&case, name)?,
+                oxl_engine::column_comments(&case, name)?,
+            )),
+        ),
+        None => (oxl_engine::relations(&case)?, None),
     };
     let list: Vec<_> = relations
         .iter()
@@ -198,20 +198,13 @@ pub fn schema(ctx: &Ctx, relation: Option<&str>) -> Result<Reply> {
                    "hosts": r.hosts, "primary_time": r.primary_time})
         })
         .collect();
-    let (Some(name), Some(catalog_columns)) = (relation, catalog_columns) else {
+    let Some((catalog_columns, comments)) = catalog_columns else {
         return Ok(Reply::new(json!({
             "relations": list.len(),
             "untrusted": wrap(&json!({"relations": list})),
         })));
     };
-    let described: Vec<Described> = oxl_engine::describe(ctx.case_path()?, Some(name))?;
-    let comment_of = |column: &str| -> Option<&str> {
-        described
-            .iter()
-            .flat_map(|d| &d.columns)
-            .find(|c| c.name == column)
-            .and_then(|c| c.comment.as_deref())
-    };
+    let comment_of = |column: &str| comments.get(column).map(String::as_str);
     let columns: Vec<_> = catalog_columns
         .iter()
         .map(|c| {

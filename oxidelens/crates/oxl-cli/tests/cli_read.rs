@@ -539,6 +539,22 @@ fn schema_lists_relations_and_columns() {
     assert_eq!(time["time_semantics"], "utc");
     assert_eq!(time["origin"], "suite");
     assert_eq!(ox(&["--case", p, "schema", "no_such_relation"]).0, 3);
+
+    // Found on the first real run: asking for one relation returned every
+    // relation of the case too (33 KB over 164 relations) beside its columns.
+    let (_, v) = ox(&["--case", p, "schema", "evtxtriage_events"]);
+    let relations = inner(&v["data"]["untrusted"])["relations"].clone();
+    assert_eq!(v["data"]["relations"], 1, "{v}");
+    assert_eq!(
+        relations
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["evtxtriage_events"]
+    );
+    assert_eq!(relations[0]["rows"], 11);
 }
 
 #[test]
