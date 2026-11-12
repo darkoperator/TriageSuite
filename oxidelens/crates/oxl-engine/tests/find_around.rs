@@ -89,6 +89,48 @@ fn a_pivot_reads_the_catalog_once_however_many_relations_there_are() {
     assert_eq!(grew, [1, 1, 1, 0], "before {before:?}, after {after:?}");
 }
 
+/// Found on the second real run (5.5 M rows): a search tested each row by
+/// joining all its cells into one string, which cost two to four times a
+/// test of each cell; and an exact find kept every row whose joined cells
+/// merely contained the value, so `_` kept nearly all of them for the
+/// per-cell stage. A search now tests each cell, and an exact find asks
+/// each cell for equality from the start.
+#[test]
+fn a_search_tests_each_cell_and_an_exact_find_asks_for_equality() {
+    let (_d, case) = loaded();
+    let ran = |call: &dyn Fn(&oxl_engine::Case)| case.statements_during(|| call(&case)).unwrap().1;
+    let mut searches = ran(&|c| {
+        find(c, &req("svc_backup", FindMode::Contains), &mut |_, _| true).unwrap();
+    });
+    searches.extend(ran(&|c| {
+        let q = oxl_engine::GridQuery {
+            relation: "evtxtriage_events".into(),
+            search: Some("svc_backup".into()),
+            ..Default::default()
+        };
+        oxl_engine::page(c, &q, 10, 0).unwrap();
+    }));
+    assert!(
+        searches.iter().any(|s| s.contains("contains(")),
+        "{searches:#?}"
+    );
+    assert!(
+        searches.iter().all(|s| !s.contains("concat_ws")),
+        "{searches:#?}"
+    );
+    let exact = ran(&|c| {
+        find(c, &req("_", FindMode::Exact), &mut |_, _| true).unwrap();
+    });
+    let finds: Vec<&String> = exact.iter().filter(|s| s.contains("unnest(")).collect();
+    assert!(!finds.is_empty(), "{exact:#?}");
+    assert!(
+        finds
+            .iter()
+            .all(|s| !s.contains("contains(") && !s.contains("concat_ws")),
+        "{finds:#?}"
+    );
+}
+
 /// Found on the first real run: the merged list worked out a summary and
 /// looked up a mark for every row of the pivot before keeping the first
 /// page of them, which was 0.95 s of the 1.4 s a pivot's row list took.

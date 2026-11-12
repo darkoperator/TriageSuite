@@ -137,6 +137,23 @@ pub(crate) fn literal_sql(
     )
 }
 
+/// `haystack` (SQL) tested for being exactly the text `needle`, which is
+/// pushed as a parameter; both sides lowered first unless `case_sensitive`,
+/// as an `eq` filter on a column's text compares them.
+pub(crate) fn literal_eq_sql(
+    haystack: &str,
+    needle: &str,
+    case_sensitive: bool,
+    params: &mut Vec<SqlValue>,
+) -> String {
+    params.push(SqlValue::Text(needle.to_string()));
+    format!(
+        "{} = {}",
+        fold(haystack, case_sensitive),
+        fold("?", case_sensitive)
+    )
+}
+
 /// `haystack` (SQL) tested against the regex `pattern`, which is pushed as a
 /// parameter; case-insensitive unless `case_sensitive`.
 pub(crate) fn regex_sql(

@@ -14,7 +14,7 @@
 mod compile;
 
 pub use compile::{compile_filter, SqlFragment};
-pub(crate) use compile::{literal_sql, null_safe, regex_sql, LiteralMatch};
+pub(crate) use compile::{literal_eq_sql, literal_sql, null_safe, regex_sql, LiteralMatch};
 
 use crate::error::{EngineError, Result};
 use serde_json::Value;

@@ -311,24 +311,13 @@ fn term_sql(
             test(quote_ident(&column.text_column))
         }
         None if searchable.is_empty() => "FALSE".into(),
-        // A term holding the separator could match across two joined
-        // cells, so it is tested against each cell on its own.
-        None if term.text.contains(SEPARATOR) => {
-            format!("({})", texts().map(test).collect::<Vec<_>>().join(" OR "))
-        }
-        // One test over the cells joined by the unit separator, instead of
-        // one test per column.
-        None => test(format!(
-            "concat_ws(chr({}), {})",
-            u32::from(SEPARATOR),
-            texts().collect::<Vec<_>>().join(", ")
-        )),
+        // One test per cell. Joining a row's cells and testing the joined
+        // text once builds that string for every row, which on a real run
+        // cost two to four times as much as testing each cell, a row
+        // stopping at its first match.
+        None => format!("({})", texts().map(test).collect::<Vec<_>>().join(" OR ")),
     })
 }
-
-/// What an unscoped term's cells are joined with: the ASCII unit separator,
-/// which evidence text almost never holds.
-const SEPARATOR: char = '\u{1f}';
 
 /// `pattern` tested against each searchable cell on its own.
 fn any_cell_regex_sql(

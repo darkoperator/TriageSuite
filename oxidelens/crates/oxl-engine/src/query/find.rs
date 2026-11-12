@@ -3,10 +3,13 @@
 //! it was found in.
 //!
 //! Each relation is searched with one query in two stages. The first keeps
-//! the rows whose searchable cells, joined, contain the value: the search
-//! box's own unscoped term, so it is one test per row rather than one per
-//! column. The second unpivots only those rows into one row per cell and
-//! keeps the cells that match, which is what attributes a hit to a column.
+//! the rows with a cell that can match: for `Contains` the search box's own
+//! unscoped term, for `Exact` a cell equal to the value. The second
+//! unpivots only those rows into one row per cell and keeps the cells that
+//! match, which is what attributes a hit to a column. An exact find asks
+//! for equality from the start because a value common inside cells (`_`
+//! is in most paths) would otherwise keep nearly every row for the second
+//! stage.
 //! A cell matches the way a filter leaf does: `eq` (`Exact`) or `contains`
 //! (`Contains`), without regard to case, on the cell's text.
 //!
@@ -20,7 +23,7 @@ use super::{resolve_hosts, scope_of, subjects, GridQuery, Scope, Subject, ROW_AL
 use crate::case::Case;
 use crate::catalog::{ColumnInfo, ColumnRole, TimeSemantics};
 use crate::error::{EngineError, Result};
-use crate::filter::{compile_filter, FilterNode, Leaf, Op};
+use crate::filter::{compile_filter, literal_eq_sql, null_safe, FilterNode, Leaf, Op, SqlFragment};
 use crate::search::{compile_search, Search, SearchExpr, SearchOptions, Term};
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
@@ -249,18 +252,31 @@ pub(super) fn cells_sql(
         })
         .collect();
 
-    // Stage one: the rows whose joined cells contain the value at all.
-    let rows = compile_search(
-        &Search::Terms(SearchExpr {
-            any: vec![Term {
-                text: req.value.clone(),
-                column: None,
-            }],
-            ..Default::default()
-        }),
-        SearchOptions::default(),
-        &target.searched,
-    )?;
+    // Stage one: the rows with a cell that can match.
+    let rows = match req.mode {
+        FindMode::Contains => compile_search(
+            &Search::Terms(SearchExpr {
+                any: vec![Term {
+                    text: req.value.clone(),
+                    column: None,
+                }],
+                ..Default::default()
+            }),
+            SearchOptions::default(),
+            &target.searched,
+        )?,
+        FindMode::Exact => {
+            let mut params = Vec::new();
+            let tests: Vec<String> = cells
+                .iter()
+                .map(|cell| null_safe(&literal_eq_sql(cell, &req.value, false, &mut params)))
+                .collect();
+            SqlFragment {
+                sql: format!("({})", tests.join(" OR ")),
+                params,
+            }
+        }
+    };
     // Stage two: which of their cells match.
     let cell = ColumnInfo {
         name: CELL.into(),
