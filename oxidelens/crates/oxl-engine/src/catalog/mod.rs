@@ -625,16 +625,16 @@ fn sync_companions(conn: &Connection, relation: &str) -> Result<()> {
     Ok(())
 }
 
-/// Set `relation`'s primary time when it has none and no analyst ever chose
+/// Give `relation` its default primary time unless an analyst ever chose
 /// one for this relation row (choosing none is a choice too): the
-/// `PRIMARY_TIME` entry if that is a catalogued timestamp, else the first
-/// catalogued timestamp. The choice is read from the row itself, not from
-/// history, so a relation recreated after its last source was removed
-/// starts from the default again.
+/// `PRIMARY_TIME` entry once that is a catalogued timestamp, else, when it
+/// has none, its first catalogued timestamp. An automatic choice is not
+/// final: a relation that took its first timestamp, as one loaded before
+/// its entry existed did, moves to the entry's column once that is typed.
+/// The choice is read from the row itself, not from history, so a relation
+/// recreated after its last source was removed starts from the default
+/// again.
 fn default_primary_time(conn: &Connection, relation: &str) -> Result<()> {
-    if read_relation(conn, relation)?.primary_time.is_some() {
-        return Ok(());
-    }
     let chosen: bool = conn.query_row(
         "SELECT primary_time_chosen FROM ox.relation WHERE name = ?",
         params![relation],
@@ -643,14 +643,23 @@ fn default_primary_time(conn: &Connection, relation: &str) -> Result<()> {
     if chosen {
         return Ok(());
     }
+    let current = read_relation(conn, relation)?.primary_time;
     let timestamps: Vec<String> = read_columns(conn, relation)?
         .into_iter()
         .filter(|c| c.sql_type == Some(SqlType::Timestamp))
         .map(|c| c.name)
         .collect();
-    let pick = primary_time_for(relation)
-        .and_then(|p| timestamps.iter().find(|t| t.as_str() == p))
-        .or_else(|| timestamps.first());
+    let listed =
+        primary_time_for(relation).and_then(|p| timestamps.iter().find(|t| t.as_str() == p));
+    let pick = match (listed, &current) {
+        (Some(listed), _) => Some(listed),
+        // An automatic choice with no listed column to move to stays.
+        (None, Some(_)) => return Ok(()),
+        (None, None) => timestamps.first(),
+    };
+    if pick == current.as_ref() {
+        return Ok(());
+    }
     if let Some(column) = pick {
         conn.execute(
             "UPDATE ox.relation SET primary_time = ? WHERE name = ?",

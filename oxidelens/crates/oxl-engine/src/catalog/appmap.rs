@@ -31,14 +31,36 @@ impl AppRule {
     }
 }
 
-/// Every column the app types. Hayabusa writes its timestamps as text the
-/// suite cannot declare a zone for in general; with a trailing `Z` it is UTC.
-pub const APP_TYPES: &[AppType] = &[AppType {
-    relation: "ext_hayabusa_csv_timeline",
-    column: "Timestamp",
-    sql_type: SqlType::Timestamp,
-    rule: AppRule::UtcWhenTextEndsInZ,
-}];
+/// A timestamp the app types by `AppRule::UtcWhenTextEndsInZ`.
+const fn utc_z(relation: &'static str, column: &'static str) -> AppType {
+    AppType {
+        relation,
+        column,
+        sql_type: SqlType::Timestamp,
+        rule: AppRule::UtcWhenTextEndsInZ,
+    }
+}
+
+/// Every column the app types. Each holds times as text the suite does not
+/// declare a zone for; with a trailing `Z` a value is UTC. Hayabusa's
+/// timestamps are the first. The rest were found on a real run, each
+/// written in the Z form wherever it was set: AppCompat's last-modified time,
+/// a prefetch file's last run, a scheduled task's creation and last start
+/// and stop, UserAssist's last execution, and a shellbag's key write and
+/// first and last interaction. A column whose name says local time, or
+/// whose values are written another way, is not here.
+pub const APP_TYPES: &[AppType] = &[
+    utc_z("ext_hayabusa_csv_timeline", "Timestamp"),
+    utc_z("appcompattriage_appcompat", "LastModifiedTimeUTC"),
+    utc_z("petriage_main", "LastRun"),
+    utc_z("retriage_taskcache_software", "CreatedOn"),
+    utc_z("retriage_taskcache_software", "LastStart"),
+    utc_z("retriage_taskcache_software", "LastStop"),
+    utc_z("retriage_userassist_ntuser_dat", "LastExecuted"),
+    utc_z("sbetriage_shellbags", "LastWriteTime"),
+    utc_z("sbetriage_shellbags", "FirstInteracted"),
+    utc_z("sbetriage_shellbags", "LastInteracted"),
+];
 
 /// The column each relation's timeline runs on by default, when it is a
 /// catalogued timestamp. A relation not listed here takes its first
@@ -50,6 +72,15 @@ pub const PRIMARY_TIME: &[(&str, &str)] = &[
     ("petriage_timeline", "RunTime"),
     ("rbtriage_main", "DeletedOn"),
     ("ext_hayabusa_csv_timeline", "Timestamp"),
+    ("appcompattriage_appcompat", "LastModifiedTimeUTC"),
+    // The last run, not the first of the earlier runs the suite types.
+    ("petriage_main", "LastRun"),
+    // Set for every task, where the last start and stop often are not.
+    ("retriage_taskcache_software", "CreatedOn"),
+    ("retriage_userassist_ntuser_dat", "LastExecuted"),
+    // Its BagMRU key's last write, which SBETriage writes on every row;
+    // LastInteracted is the same time on the most recent slot alone.
+    ("sbetriage_shellbags", "LastWriteTime"),
 ];
 
 /// The columns whose texts make a row's one-line summary in the merged row

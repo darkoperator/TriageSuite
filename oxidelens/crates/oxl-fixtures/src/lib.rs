@@ -280,6 +280,112 @@ pub fn with_channels(dir: &Path, aggregate: bool) -> PathBuf {
     write_run(&dir.join(format!("run-{run_id}")), run_id, specs)
 }
 
+/// A run of WS01 with datasets whose timeline the app chooses:
+/// `petriage_main` (2 rows), where the suite types `PreviousRun0` but the
+/// run's own time `LastRun` is text; `retriage_userassist_ntuser_dat`
+/// (3 rows), whose `LastExecuted` is text, one value without a `Z`; and one
+/// row each of `appcompattriage_appcompat`, `retriage_taskcache_software`
+/// and `sbetriage_shellbags`, every time as text. Run id
+/// `20260110000000-iiii`.
+pub fn app_timed(dir: &Path) -> PathBuf {
+    let ws = "Processed-WS01-20260110000000";
+    let pf = format!("{ws}/Execution/pf_main.csv");
+    let ua = format!("{ws}/Registry/userassist.csv");
+    let ac = format!("{ws}/Execution/appcompat.csv");
+    let tc = format!("{ws}/Registry/taskcache.csv");
+    let sb = format!("{ws}/FileFolderAccess/shellbags.csv");
+    write_run(
+        &dir.join("run-20260110000000-iiii"),
+        "20260110000000-iiii",
+        vec![
+            DatasetSpec {
+                tool: "PETriage",
+                dataset_id: "main",
+                view: "petriage_main",
+                source: "internal",
+                evidence_path_column: None,
+                typed: &[("PreviousRun0", SqlType::Timestamp, Some(TimeSemantics::Utc))],
+                files: vec![FileSpec {
+                    host: "WS01",
+                    path: &pf,
+                    header: "ExecutableName,LastRun,PreviousRun0",
+                    rows: &[
+                        "SVCH0ST.EXE,2026-01-05T02:15:44.4120000Z,2026-01-04T10:00:00.0000000Z",
+                        "RCLONE.EXE,2026-01-05T02:17:02.7010000Z,",
+                    ],
+                }],
+            },
+            DatasetSpec {
+                tool: "RETriage",
+                dataset_id: "userassist_ntuser_dat",
+                view: "retriage_userassist_ntuser_dat",
+                source: "internal",
+                evidence_path_column: None,
+                typed: &[],
+                files: vec![FileSpec {
+                    host: "WS01",
+                    path: &ua,
+                    header: "ProgramName,RunCounter,LastExecuted",
+                    rows: &[
+                        "rclone.exe,3,2026-01-05T02:17:02.0000000Z",
+                        "notepad.exe,1,2026-01-04 09:00:00",
+                        "calc.exe,0,",
+                    ],
+                }],
+            },
+            untyped(
+                "AppCompatTriage",
+                "appcompat",
+                "appcompattriage_appcompat",
+                &ac,
+                "Path,LastModifiedTimeUTC",
+                &["C:\\Tools\\rclone.exe,2026-01-05T02:16:00.0000000Z"],
+            ),
+            untyped(
+                "RETriage",
+                "taskcache_software",
+                "retriage_taskcache_software",
+                &tc,
+                "TaskName,CreatedOn,LastStart,LastStop",
+                &["\\Updater,2026-01-05T02:18:00.0000000Z,,"],
+            ),
+            untyped(
+                "SBETriage",
+                "shellbags",
+                "sbetriage_shellbags",
+                &sb,
+                "AbsolutePath,LastWriteTime,FirstInteracted,LastInteracted",
+                &["C:\\Users\\svc_backup\\stage,2026-01-05T02:19:00.0000000Z,,"],
+            ),
+        ],
+    )
+}
+
+/// A dataset of WS01 the suite types nothing of.
+fn untyped<'a>(
+    tool: &'a str,
+    dataset_id: &'a str,
+    view: &'a str,
+    path: &'a str,
+    header: &'a str,
+    rows: &'a [&'a str],
+) -> DatasetSpec<'a> {
+    DatasetSpec {
+        tool,
+        dataset_id,
+        view,
+        source: "internal",
+        evidence_path_column: None,
+        typed: &[],
+        files: vec![FileSpec {
+            host: "WS01",
+            path,
+            header,
+            rows,
+        }],
+    }
+}
+
 /// A loose firewall export, `fw.csv`, with no inventory: three rows whose
 /// times are not in the Z form. Returns the file's path.
 pub fn loose_fw_csv(dir: &Path) -> PathBuf {

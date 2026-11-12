@@ -4,7 +4,7 @@
 mod common;
 
 use common::{agent, analyst, loaded, n};
-use oxl_engine::catalog::appmap::PRIMARY_TIME;
+use oxl_engine::catalog::appmap::{APP_TYPES, PRIMARY_TIME};
 use oxl_engine::catalog::{
     columns, declare_type, relation, relations, set_primary_time, ColumnRole, RelationKind,
     SqlType, TimeSemantics, TypeOrigin,
@@ -167,6 +167,119 @@ fn declaring_a_timestamp_gives_a_relation_without_one_its_primary_time() {
     set_primary_time(&mut case, &name, None, &analyst()).unwrap();
     declare(&mut case);
     assert_eq!(relation(&case, &name).unwrap().primary_time, None);
+}
+
+/// Found on the first real run: 16 relations had no primary time, so
+/// `around` and a time-bounded `find` passed them by, and `petriage_main`'s
+/// timeline ran on `PreviousRun0` rather than its last run.
+#[test]
+fn the_app_gives_registry_and_prefetch_relations_their_timeline() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::app_timed(&d.path().join("run"));
+    let mut case = oxl_fixtures::new_case(d.path());
+    oxl_engine::load_run(&mut case, &run, &analyst()).unwrap();
+    for (rel, time) in [
+        ("petriage_main", "LastRun"),
+        ("retriage_userassist_ntuser_dat", "LastExecuted"),
+        ("appcompattriage_appcompat", "LastModifiedTimeUTC"),
+        ("retriage_taskcache_software", "CreatedOn"),
+        ("sbetriage_shellbags", "LastWriteTime"),
+    ] {
+        assert_eq!(
+            relation(&case, rel).unwrap().primary_time.as_deref(),
+            Some(time),
+            "{rel}"
+        );
+        assert_eq!(
+            n(
+                &case,
+                &format!("select count(*) from {rel} where \"{time}__typed\" is not null")
+            ),
+            if rel == "petriage_main" { 2 } else { 1 },
+            "{rel}.{time} did not cast"
+        );
+        let column = columns(&case, rel)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == time)
+            .unwrap();
+        assert_eq!(
+            (column.sql_type, column.time_semantics, column.origin),
+            (
+                Some(SqlType::Timestamp),
+                Some(oxl_engine::TimeSemantics::Utc),
+                Some(TypeOrigin::AppMap)
+            ),
+            "{rel}.{time}"
+        );
+    }
+    // A value without the Z names no zone and stays untyped.
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from retriage_userassist_ntuser_dat where \"LastExecuted__typed\" is not null"
+        ),
+        1
+    );
+    // Every app-chosen primary time the app types is one it types as a time.
+    for (rel, column) in PRIMARY_TIME {
+        if let Some(app) = APP_TYPES
+            .iter()
+            .find(|t| t.relation == *rel && t.column == *column)
+        {
+            assert_eq!(app.sql_type, SqlType::Timestamp, "{rel}.{column}");
+        }
+    }
+}
+
+/// Reviewed: a case loaded before an entry existed chose its primary time
+/// automatically (`PreviousRun0`); a later load moves an automatic choice
+/// to the listed column, and leaves an analyst's choice as it is.
+#[test]
+fn a_later_load_moves_an_automatic_primary_time_to_the_listed_one() {
+    for analyst_chose in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let run = oxl_fixtures::app_timed(&d.path().join("run"));
+        let mut case = oxl_fixtures::new_case(d.path());
+        oxl_engine::load_run(&mut case, &run, &analyst()).unwrap();
+        if analyst_chose {
+            set_primary_time(&mut case, "petriage_main", Some("PreviousRun0"), &analyst()).unwrap();
+        } else {
+            // What a build without the entry left: its own pick, not chosen.
+            case.scalar_i64(
+                "UPDATE ox.relation SET primary_time = 'PreviousRun0' \
+                 WHERE name = 'petriage_main' RETURNING 1",
+            )
+            .unwrap();
+        }
+        // A later run of the same host.
+        let later = d.path().join("later");
+        oxl_fixtures_copy(&run, &later, "20260111000000-jjjj");
+        oxl_engine::load_run(&mut case, &later, &analyst()).unwrap();
+        let expected = if analyst_chose {
+            "PreviousRun0"
+        } else {
+            "LastRun"
+        };
+        assert_eq!(
+            relation(&case, "petriage_main")
+                .unwrap()
+                .primary_time
+                .as_deref(),
+            Some(expected),
+            "analyst chose: {analyst_chose}"
+        );
+    }
+}
+
+/// A copy of the run at `from` under `to` with run id `run_id`.
+fn oxl_fixtures_copy(from: &std::path::Path, to: &std::path::Path, run_id: &str) {
+    common::copy_tree(from, to);
+    let path = to.join("duckdb").join("datasets.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    json["run_id"] = run_id.into();
+    std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 }
 
 #[test]
