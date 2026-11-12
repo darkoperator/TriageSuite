@@ -4,8 +4,9 @@ use oxl_engine::{Case, CaseInfo, Result};
 use serde_json::json;
 use std::path::Path;
 
-pub fn new(ctx: &Ctx, path: &Path, name: &str) -> Result<Reply> {
-    let case = Case::create(path, name, &ctx.actor)?;
+/// A new case at `path`, or, without one, at the path `--case` names.
+pub fn new(ctx: &Ctx, path: Option<&Path>, name: &str) -> Result<Reply> {
+    let case = Case::create(ctx.new_case_path(path)?, name, &ctx.actor)?;
     Ok(info_reply(case.info()?))
 }
 

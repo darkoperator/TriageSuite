@@ -92,6 +92,37 @@ fn case_info_reports_free_space_and_compact_writes_a_copy() {
     );
 }
 
+/// Found on the second real run: `--case <path> case new --name <name>`
+/// was refused for want of a path, though every other command takes the
+/// case from `--case`. `case new` now takes it from there too; a path
+/// given to `case new` itself still comes first.
+#[test]
+fn case_new_takes_its_path_from_the_case_option() {
+    let d = tempfile::tempdir().unwrap();
+    let from_option = d.path().join("option.case.duckdb");
+    let from_option = from_option.to_string_lossy();
+    let (code, v) = ox(&["--case", &from_option, "case", "new", "--name", "IR-1"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(inner(&v["data"]["untrusted"])["path"], from_option.as_ref());
+    assert_eq!(ox(&["--case", &from_option, "case", "info"]).0, 0);
+
+    let given = d.path().join("given.case.duckdb");
+    let given = given.to_string_lossy();
+    let other = d.path().join("other.case.duckdb");
+    let other = other.to_string_lossy();
+    let (code, v) = ox(&["--case", &other, "case", "new", &given, "--name", "IR-2"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(inner(&v["data"]["untrusted"])["path"], given.as_ref());
+    assert!(!std::path::Path::new(other.as_ref()).exists());
+
+    let (code, v) = ox(&["case", "new", "--name", "IR-3"]);
+    assert_eq!(
+        (code, v["error"]["code"].clone()),
+        (2, json!("invalid")),
+        "{v}"
+    );
+}
+
 #[test]
 fn load_run_leaves_out_per_channel_copies_unless_asked() {
     let d = tempfile::tempdir().unwrap();

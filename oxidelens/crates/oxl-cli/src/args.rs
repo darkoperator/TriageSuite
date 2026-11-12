@@ -17,7 +17,7 @@ pub const QUERY_SECONDS_MAX: u64 = oxl_engine::SQL_TIME_LIMIT_MAX.as_secs();
     about = "Work an OxideLens case: load TriageSuite output, query it, and record findings"
 )]
 pub struct Cli {
-    /// The case file (required by every command except `capabilities` and `case new`).
+    /// The case file (required by every command except `capabilities`; `case new` takes it when given no path).
     #[arg(long, global = true, env = "OXIDELENS_CASE", hide_env_values = true)]
     pub case: Option<PathBuf>,
     /// Who is acting: analyst:<name> or agent:<name>.
@@ -237,7 +237,8 @@ pub enum FindModeArg {
 pub enum CaseCmd {
     /// Create a new case file.
     New {
-        path: PathBuf,
+        /// The new case file; --case or OXIDELENS_CASE when left out.
+        path: Option<PathBuf>,
         #[arg(long)]
         name: String,
     },

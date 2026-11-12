@@ -52,6 +52,16 @@ impl Ctx {
     pub fn case_path(&self) -> Result<&Path> {
         self.case.as_deref().ok_or_else(no_case)
     }
+
+    /// The path `case new` creates: its own argument, else the case option.
+    pub fn new_case_path<'a>(&'a self, given: Option<&'a Path>) -> Result<&'a Path> {
+        given.or(self.case.as_deref()).ok_or_else(|| {
+            EngineError::Invalid(
+                "case new needs a path: case new <path>, or --case <path> or OXIDELENS_CASE"
+                    .to_string(),
+            )
+        })
+    }
 }
 
 fn no_case() -> EngineError {
@@ -67,7 +77,7 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
         actor: resolve_actor(cli.actor.as_deref())?,
     };
     match &cli.command {
-        Command::Case(CaseCmd::New { path, name }) => case::new(&ctx, path, name),
+        Command::Case(CaseCmd::New { path, name }) => case::new(&ctx, path.as_deref(), name),
         Command::Case(CaseCmd::Info) => case::info(&ctx),
         Command::Case(CaseCmd::Compact { out }) => case::compact(&ctx, out),
         Command::Load(LoadCmd::Run {

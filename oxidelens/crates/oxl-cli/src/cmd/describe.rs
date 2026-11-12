@@ -17,7 +17,7 @@ use serde_json::json;
 const COMMANDS: &[(&str, &str)] = &[
     (
         "case new",
-        "Create a new case file: case new <path> --name <name>",
+        "Create a new case file: case new [<path>] --name <name>; without a path, the one --case or OXIDELENS_CASE names",
     ),
     (
         "case info",

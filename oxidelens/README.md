@@ -84,7 +84,7 @@ command and limit and needs no case.
 
 | Command | What it does |
 |---|---|
-| `case new <path> --name <name>` | Create a case file |
+| `case new [<path>] --name <name>` | Create a case file; without a path, at the one `--case` or `OXIDELENS_CASE` names |
 | `case info` | Format, creator, creation time, name and path; `bytes` and `free_bytes`, the space removed sources left, which the file keeps for reuse and never gives back |
 | `case compact <new path>` | Write a copy of the case without its free space; the case is left as it is, and work goes on in the copy, its ids carrying on where the case was |
 | `load run <out_root> [--per-channel]` | Load a run's output root; a later run for the same host supersedes the earlier one. EvtxTriage's per-channel copies of the event log (`Individual/<channel>`, one relation per channel) repeat every event of its aggregate `evtxtriage_events`, so for each host the aggregate covers they are left out and listed under `skipped`; `--per-channel` loads them too. A per-channel relation an earlier load brought (an older build, or `--per-channel`) is not superseded by a later run that leaves them out; remove that source to drop it |
