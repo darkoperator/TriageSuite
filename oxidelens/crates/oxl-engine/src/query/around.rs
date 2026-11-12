@@ -18,14 +18,15 @@ use super::find::{cells_sql, resolved, targets, FindRequest};
 use super::group::{as_count, primary_time_semantics, typed_primary_time};
 use super::page::{mark_sql, read_mark};
 use super::{
-    resolve_hosts, scope, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS,
+    resolve_hosts, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS,
 };
 use crate::annot::locate;
 use crate::case::Case;
 use crate::catalog::appmap::summary_for;
-use crate::catalog::{ColumnInfo, ColumnRole, SqlType, TimeSemantics};
+use crate::catalog::{self, physical_columns, ColumnInfo, ColumnRole, SqlType, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
+use crate::load::stage::source_schema;
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
@@ -78,40 +79,45 @@ pub fn around(case: &Case, host: &str, at: &str, window_seconds: u64) -> Result<
 }
 
 /// The host and UTC primary time of row `row_id`, the anchor of a pivot
-/// from it. `NotFound` when no relation holds the row; `Invalid` when the
-/// row has no host or no usable time.
+/// from it. `NotFound` when no source holds the row, or the one that did was
+/// removed; `Invalid` when the row has no host or no usable time.
+///
+/// The row is read from its own source's table, not from the view: a row a
+/// later run of its host superseded still says where and when it was, and
+/// the pivot from there counts the rows active now.
 pub fn anchor_of(case: &Case, row_id: i64) -> Result<(String, String)> {
     let conn = case.conn();
     let not_found = || EngineError::NotFound(format!("no row {row_id} in the case"));
-    let Some((_, name, _)) = locate(conn, row_id)? else {
+    let Some((source, name, table)) = locate(conn, row_id)? else {
         return Err(not_found());
     };
-    // Through the view: a row of a superseded run or a removed source has
-    // nothing around it to pivot to. A removed source's relation may be gone.
-    let scope = match scope(
-        case,
-        &GridQuery {
-            relation: name,
-            ..Default::default()
-        },
-    ) {
-        Ok(scope) => scope,
-        Err(EngineError::NotFound(_)) => return Err(not_found()),
-        Err(e) => return Err(e),
-    };
-    let relation = &scope.relation;
-    let host = match &relation.host_column {
+    let removed: bool = conn.query_row(
+        "SELECT removed FROM ox.source WHERE id = ?",
+        params![source],
+        |r| r.get(0),
+    )?;
+    if removed {
+        return Err(EngineError::NotFound(format!(
+            "no row {row_id} in the case: source {source}, which held it, was removed"
+        )));
+    }
+    // A live source's table means its relation is still catalogued.
+    let relation = catalog::relation(case, &name)?;
+    let columns = catalog::columns(case, &name)?;
+    // A column a later source brought is not in an earlier source's table.
+    let present = physical_columns(conn, &source_schema(source), &name)?;
+    let has = |column: &str| present.contains(&column.to_lowercase());
+    let host = match relation.host_column.as_deref().filter(|h| has(h)) {
         Some(h) => format!("CAST({ROW_ALIAS}.{} AS VARCHAR)", quote_ident(h)),
         None => "CAST(NULL AS VARCHAR)".into(),
     };
-    let time = match typed_primary_time(&relation.primary_time, &scope.columns) {
+    let time = match typed_primary_time(&relation.primary_time, &columns).filter(|t| has(t)) {
         Some(t) => format!("strftime({ROW_ALIAS}.{}, '{ISO_FORMAT}')", quote_ident(t)),
         None => "CAST(NULL AS VARCHAR)".into(),
     };
     let found: Option<(Option<String>, Option<String>)> = conn
         .prepare(&format!(
-            "SELECT {host}, {time} FROM {} WHERE {ROW_ALIAS}._ox_row = ?",
-            scope.from_sql
+            "SELECT {host}, {time} FROM {table} AS {ROW_ALIAS} WHERE {ROW_ALIAS}._ox_row = ?"
         ))?
         .query_map(params![row_id], |r| Ok((r.get(0)?, r.get(1)?)))?
         .next()

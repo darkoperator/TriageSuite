@@ -951,6 +951,50 @@ fn a_pivot_reads_a_column_only_a_superseded_run_had_as_empty() {
     assert_eq!(row.summary, "1");
 }
 
+/// Found on the first real run: `around --row` on a superseded row said
+/// "no row in the case" while `row` showed the same row, inactive. A
+/// superseded row still has a host and a time, so it anchors a pivot: what
+/// happened on that host around that moment, in the rows active now.
+#[test]
+fn a_superseded_row_anchors_a_pivot() {
+    let (d, mut case) = setup();
+    let first = oxl_fixtures::two_hosts(&d.path().join("a"));
+    load_run(&mut case, &first, &analyst()).unwrap();
+    let old = n(&case, SVCH0ST_WS01);
+    let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
+    let report = load_run(&mut case, &rerun, &analyst()).unwrap();
+    assert!(!report.superseded.is_empty());
+    assert_ne!(
+        n(&case, SVCH0ST_WS01),
+        old,
+        "the old row is no longer in the view"
+    );
+
+    let (host, at) = oxl_engine::anchor_of(&case, old).unwrap();
+    assert_eq!(
+        (host.as_str(), at.as_str()),
+        ("WS01", "2026-01-05T02:15:44.412000Z")
+    );
+    let counts = around(&case, &host, &at, 60).unwrap();
+    let prefetch = counts
+        .iter()
+        .find(|c| c.relation == "petriage_timeline")
+        .unwrap();
+    // The rerun's identical row, the one active now.
+    assert_eq!(prefetch.count, 1);
+
+    // A row whose source was removed has nothing left to read.
+    let source = sources(&case)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.run_id.as_deref() == Some("20260101000000-aaaa"))
+        .unwrap()
+        .id;
+    remove_source(&mut case, source, true, &analyst()).unwrap();
+    let e = oxl_engine::anchor_of(&case, old).unwrap_err();
+    assert_eq!(e.code(), "not_found", "{e}");
+}
+
 #[test]
 fn a_run_that_types_a_column_differently_is_refused() {
     let (d, mut case) = setup();
