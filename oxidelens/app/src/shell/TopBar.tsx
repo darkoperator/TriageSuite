@@ -3,7 +3,7 @@ import type { CaseSummary } from "../contract/generated/CaseSummary";
 import { displaySafe } from "../text";
 
 export default function TopBar({
-  summary, analyst, busy, onLoadRun, onOpenCsv, onClose,
+  summary, analyst, busy, onLoadRun, onOpenCsv, onClose, onSettings,
 }: {
   summary: CaseSummary;
   analyst: string | null;
@@ -11,6 +11,8 @@ export default function TopBar({
   onLoadRun(): void;
   onOpenCsv(): void;
   onClose(): void;
+  /** Opens the settings dialog; gets the gear button so focus can return to it. */
+  onSettings(gear: HTMLButtonElement): void;
 }) {
   const hosts = summary.hosts.length;
   const sources = summary.sources.filter((s) => !s.removed).length;
@@ -25,6 +27,7 @@ export default function TopBar({
       <button type="button" disabled={busy} onClick={onLoadRun}>Load run…</button>
       <button type="button" disabled={busy} onClick={onOpenCsv}>Open CSV…</button>
       <button type="button" onClick={onClose}>Close case</button>
+      <button type="button" className="icon-button" aria-label="Settings" title="Settings" onClick={(e) => onSettings(e.currentTarget)}>⚙</button>
     </header>
   );
 }

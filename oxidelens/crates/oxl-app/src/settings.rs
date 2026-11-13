@@ -109,6 +109,9 @@ pub struct DamagedSettings {
 pub struct SettingsReply {
     pub settings: Settings,
     pub damaged: Option<DamagedSettings>,
+    /// Who the app's changes are recorded under now: the `analyst:<name>`
+    /// label of the saved analyst name, else of the operating system's user.
+    pub actor: String,
 }
 
 /// Whether `name` is an analyst name an `Actor` can carry.

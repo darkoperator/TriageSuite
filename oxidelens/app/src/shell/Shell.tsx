@@ -12,9 +12,12 @@ import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { DamagedSettings } from "../contract/generated/DamagedSettings";
 import type { Session } from "../contract/generated/Session";
-import type { Settings } from "../contract/generated/Settings";
+import type { Settings as SettingsData } from "../contract/generated/Settings";
+import type { SettingsReply } from "../contract/generated/SettingsReply";
 import { pickCsvFile, pickRunFolder } from "../dialogs";
+import Settings from "../settings/Settings";
 import { displaySafe } from "../text";
+import { applyAppearance } from "../theme/appearance";
 import Welcome from "../welcome/Welcome";
 import { ShellCtx, type AppliedDelivery, type ExportJob, type ShellContext } from "./context";
 import KeyStrip from "./KeyStrip";
@@ -49,8 +52,8 @@ async function cancelJob(queryId: string, report: (e: unknown) => void): Promise
 }
 
 export default function Shell() {
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const settingsRef = useRef<Settings | null>(null);
+  const [settings, setSettings] = useState<SettingsData | null>(null);
+  const settingsRef = useRef<SettingsData | null>(null);
   const [damaged, setDamaged] = useState<DamagedSettings | null>(null);
   const [summary, setSummary] = useState<CaseSummary | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -86,7 +89,7 @@ export default function Shell() {
   const reportError = useCallback((e: unknown) => setError(describe(e)), []);
 
   // ---- settings ---------------------------------------------------------------------------------------------------
-  const applySettings = useCallback((s: Settings) => {
+  const applySettings = useCallback((s: SettingsData) => {
     settingsRef.current = s;
     setSettings(s);
   }, []);
@@ -94,23 +97,31 @@ export default function Shell() {
   // Settings writes go through one queue. `confirmed` is the latest reply's settings; `queued` holds changes not yet
   // sent. Each write is `confirmed` plus the queued changes, so two quick changes can never write an older object
   // last, and the UI follows the reply once the queue is empty (until then it shows the intended state).
-  const confirmed = useRef<Settings | null>(null);
-  const queued = useRef<Partial<Settings>>({});
+  const confirmed = useRef<SettingsData | null>(null);
+  // The queue is an ordered list. Consecutive plain changes coalesce; an awaited save (`saveSettings`) is its own entry,
+  // written alone and in order, so its refusal drops only its own patch and its waiter gets its own write's outcome.
+  type Waiter = { resolve(r: SettingsReply): void; reject(e: unknown): void };
+  type Entry = { patch: Partial<SettingsData>; waiter: Waiter | null };
+  const queued = useRef<Entry[]>([]);
   const writing = useRef(false);
+  const [actor, setActor] = useState("");
 
   const pump = useCallback(async () => {
     if (writing.current) return;
     writing.current = true;
     try {
-      while (Object.keys(queued.current).length > 0 && confirmed.current) {
-        const patch = queued.current;
-        queued.current = {};
+      while (queued.current.length > 0 && confirmed.current) {
+        const { patch, waiter } = queued.current.shift()!;
         try {
           const r = await settingsUpdate({ ...confirmed.current, ...patch });
           confirmed.current = r.settings;
+          setActor(r.actor);
           if (r.damaged === null) setDamaged(null);
+          waiter?.resolve(r);
         } catch (e) {
-          reportError(e); // the change is dropped; the UI falls back to what the file holds
+          // The entry's change is dropped; the UI falls back to what the file holds. A caller that awaits shows the refusal itself.
+          if (waiter) waiter.reject(e);
+          else reportError(e);
         }
       }
       if (confirmed.current) applySettings(confirmed.current);
@@ -120,15 +131,31 @@ export default function Shell() {
   }, [applySettings, reportError]);
 
   /** Saves a change to the settings, shown at once; the file follows through the queue. */
-  const updateSettings = useCallback(
-    (patch: Partial<Settings>) => {
+  const enqueue = useCallback(
+    (patch: Partial<SettingsData>, waiter: Waiter | null) => {
       const base = settingsRef.current;
-      if (!base) return;
-      queued.current = { ...queued.current, ...patch };
+      if (!base) return false;
+      const last = queued.current[queued.current.length - 1];
+      if (waiter === null && last && last.waiter === null) last.patch = { ...last.patch, ...patch };
+      else queued.current.push({ patch, waiter });
       applySettings({ ...base, ...patch });
       void pump();
+      return true;
     },
     [applySettings, pump],
+  );
+  const updateSettings = useCallback((patch: Partial<SettingsData>) => void enqueue(patch, null), [enqueue]);
+
+  /**
+   * Like `updateSettings`, for a change whose refusal the caller shows: resolves with the reply of the write that carried
+   * the patch, rejects with that write's error. It rides the same queue, so no older object is written last.
+   */
+  const saveSettings = useCallback(
+    (patch: Partial<SettingsData>) =>
+      new Promise<SettingsReply>((resolve, reject) => {
+        if (!enqueue(patch, { resolve, reject })) reject({ code: "internal", message: "the settings are not loaded yet" });
+      }),
+    [enqueue],
   );
 
   /** One dataset's column layout: the layouts map is rebuilt from the latest (optimistic) settings, then queued. */
@@ -161,9 +188,9 @@ export default function Shell() {
 
   /** Settings read from the backend: the new confirmed state, shown unless a change is still on its way. */
   const adoptSettings = useCallback(
-    (s: Settings) => {
+    (s: SettingsData) => {
       confirmed.current = s;
-      if (!writing.current && Object.keys(queued.current).length === 0) applySettings(s);
+      if (!writing.current && queued.current.length === 0) applySettings(s);
     },
     [applySettings],
   );
@@ -174,6 +201,7 @@ export default function Shell() {
       (r) => {
         if (!live) return;
         adoptSettings(r.settings);
+        setActor(r.actor);
         setDamaged(r.damaged);
       },
       (e) => live && reportError(e),
@@ -188,6 +216,13 @@ export default function Shell() {
       stopJob?.();
     };
   }, [adoptSettings, reportError]);
+
+  // The theme, the font size and the row height follow the settings (shown at once, ahead of the file).
+  useEffect(() => {
+    if (settings) applyAppearance(settings);
+  }, [settings]);
+
+  const [settingsOpen, setSettingsOpen] = useState<HTMLElement | null>(null);
 
   // ---- the case ---------------------------------------------------------------------------------------------------
   const readSessionsNow = useCallback(() => {
@@ -211,7 +246,7 @@ export default function Shell() {
       setGridStatus(null);
       setRightPane(null);
       readSessionsNow();
-      settingsGet().then((r) => adoptSettings(r.settings), reportError); // the open put the case first in `recent`
+      settingsGet().then((r) => (adoptSettings(r.settings), setActor(r.actor)), reportError); // the open put the case first in `recent`
     },
     [adoptSettings, readSessionsNow, reportError, store],
   );
@@ -367,7 +402,11 @@ export default function Shell() {
           onLoadRun={() => void runLoad(pickRunFolder, loadRun)}
           onOpenCsv={() => void runLoad(pickCsvFile, (p) => loadFile(p))}
           onClose={() => void close()}
+          onSettings={setSettingsOpen}
         />
+        {settingsOpen !== null && (
+          <Settings settings={settings!} actor={actor} update={updateSettings} save={saveSettings} returnTo={settingsOpen} onClose={() => setSettingsOpen(null)} />
+        )}
         <div className="shell-main">
           {left === "open" ? (
             <LeftPane summary={summary} sessions={sessions} onOpenDataset={openTab} onOpenSession={openSession} onCollapse={() => togglePane("left_pane")} />

@@ -370,6 +370,11 @@ fn settings_update_checks_and_saves() {
     s.analyst = Some("jdoe".into());
     let saved = cmd::settings::settings_update(&state, s.clone()).unwrap();
     assert_eq!(saved.settings, s);
+    assert_eq!(saved.actor, "analyst:jdoe");
+    assert_eq!(
+        cmd::settings::settings_get(&state).unwrap().actor,
+        "analyst:jdoe"
+    );
     assert_eq!(state.actor(), oxl_engine::Actor::Analyst("jdoe".into()));
     let (reread, _) = oxl_app::settings::SettingsStore::load(d.path());
     assert_eq!(reread.get(), s);

@@ -78,7 +78,8 @@
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Placeholder: same names, light values. Finished (and contrast-checked) in the theme task. */
+/* Light: the same names, light values. The reserved amber, red and purple hold 3:1 against --bg, --surface and --card
+   (pinned by a test); the accent and the marks keep their hue. */
 :root[data-theme="light"] {
   color-scheme: light;
 

@@ -772,10 +772,13 @@ const handlers: Handlers = {
     }),
 
   // settings (the file in the app's config folder, not the case: no `case-changed`)
-  settings_get: () => ({ settings, damaged: null }),
+  settings_get: () => ({ settings, damaged: null, actor: analyst() }),
   settings_update: (a) => {
+    // The same refusal as the backend's `Settings::check`.
+    if (a.settings.analyst !== null && !/^[A-Za-z0-9._-]{1,64}$/.test(a.settings.analyst))
+      fail("invalid", "an analyst name is 1 to 64 characters of A-Z a-z 0-9 . _ -");
     settings = { ...a.settings };
-    return { settings, damaged: null };
+    return { settings, damaged: null, actor: analyst() };
   },
 
   // cancelling

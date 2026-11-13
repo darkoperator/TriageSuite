@@ -60,6 +60,7 @@ import { stableKey, useGridData } from "./useGridData";
 import { useMatches } from "./useMatches";
 import ValueViewer from "./ValueViewer";
 import ZonePicker from "./ZonePicker";
+import { rowHeightFor } from "../theme/appearance";
 import "./grid.css";
 
 const NO_ROWS: unknown[] = [];
@@ -352,7 +353,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   }, [change, refresh, treeRefresh]);
 
   // ---- virtual rows -----------------------------------------------------------------------------------------------
-  const rowHeight = settings.font_size + 10;
+  const rowHeight = rowHeightFor(settings.font_size);
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
@@ -360,6 +361,11 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     overscan: 12,
     initialOffset: scrollOffset,
   });
+  // The virtualiser keeps the sizes it measured; a new row height (the font-size setting) must drop them.
+  const measureRows = virtualizer.measure;
+  useEffect(() => {
+    measureRows();
+  }, [rowHeight, measureRows]);
   const items = virtualizer.getVirtualItems();
   const firstShown = items.length > 0 ? items[0].index : 0;
   const lastShown = items.length > 0 ? items[items.length - 1].index : 0;

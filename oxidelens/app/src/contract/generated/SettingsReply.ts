@@ -6,4 +6,9 @@ import type { Settings } from "./Settings";
  * What `settings_get` and `settings_update` answer: the settings, and the
  * damaged file the defaults replaced, until a settings update succeeds.
  */
-export type SettingsReply = { settings: Settings, damaged: DamagedSettings | null, };
+export type SettingsReply = { settings: Settings, damaged: DamagedSettings | null, 
+/**
+ * Who the app's changes are recorded under now: the `analyst:<name>`
+ * label of the saved analyst name, else of the operating system's user.
+ */
+actor: string, };

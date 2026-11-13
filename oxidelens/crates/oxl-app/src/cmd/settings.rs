@@ -11,6 +11,7 @@ pub fn settings_get(state: &AppState) -> Result<SettingsReply, CmdError> {
     Ok(SettingsReply {
         settings: state.settings.get(),
         damaged: state.settings.damaged(),
+        actor: state.actor().label(),
     })
 }
 
@@ -21,6 +22,7 @@ pub fn settings_update(state: &AppState, settings: Settings) -> Result<SettingsR
     Ok(SettingsReply {
         settings,
         damaged: state.settings.damaged(),
+        actor: state.actor().label(),
     })
 }
 
