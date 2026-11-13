@@ -5,11 +5,12 @@ import { displaySafe } from "../text";
 import { SavedViewsSection } from "./slots";
 
 export default function LeftPane({
-  summary, sessions, onOpenDataset, onCollapse,
+  summary, sessions, onOpenDataset, onOpenSession, onCollapse,
 }: {
   summary: CaseSummary;
   sessions: Session[];
   onOpenDataset(relation: string): void;
+  onOpenSession(session: Session): void;
   onCollapse(): void;
 }) {
   const datasets = summary.relations.filter((r) => r.kind === "dataset");
@@ -53,7 +54,7 @@ export default function LeftPane({
         {list(files)}
       </section>
       <section aria-labelledby="sec-views">
-        <h3 id="sec-views">Saved views</h3>
+        <h3 id="sec-views" tabIndex={-1}>Saved views</h3>
         <SavedViewsSection />
       </section>
       <section aria-labelledby="sec-sessions">
@@ -63,9 +64,22 @@ export default function LeftPane({
         ) : (
           <ul className="pane-list">
             {sessions.map((s) => (
-              <li key={`${s.source_id}:${s.name}`} className="pane-line">
-                <span className="pane-item-name">{displaySafe(s.name)}</span>
-                <span className="pane-item-count">{s.relations.length}</span>
+              <li key={`${s.source_id}:${s.name}`}>
+                <button
+                  type="button"
+                  className="pane-item"
+                  disabled={s.relations.length === 0}
+                  title="Opens a tab for each dataset of the session, scoped to its hosts"
+                  onClick={() => onOpenSession(s)}
+                >
+                  <span className="pane-item-name">{displaySafe(s.name)}</span>
+                  <span className="pane-item-count">{new Set(s.relations.map((r) => r.relation)).size}</span>
+                </button>
+                {s.unmatched > 0 && (
+                  <p className="pane-empty">
+                    {`${s.unmatched} session file${s.unmatched === 1 ? "" : "s"} matched no loaded dataset.`}
+                  </p>
+                )}
               </li>
             ))}
           </ul>

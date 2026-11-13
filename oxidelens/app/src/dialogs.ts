@@ -26,6 +26,26 @@ export async function pickRunFolder(): Promise<string | null> {
   return single(await open({ title: "Load run", multiple: false, directory: true }));
 }
 
+const VIEW_FILTER = [{ name: "OxideLens view", extensions: ["json"] }];
+
+/** Where a grid's CSV export goes (a save dialog); `null` when the analyst cancels. */
+export async function pickCsvSavePath(): Promise<string | null> {
+  if (__OXL_MOCK__) return "/mock/export.csv";
+  return save({ title: "Export CSV", filters: [{ name: "CSV", extensions: ["csv"] }], defaultPath: "export.csv" });
+}
+
+/** Where a saved view's JSON file goes (a save dialog); `null` when the analyst cancels. */
+export async function pickViewSavePath(): Promise<string | null> {
+  if (__OXL_MOCK__) return "/mock/view.json";
+  return save({ title: "Export view", filters: VIEW_FILTER, defaultPath: "view.json" });
+}
+
+/** A view file to import. */
+export async function pickViewFile(): Promise<string | null> {
+  if (__OXL_MOCK__) return "/mock/view.json";
+  return single(await open({ title: "Import view", multiple: false, directory: false, filters: VIEW_FILTER }));
+}
+
 /** A CSV file to open as a loose file. */
 export async function pickCsvFile(): Promise<string | null> {
   if (__OXL_MOCK__) return "/mock/loose.csv";

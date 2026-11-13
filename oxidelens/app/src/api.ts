@@ -206,7 +206,10 @@ export const mergedPage = (
 // saved views and presets
 export const viewsList = (relation: string | null, limit: number, offset: number, slot: string, queryId = newQueryId()) =>
   call<CommandResult["views_list"]>("views_list", { queryId, slot, relation, limit, offset } satisfies Args<"views_list">);
-export const viewSave = (name: string, kind: ViewKind, pattern: string, doc: ViewDoc) =>
+/** The views and presets that match at least one relation of the case, each with the relations it matches. */
+export const viewsMatching = (limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["views_matching"]>("views_matching", { queryId, slot, limit, offset } satisfies Args<"views_matching">);
+export const viewSave =(name: string, kind: ViewKind, pattern: string, doc: ViewDoc) =>
   call<CommandResult["view_save"]>("view_save", { name, kind, pattern, doc } satisfies Args<"view_save">);
 export const viewDelete = (id: number) => call<CommandResult["view_delete"]>("view_delete", { id } satisfies Args<"view_delete">);
 export const viewApply = (id: number, relation: string, slot: string, queryId = newQueryId()) =>

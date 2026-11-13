@@ -34,8 +34,8 @@ use crate::settings::{DamagedSettings, Settings, SettingsReply};
 use oxl_engine::{
     AppliedView, CellValue, Chip, ColourRule, ColumnMeta, ExportReport, FileOptions, GridCounts,
     GridPage, GridState, GroupView, Histogram, HostZone, Listing, LoadReport, MatchPos,
-    MergedSource, MergedView, PageOptions, RowView, SavedView, Session, ValueCount, ValueOrder,
-    ViewDoc, ViewKind, WindowTotal,
+    MatchingView, MergedSource, MergedView, PageOptions, RowView, SavedView, Session, ValueCount,
+    ValueOrder, ViewDoc, ViewKind, WindowTotal,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -73,6 +73,7 @@ pub const COMMANDS: &[&str] = &[
     "around_totals",
     "merged_page",
     "views_list",
+    "views_matching",
     "view_save",
     "view_delete",
     "view_apply",
@@ -288,6 +289,10 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         read!(
             c,
             views_list(relation: Option<String>, limit: u32, offset: u64) -> Listing<SavedView>
+        ),
+        read!(
+            c,
+            views_matching(limit: u32, offset: u64) -> Listing<MatchingView>
         ),
         cmd!(
             c,

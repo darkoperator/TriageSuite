@@ -7,8 +7,9 @@ mod common;
 use common::{agent, analyst, loaded, n};
 use oxl_engine::{
     apply_view, count_view, delete_view, export_view, history, import_view, load_run, parse_filter,
-    save_view, views, Actor, Case, Chip, ChipOrigin, ColourRule, ColumnLayout, FilterNode,
-    RuleColour, RuleScope, SearchMode, SearchState, SortKey, ViewDoc, ViewKind, MAX_CHIPS,
+    save_view, views, views_matching, Actor, Case, Chip, ChipOrigin, ColourRule, ColumnLayout,
+    FilterNode, RuleColour, RuleScope, SearchMode, SearchState, SortKey, ViewDoc, ViewKind,
+    MAX_CHIPS,
 };
 use std::collections::BTreeMap;
 
@@ -1009,4 +1010,110 @@ fn a_disabled_chip_holds_only_a_value_the_compiler_takes() {
         applied.state.chips[0].enabled = true;
         count_view(&case, &applied.state).unwrap_or_else(|e| panic!("{op} {value}: {e}"));
     }
+}
+
+fn matching_names(case: &Case, limit: u32, offset: u64) -> (Vec<(String, Vec<String>)>, bool) {
+    let l = views_matching(case, limit, offset).unwrap();
+    (
+        l.items
+            .into_iter()
+            .map(|m| (m.view.name, m.relations))
+            .collect(),
+        l.truncated,
+    )
+}
+
+#[test]
+fn views_matching_lists_each_view_with_its_relations() {
+    let (_d, mut case) = loaded();
+    let doc = chips_doc(Vec::new());
+    for (name, kind, pattern) in [
+        ("evtx", ViewKind::View, "evtxtriage_*"),
+        ("all", ViewKind::View, "*"),
+        ("Case-folded", ViewKind::View, "PETRIAGE_TIMELINE"),
+        ("a preset", ViewKind::Preset, "evtxtriage_events"),
+        ("nowhere", ViewKind::View, "nomatch_*"),
+    ] {
+        save_view(&mut case, name, kind, pattern, &doc, &analyst()).unwrap();
+    }
+    let every: Vec<String> = oxl_engine::relations(&case)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    let (got, truncated) = matching_names(&case, 50, 0);
+    assert!(!truncated);
+    // Views before presets, each by name; a view matching nothing is omitted.
+    let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["Case-folded", "all", "evtx", "a preset"]);
+    let rels = |name: &str| got.iter().find(|(n, _)| n == name).unwrap().1.clone();
+    assert_eq!(rels("all"), every);
+    assert_eq!(rels("evtx"), ["evtxtriage_events"]);
+    assert_eq!(rels("Case-folded"), ["petriage_timeline"]);
+    assert_eq!(rels("a preset"), ["evtxtriage_events"]);
+    // The same rule as `views` with a relation.
+    for relation in &every {
+        let listed: Vec<String> = views(&case, Some(relation), 50, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|v| v.name)
+            .collect();
+        let via_matching: Vec<&str> = got
+            .iter()
+            .filter(|(_, r)| r.contains(relation))
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert_eq!(listed, via_matching, "{relation}");
+    }
+}
+
+#[test]
+fn views_matching_pages_after_matching() {
+    let (_d, mut case) = loaded();
+    let doc = chips_doc(Vec::new());
+    // Sorted first, matching nothing: they must not use up the page.
+    for i in 0..3 {
+        save_view(
+            &mut case,
+            &format!("a{i}"),
+            ViewKind::View,
+            "nomatch",
+            &doc,
+            &analyst(),
+        )
+        .unwrap();
+    }
+    for name in ["m1", "m2", "m3"] {
+        save_view(&mut case, name, ViewKind::View, "*", &doc, &analyst()).unwrap();
+    }
+    let (first, truncated) = matching_names(&case, 2, 0);
+    assert_eq!(
+        first.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        ["m1", "m2"]
+    );
+    assert!(truncated);
+    let (rest, truncated) = matching_names(&case, 2, 2);
+    assert_eq!(
+        rest.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        ["m3"]
+    );
+    assert!(!truncated);
+    assert_eq!(code(views_matching(&case, 0, 0)), "invalid");
+}
+
+#[test]
+fn views_matching_skips_deleted_views() {
+    let (_d, mut case) = loaded();
+    let saved = save_view(
+        &mut case,
+        "gone",
+        ViewKind::View,
+        "*",
+        &chips_doc(Vec::new()),
+        &analyst(),
+    )
+    .unwrap();
+    delete_view(&mut case, saved.id, &analyst()).unwrap();
+    assert!(matching_names(&case, 10, 0).0.is_empty());
 }

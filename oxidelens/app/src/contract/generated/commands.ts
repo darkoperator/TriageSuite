@@ -22,6 +22,7 @@ import type { JobStarted } from "./JobStarted";
 import type { Listing } from "./Listing";
 import type { LoadReport } from "./LoadReport";
 import type { MatchPos } from "./MatchPos";
+import type { MatchingView } from "./MatchingView";
 import type { MergedSource } from "./MergedSource";
 import type { MergedView } from "./MergedView";
 import type { PageOptions } from "./PageOptions";
@@ -66,6 +67,7 @@ export const COMMANDS = [
   "around_totals",
   "merged_page",
   "views_list",
+  "views_matching",
   "view_save",
   "view_delete",
   "view_apply",
@@ -113,6 +115,7 @@ export type CommandArgs = {
   around_totals: { queryId: string; slot: string; rowId: number; windows: Array<number> };
   merged_page: { queryId: string; slot: string; source: MergedSource; limit: number; offset: number; zone: string };
   views_list: { queryId: string; slot: string; relation?: string | null; limit: number; offset: number };
+  views_matching: { queryId: string; slot: string; limit: number; offset: number };
   view_save: { name: string; kind: ViewKind; pattern: string; doc: ViewDoc };
   view_delete: { id: number };
   view_apply: { queryId: string; slot: string; id: number; relation: string };
@@ -157,6 +160,7 @@ export type CommandResult = {
   around_totals: Array<WindowTotal>;
   merged_page: Listing<MergedView>;
   views_list: Listing<SavedView>;
+  views_matching: Listing<MatchingView>;
   view_save: SavedView;
   view_delete: null;
   view_apply: AppliedView;

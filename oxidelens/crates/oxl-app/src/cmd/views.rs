@@ -13,7 +13,8 @@ use super::At;
 use crate::error::CmdError;
 use crate::state::{AppState, Point};
 use oxl_engine::{
-    AppliedView, EngineError, Listing, SavedView, ViewDoc, ViewKind, MAX_VIEW_FILE_BYTES,
+    AppliedView, EngineError, Listing, MatchingView, SavedView, ViewDoc, ViewKind,
+    MAX_VIEW_FILE_BYTES,
 };
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -31,6 +32,18 @@ pub fn views_list(
     offset: u64,
 ) -> Result<Listing<SavedView>, CmdError> {
     at.read(state, |c| oxl_engine::views(c, relation, limit, offset))
+}
+
+/// Up to `limit` views and presets from `offset` that match at least one
+/// relation of the case, each with the relations it matches
+/// (`views_matching`).
+pub fn views_matching(
+    state: &AppState,
+    at: At<'_>,
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<MatchingView>, CmdError> {
+    at.read(state, |c| oxl_engine::views_matching(c, limit, offset))
 }
 
 /// Save `doc` as a view or preset named `name` for the relations `pattern`
@@ -158,7 +171,7 @@ pub mod commands {
     use crate::cmd::At;
     use crate::error::CmdError;
     use crate::state::AppState;
-    use oxl_engine::{AppliedView, Listing, SavedView, ViewDoc, ViewKind};
+    use oxl_engine::{AppliedView, Listing, MatchingView, SavedView, ViewDoc, ViewKind};
     use std::path::PathBuf;
     use tauri::State;
 
@@ -173,6 +186,18 @@ pub mod commands {
     ) -> Result<Listing<SavedView>, CmdError> {
         let at = At::new(&query_id, &slot);
         super::views_list(&app, at, relation.as_deref(), limit, offset)
+    }
+
+    #[tauri::command(async)]
+    pub fn views_matching(
+        app: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+        limit: u32,
+        offset: u64,
+    ) -> Result<Listing<MatchingView>, CmdError> {
+        let at = At::new(&query_id, &slot);
+        super::views_matching(&app, at, limit, offset)
     }
 
     #[tauri::command(async)]

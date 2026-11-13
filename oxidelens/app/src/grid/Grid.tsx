@@ -10,7 +10,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
-import { columns as readColumns, defaultColourRules, gridEmptyColumns, gridPage, gridRowOffset, isCmdError, viewSave } from "../api";
+import {
+  columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowOffset, isCmdError, newQueryId, viewSave,
+} from "../api";
+import { pickCsvSavePath } from "../dialogs";
+import ApplyWarnings, { type ViewNotice } from "../views/ApplyWarnings";
+import ExportDialog from "../views/ExportDialog";
+import SaveViewDialog from "../views/SaveViewDialog";
 import type { Chip } from "../contract/generated/Chip";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
@@ -76,6 +82,7 @@ interface Focus {
 export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyProps): ReactNode {
   const {
     summary, settings, change, setGridStatus, reportError, saveLayout, saveColourRules, openScoped, setHistogram, setRightPane, pendingRow, clearPendingRow,
+    pendingApply, clearPendingApply, exportJob, exportRunning, beginExport, endExport,
   } = useShell();
   const relation = tab.relation ?? "";
 
@@ -746,6 +753,95 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     openScoped({ id: `scoped:${hash(stableKey([relation, seed]))}`, kind: "dataset", relation, title, seed });
   };
 
+  // ---- saved views and export -------------------------------------------------------------------------------------
+  const [notice, setNotice] = useState<ViewNotice | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  // A tab that is hidden keeps no popover open: it would still be there on return, and could start an export the toolbar
+  // forbids (switching tabs by key does not press the mouse, so the popover's own outside-press close does not run).
+  if (!active && (saveOpen || exportOpen)) {
+    setSaveOpen(false);
+    setExportOpen(false);
+  }
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const exportButton = useRef<HTMLButtonElement>(null);
+
+  // A view the left pane applied to this tab: the engine's answer replaces the state and the group-by. Its layout and
+  // colour rules, when it has any, are written for this relation through the shell's settings queue (they are per-machine
+  // settings, and the analyst chose to apply the view); the confirmation says so.
+  useEffect(() => {
+    if (!pendingApply || pendingApply.tabId !== tab.id) return;
+    clearPendingApply?.();
+    const { applied, name } = pendingApply;
+    changeState(() => applied.state);
+    changeBy(applied.group_by);
+    setClearToken((t) => t + 1);
+    const wrote: string[] = [];
+    if (applied.layout !== null) {
+      window.clearTimeout(saveTimer.current);
+      savePending.current = false;
+      layoutRef.current = applied.layout;
+      setLayout(applied.layout);
+      saveLayout(relation, applied.layout);
+      wrote.push("column layout");
+    }
+    if (applied.colour_rules.length > 0) {
+      saveColourRules(relation, applied.colour_rules);
+      wrote.push("colour rules");
+    }
+    setNotice({
+      notes: [`Applied “${name}”.${wrote.length > 0 ? ` Its ${wrote.join(" and ")} ${wrote.length > 1 ? "were" : "was"} saved for ${relation} on this machine.` : ""}`],
+      errors: [],
+      warnings: applied.warnings,
+    });
+  }, [pendingApply, tab.id, clearPendingApply, changeState, changeBy, saveLayout, saveColourRules, relation]);
+
+  /** Saves what the tab shows as a view: chips, search, hosts, group-by, sort, the layout and the colour rules. */
+  const saveView = async (name: string, pattern: string): Promise<string | null> => {
+    try {
+      await viewSave(name, "view", pattern, {
+        chips: state.chips, search: state.search, hosts: state.hosts, group_by: by, sort: state.sort,
+        layout: layoutRef.current, colour_rules: rules,
+      });
+      setNotice({ notes: [`Saved view “${name}”.`], errors: [], warnings: [] });
+      return null;
+    } catch (e) {
+      return isCmdError(e) ? e.message : e instanceof Error ? e.message : String(e);
+    }
+  };
+
+  /** Asks for the file, then writes the rows as a job the status bar can cancel. */
+  const runExport = async (zoneTimes: boolean) => {
+    setExportOpen(false);
+    // One export at a time, and the shell is where that is decided: a dialog left open in another tab cannot get round it.
+    const refuse = () => setNotice({ notes: [], errors: ["An export is running."], warnings: [] });
+    if (exportRunning?.()) return refuse();
+    let path: string | null;
+    try {
+      path = await pickCsvSavePath();
+    } catch (e) {
+      reportError(e);
+      return;
+    }
+    if (path === null) return;
+    const queryId = newQueryId();
+    if (beginExport && !beginExport({ queryId, zoneTimes })) return refuse();
+    try {
+      const report = await gridExport(shownState, path, zoneTimes ? summary.display_zone : null, `tab:${tab.id}:export`, queryId);
+      setNotice({ notes: [`Exported ${fmt(report.rows)} ${plural(report.rows, "row", "rows")} to ${report.path}.`], errors: [], warnings: [] });
+    } catch (e) {
+      if (isCmdError(e) && (e.code === "interrupted" || e.code === "superseded")) {
+        setNotice({ notes: ["Export cancelled."], errors: [], warnings: [] });
+      } else if (isCmdError(e)) {
+        setNotice({ notes: [], errors: [`Export failed (${e.code}): ${e.message}`], warnings: [] });
+      } else {
+        reportError(e);
+      }
+    } finally {
+      endExport?.(queryId); // frees the slot only while it is this job's
+    }
+  };
+
   return (
     <div ref={rootRef} className="grid" style={{ "--cell-size": `${settings.font_size}px` } as CSSProperties}>
       <div className="grid-toolbar">
@@ -769,7 +865,17 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         <button type="button" className="scope-button" aria-haspopup="dialog" aria-expanded={rulesOpen} title="Colour rules" onClick={() => setRulesOpen(true)}>
           {`Colours ${rules.filter((r) => r.enabled).length}`}
         </button>
+        <button ref={saveButton} type="button" className="scope-button" aria-haspopup="dialog" aria-expanded={saveOpen} onClick={() => setSaveOpen((o) => !o)}>
+          Save view…
+        </button>
+        <button ref={exportButton} type="button" className="scope-button" aria-haspopup="dialog" aria-expanded={exportOpen} disabled={exportJob != null} onClick={() => setExportOpen((o) => !o)}>
+          Export…
+        </button>
+        {exportJob != null && <span className="chip-note">An export is running.</span>}
+        {saveOpen && <SaveViewDialog anchor={saveButton} relation={relation} onSave={saveView} onClose={() => setSaveOpen(false)} />}
+        {exportOpen && <ExportDialog anchor={exportButton} zone={summary.display_zone} onStart={(z) => void runExport(z)} onClose={() => setExportOpen(false)} />}
       </div>
+      {notice !== null && <ApplyWarnings notice={notice} onDismiss={() => setNotice(null)} />}
       <ChipBar
         search={state.search}
         onClearSearch={() => void applySearch({ ...state.search, text: "" })}

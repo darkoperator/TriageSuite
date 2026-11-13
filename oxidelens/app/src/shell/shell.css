@@ -71,3 +71,19 @@ kbd { font: var(--cell-font); color: var(--text-2); background: var(--raised); b
 .recent-list { list-style: none; margin: 0; padding: 0; }
 .recent-list li { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
 input[type="text"] { font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line-strong); border-radius: 4px; padding: 3px 6px; }
+
+/* Saved views, sessions and export (Task 23) */
+.pane-actions { display: flex; gap: 6px; margin: 2px 4px 4px; }
+.pane-action, .status-cancel { background: none; border: 1px solid var(--line-strong); border-radius: 4px; padding: 1px 8px; color: var(--text-2); cursor: pointer; font: inherit; }
+.view-notices { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 4px 8px; background: var(--card); border-bottom: 1px solid var(--line-strong); }
+.view-notices-body { min-width: 0; overflow-wrap: anywhere; }
+.view-notices p { margin: 2px 0; }
+.view-error { color: var(--malicious); }
+.view-warnings { margin: 2px 0; padding-left: 18px; }
+.view-warning-part { color: var(--muted); font: var(--cell-font); }
+.view-warning-name { font: var(--cell-font); }
+.form-field { display: flex; flex-direction: column; gap: 2px; }
+.form-hint { margin: 2px 0; color: var(--muted); }
+.form-check { display: flex; align-items: center; gap: 6px; }
+.form-buttons { display: flex; gap: 6px; }
+.menu-ask { margin: 2px 8px; max-width: 260px; overflow-wrap: anywhere; }

@@ -594,6 +594,25 @@ fn view_save_and_views_list() {
 }
 
 #[test]
+fn views_matching_lists_views_with_their_relations() {
+    let l = loaded();
+    views::view_save(
+        &l.state,
+        "Logons",
+        ViewKind::View,
+        "evtxtriage_*",
+        &logons(),
+    )
+    .unwrap();
+    views::view_save(&l.state, "Nowhere", ViewKind::View, "nomatch_*", &logons()).unwrap();
+    let got = views::views_matching(&l.state, at("views"), 10, 0).unwrap();
+    assert_eq!(got.items.len(), 1);
+    assert_eq!(got.items[0].view.name, "Logons");
+    assert_eq!(got.items[0].relations, [EVENTS]);
+    assert!(!got.truncated);
+}
+
+#[test]
 fn view_delete_removes_it() {
     let l = loaded();
     let saved = views::view_save(&l.state, "Logons", ViewKind::View, "*", &logons()).unwrap();

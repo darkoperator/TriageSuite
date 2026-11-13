@@ -67,6 +67,7 @@ handlers![
     [cmd::row::commands] around_totals,
     [cmd::row::commands] merged_page,
     [cmd::views::commands] views_list,
+    [cmd::views::commands] views_matching,
     [cmd::views::commands] view_save,
     [cmd::views::commands] view_delete,
     [cmd::views::commands] view_apply,

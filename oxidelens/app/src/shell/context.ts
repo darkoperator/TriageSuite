@@ -1,13 +1,45 @@
 // What a screen inside the shell can ask of it. A tab body, the right pane's content and the saved-views section read
 // this through `useShell()`.
 import { createContext, useContext, type ReactNode } from "react";
+import type { AppliedView } from "../contract/generated/AppliedView";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
 import type { Settings } from "../contract/generated/Settings";
 import type { Tab } from "./tabs";
 
+/** A saved view the engine resolved for one relation, on its way to the tab that takes it. */
+export interface AppliedDelivery {
+  /** The tab that takes it (a dataset tab, which `deliverApplied` opens first when `openRelation` is set). */
+  tabId: string;
+  relation: string;
+  /** The view's name, for the confirmation. */
+  name: string;
+  applied: AppliedView;
+  openRelation: boolean;
+}
+
+/** A running CSV export: the query id `query_cancel` names, and whether its times are written in the display zone. */
+export interface ExportJob {
+  queryId: string;
+  zoneTimes: boolean;
+}
+
 export interface ShellContext {
+  /** The tab being shown (the saved views section applies a view to it when the view matches its relation). */
+  activeTab?: Tab | null;
+  /** A view's answer for a tab: the tab replaces its state and group-by with it and writes its layout and colour rules. */
+  pendingApply?: AppliedDelivery | null;
+  clearPendingApply?(): void;
+  deliverApplied?(d: AppliedDelivery): void;
+  /** The export that is running, if any (one at a time, across tabs): the status bar offers *Cancel* while it is set. */
+  exportJob?: ExportJob | null;
+  /** Whether an export is running right now (read at the moment of asking, not at the last render). */
+  exportRunning?(): boolean;
+  /** Takes the one export slot for `job`; false (and nothing changes) when an export is already running. */
+  beginExport?(job: ExportJob): boolean;
+  /** Frees the export slot, only if `queryId` still holds it, so a job never frees another's. */
+  endExport?(queryId: string): void;
   summary: CaseSummary;
   settings: Settings;
   /** Rises with every `case-changed`; `kinds` says what the write touched. A screen re-reads when its kind is listed. */

@@ -12,6 +12,7 @@
 import type { ReactNode } from "react";
 import Grid from "../grid/Grid";
 import { MergedTab } from "../grid/MergedTab";
+import ViewList from "../views/ViewList";
 import Overview from "./Overview";
 import { useShell } from "./context";
 import type { Tab } from "./tabs";
@@ -32,7 +33,7 @@ export function TabBody(props: TabBodyProps): ReactNode {
 }
 
 export function SavedViewsSection(): ReactNode {
-  return <p className="pane-empty">No saved views yet.</p>;
+  return <ViewList />;
 }
 
 export function RightPaneContent(): ReactNode {

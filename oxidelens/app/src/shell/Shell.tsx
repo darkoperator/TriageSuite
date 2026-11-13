@@ -3,10 +3,11 @@
 // keeps: the settings, the case summary, the open tabs, the job line. Screens inside it read `useShell()`.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  caseClose, caseSummary, isCmdError, loadFile, loadRun, onJob, onSettingsDamaged, sessions as readSessions,
+  caseClose, caseSummary, isCmdError, loadFile, loadRun, onJob, onSettingsDamaged, queryCancel, sessions as readSessions,
   settingsGet, settingsUpdate,
 } from "../api";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
+import { sessionTabs } from "../views/sessions";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { DamagedSettings } from "../contract/generated/DamagedSettings";
@@ -15,7 +16,7 @@ import type { Settings } from "../contract/generated/Settings";
 import { pickCsvFile, pickRunFolder } from "../dialogs";
 import { displaySafe } from "../text";
 import Welcome from "../welcome/Welcome";
-import { ShellCtx, type ShellContext } from "./context";
+import { ShellCtx, type AppliedDelivery, type ExportJob, type ShellContext } from "./context";
 import KeyStrip from "./KeyStrip";
 import LeftPane from "./LeftPane";
 import { useShellKeys } from "./keys";
@@ -38,6 +39,15 @@ const describe = (e: unknown): string =>
 /** An answer that lost to a newer query, or to the case closing, is not an error to show. */
 const isStale = (e: unknown) => isCmdError(e) && (e.code === "superseded" || e.code === "interrupted");
 
+/** Asks the engine to stop a running job by its query id; the job's own answer says how it ended. */
+async function cancelJob(queryId: string, report: (e: unknown) => void): Promise<void> {
+  try {
+    await queryCancel([queryId]);
+  } catch (e) {
+    report(e);
+  }
+}
+
 export default function Shell() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const settingsRef = useRef<Settings | null>(null);
@@ -47,7 +57,24 @@ export default function Shell() {
   const [tabs, setTabs] = useState<TabsState>(initialTabs);
   const [tabsCase, setTabsCase] = useState<string | null>(null);
   const [change, setChange] = useState({ generation: 0, kinds: [] as string[] });
-  const [job, setJob] = useState<string | null>(null);
+  const [job, setJob] = useState<{ kind: string; label: string } | null>(null);
+  // A running export's query id: the status bar offers *Cancel* while one is set.
+  const [exportJob, setExportJobState] = useState<ExportJob | null>(null);
+  // The shell owns the one export slot. A ref is the truth (two starts in one tick cannot both win); the state is for drawing.
+  const exportRef = useRef<ExportJob | null>(null);
+  const exportRunning = useCallback(() => exportRef.current !== null, []);
+  const beginExport = useCallback((job: ExportJob) => {
+    if (exportRef.current !== null) return false;
+    exportRef.current = job;
+    setExportJobState(job);
+    return true;
+  }, []);
+  const endExport = useCallback((queryId: string) => {
+    if (exportRef.current?.queryId !== queryId) return;
+    exportRef.current = null;
+    setExportJobState(null);
+  }, []);
+  const [pendingApply, setPendingApply] = useState<AppliedDelivery | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gridStatus, setGridStatus] = useState<ReactNode>(null);
@@ -154,7 +181,7 @@ export default function Shell() {
     let stopDamaged: (() => void) | null = null;
     let stopJob: (() => void) | null = null;
     void onSettingsDamaged((d) => live && setDamaged(d)).then((s) => (live ? (stopDamaged = s) : s()));
-    void onJob((e) => live && setJob(e.phase === "started" ? e.label : null)).then((s) => (live ? (stopJob = s) : s()));
+    void onJob((e) => live && setJob(e.phase === "started" ? { kind: e.kind, label: e.label } : null)).then((s) => (live ? (stopJob = s) : s()));
     return () => {
       live = false;
       stopDamaged?.();
@@ -255,6 +282,21 @@ export default function Shell() {
     setPendingRow({ tabId: datasetTabId(relation), rowId });
   }, []);
   const clearPendingRow = useCallback(() => setPendingRow(null), []);
+  // A saved view applied from the left pane: opens the relation's tab when asked, then the tab takes the answer.
+  const deliverApplied = useCallback((d: AppliedDelivery) => {
+    if (d.openRelation) setTabs((t) => openDataset(t, d.relation));
+    setPendingApply(d);
+  }, []);
+  const clearPendingApply = useCallback(() => setPendingApply(null), []);
+  // A session opens one tab per relation, scoped to the hosts the session names for it; the first one is shown.
+  const openSession = useCallback((s: Session) => {
+    const made = sessionTabs(s);
+    setTabs((t) => {
+      let next = t;
+      for (const tab of made) next = openScoped(next, tab);
+      return made.length > 0 ? activate(next, made[0].id) : next;
+    });
+  }, []);
 
   // ---- panes ------------------------------------------------------------------------------------------------------
   const togglePane = useCallback(
@@ -274,9 +316,10 @@ export default function Shell() {
       summary && settings
         ? {
             summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, pendingRow, clearPendingRow, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
+            activeTab: tabs.tabs.find((t) => t.id === tabs.active) ?? null, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport,
           }
         : null,
-    [summary, settings, change, openTab, openScopedTab, openRow, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram],
+    [summary, settings, change, openTab, openScopedTab, openRow, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram, tabs, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport],
   );
 
   const dismissNote = damaged && (
@@ -327,7 +370,7 @@ export default function Shell() {
         />
         <div className="shell-main">
           {left === "open" ? (
-            <LeftPane summary={summary} sessions={sessions} onOpenDataset={openTab} onCollapse={() => togglePane("left_pane")} />
+            <LeftPane summary={summary} sessions={sessions} onOpenDataset={openTab} onOpenSession={openSession} onCollapse={() => togglePane("left_pane")} />
           ) : (
             <Rail side="left" suspicious={suspicious} onExpand={() => togglePane("left_pane")} />
           )}
@@ -356,7 +399,7 @@ export default function Shell() {
             <Rail side="right" suspicious={suspicious} onExpand={() => togglePane("right_pane")} />
           )}
         </div>
-        <StatusBar progress={job} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
+        <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
         <KeyStrip />
       </div>
     </ShellCtx.Provider>

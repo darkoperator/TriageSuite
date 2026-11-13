@@ -290,6 +290,53 @@ pub fn views(
     Ok(Listing::from_fetched(fetched, limit))
 }
 
+/// A saved view with the case's relations its pattern matches.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct MatchingView {
+    pub view: SavedView,
+    /// The case's active relations the view's pattern matches, sorted by
+    /// name; never empty.
+    pub relations: Vec<String>,
+}
+
+/// Up to `limit` of the views and presets that are not deleted and whose
+/// pattern matches at least one active relation of the case, from `offset`,
+/// each with the relations it matches (sorted). Ordered as `views` orders
+/// them; the page is cut after the matching, so a view matching nothing never
+/// uses up a place. A format-1 case has none. `Invalid` for a `limit` of 0
+/// or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
+pub fn views_matching(case: &Case, limit: u32, offset: u64) -> Result<Listing<MatchingView>> {
+    check_limit(limit)?;
+    check_offset(offset)?;
+    if case.format() < CASE_FORMAT {
+        return Ok(Listing::from_fetched(Vec::new(), limit));
+    }
+    let relations: Vec<String> = catalog::relations(case)?
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    let all = read_views(case.conn(), "NOT deleted", &[])?;
+    let skip = usize::try_from(offset).unwrap_or(usize::MAX);
+    let fetched: Vec<MatchingView> = all
+        .into_iter()
+        .filter_map(|view| {
+            let matched: Vec<String> = relations
+                .iter()
+                .filter(|r| pattern_matches(&view.pattern, r))
+                .cloned()
+                .collect();
+            (!matched.is_empty()).then_some(MatchingView {
+                view,
+                relations: matched,
+            })
+        })
+        .skip(skip)
+        .take(limit as usize + 1)
+        .collect();
+    Ok(Listing::from_fetched(fetched, limit))
+}
+
 /// Delete view `id`, leaving a tombstone (history `view_delete`).
 /// `NotFound` for an unknown id; `Refused` for a view already deleted, an
 /// agent deleting an analyst's view, or a format-1 case opened read-only.

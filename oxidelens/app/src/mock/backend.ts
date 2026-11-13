@@ -710,6 +710,15 @@ const handlers: Handlers = {
       const all = theCase().views.filter((v) => !a.relation || globMatches(v.pattern, a.relation));
       return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length };
     }),
+  views_matching: (a) =>
+    read(a.slot, a.queryId, () => {
+      const names = relations().map((r) => r.info.name).sort();
+      const all = theCase()
+        .views.map((view) => ({ view, relations: names.filter((n) => globMatches(view.pattern, n)) }))
+        .filter((m) => m.relations.length > 0)
+        .sort((x, y) => Number(x.view.kind === "preset") - Number(y.view.kind === "preset") || (x.view.name < y.view.name ? -1 : x.view.name > y.view.name ? 1 : 0));
+      return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length };
+    }),
   view_save: (a) =>
     write(["views"], () => {
       const c = theCase();
