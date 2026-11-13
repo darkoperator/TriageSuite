@@ -26,8 +26,10 @@ use triage_core::output::duckdb::sql::{quote_ident, quote_literal, NameAllocator
 /// The column a host assigned at load time is stored in.
 const HOST_COLUMN: &str = "_triage_host";
 
-/// What an analyst may say about a file at load time.
-#[derive(Default)]
+/// What an analyst may say about a file at load time. The app sends it as
+/// JSON; a field it does not know is refused.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct FileOptions {
     /// The relation's name; derived from the file name when absent.
     pub name: Option<String>,

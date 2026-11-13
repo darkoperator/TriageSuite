@@ -72,6 +72,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: oxidelens
+      # The desktop app (crates/oxl-app) links WebKitGTK on Linux.
+      - name: Install the app's system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf
       - run: cargo fmt --all -- --check
         working-directory: oxidelens
       - run: cargo clippy --all-targets -- -D warnings

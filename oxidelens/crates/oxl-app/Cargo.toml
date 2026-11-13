@@ -1,0 +1,30 @@
+[package]
+name = "oxl-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The OxideLens desktop app: Tauri commands over the case engine"
+publish = false
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+oxl-engine.workspace = true
+# The interrupt handle a running query is stopped through.
+duckdb.workspace = true
+tauri.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-mcp-bridge.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# The stamp a damaged settings file is set aside under.
+chrono.workspace = true
+
+[dev-dependencies]
+oxl-fixtures.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

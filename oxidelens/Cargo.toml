@@ -65,6 +65,15 @@ getrandom = "0.3"
 csv = "1"
 # O_NONBLOCK, so opening an `@file` that is a FIFO cannot block.
 libc = "0.2"
+# The desktop app (oxl-app). Versions as Sparrow resolves them (tauri 2.12).
+# No shell, fs, http or updater plugin: the app makes no network request and
+# reads files only through the engine.
+tauri = { version = "2.12", features = [] }
+tauri-build = { version = "2.7", features = [] }
+tauri-plugin-dialog = "2.7"
+# Lets an agent drive the window through the Tauri MCP server; registered in
+# debug builds only, bound to 127.0.0.1 (oxl-app's main.rs).
+tauri-plugin-mcp-bridge = "0.13"
 
 # Dependencies (above all the bundled DuckDB C++, built by libduckdb-sys'
 # build script through the `cc` crate, which reads the profile's OPT_LEVEL) are

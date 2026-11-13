@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: the app's own commands and the open and save file dialogs. No shell, fs, http or updater plugin. mcp-bridge is registered in debug builds only.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "mcp-bridge:default"]
+}
