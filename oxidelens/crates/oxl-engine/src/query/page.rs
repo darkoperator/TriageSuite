@@ -162,7 +162,7 @@ pub fn count(case: &Case, q: &GridQuery) -> Result<u64> {
 
 /// SQL for the mark of the row in scope, as `ox.row_mark` spells it; NULL
 /// for an unmarked row. Read it back with `read_mark`.
-pub(super) fn mark_sql() -> String {
+pub(crate) fn mark_sql() -> String {
     format!(
         "(SELECT max(ox_pm.mark) FROM ox.row_mark AS ox_pm \
          WHERE ox_pm.row_id = {ROW_ALIAS}._ox_row)"

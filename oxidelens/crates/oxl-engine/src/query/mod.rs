@@ -25,12 +25,12 @@ mod stack;
 
 pub use around::{anchor_of, around, merged_rows, AroundCount, MergedRow, MergedSource};
 pub use find::{find, FindHit, FindMode, FindRequest, FindResult, MAX_VALUE};
-pub(crate) use group::{as_count, group_key_sql};
+pub(crate) use group::{as_count, group_key_sql, group_spans, primary_time_semantics};
 pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub(crate) use page::clip_text;
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
-pub(crate) use page::{read_mark, MARK_SUSPICIOUS};
+pub(crate) use page::{mark_sql, read_mark, MARK_SUSPICIOUS};
 pub use sql::{
     describe, query_sql, query_sql_within, Described, DescribedColumn, SqlResult, SQL_MEMORY_LIMIT,
     SQL_TEXT_MAX, SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
@@ -111,6 +111,20 @@ pub(crate) fn check_offset(offset: u64) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// `Invalid` unless `zone` is an IANA zone name this build knows, spelled
+/// exactly. A display zone is never guessed or corrected.
+pub(crate) fn check_zone(zone: &str) -> Result<()> {
+    if triage_core::timestamp::zone::is_zone(zone) {
+        return Ok(());
+    }
+    let cut: String = zone.chars().take(64).collect();
+    Err(EngineError::Invalid(format!(
+        "{cut:?}{} is not a time zone this build knows (an IANA name such as \
+         America/New_York, or UTC)",
+        if cut.len() < zone.len() { "…" } else { "" }
+    )))
 }
 
 /// UTC text of a timestamp, six fractional digits (ruling R1), as a
@@ -375,7 +389,7 @@ pub(crate) fn find_column<'a>(
 
 /// Every `regex` leaf's pattern in `node`, with its case sensitivity. The
 /// node has passed `compile_filter`, whose caps bound this recursion.
-fn regex_leaves(node: &FilterNode, out: &mut Vec<(String, bool)>) {
+pub(crate) fn regex_leaves(node: &FilterNode, out: &mut Vec<(String, bool)>) {
     match node {
         FilterNode::And(children) | FilterNode::Or(children) => {
             children.iter().for_each(|c| regex_leaves(c, out));
@@ -393,7 +407,7 @@ fn regex_leaves(node: &FilterNode, out: &mut Vec<(String, bool)>) {
 /// pattern RE2 refuses is `Invalid` here rather than an engine error from
 /// the query that uses it. The Rust `regex` crate's check in the search
 /// parser does not settle it: the two dialects differ.
-fn probe_regex(conn: &Connection, pattern: &str, case_sensitive: bool) -> Result<()> {
+pub(crate) fn probe_regex(conn: &Connection, pattern: &str, case_sensitive: bool) -> Result<()> {
     let flags = if case_sensitive { "" } else { ", 'i'" };
     conn.query_row(
         &format!("SELECT regexp_matches('', ?{flags})"),

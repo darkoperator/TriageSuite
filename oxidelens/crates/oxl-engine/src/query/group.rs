@@ -52,6 +52,32 @@ pub fn groups(
     limit: u32,
     offset: u64,
 ) -> Result<Listing<GroupRow>> {
+    let fetched = group_spans(case, q, by, parent, limit, offset)?;
+    Ok(Listing {
+        items: fetched.items.into_iter().map(|g| g.row).collect(),
+        truncated: fetched.truncated,
+    })
+}
+
+/// A group with the earliest and latest primary time as the source wrote
+/// them (the text of a row holding each), which the grid renders in its
+/// display zone with the fraction as written. `None` where `GroupRow`'s
+/// `first` and `last` are.
+pub(crate) struct GroupSpan {
+    pub row: GroupRow,
+    pub first_text: Option<String>,
+    pub last_text: Option<String>,
+}
+
+/// `groups`, with each group's first and last time as text.
+pub(crate) fn group_spans(
+    case: &Case,
+    q: &GridQuery,
+    by: &[String],
+    parent: &[Option<String>],
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<GroupSpan>> {
     check_limit(limit)?;
     check_offset(offset)?;
     if by.is_empty() || by.len() > MAX_BY || parent.len() >= by.len() {
@@ -81,9 +107,10 @@ pub fn groups(
         }
     }
     let (first, last) = first_last_sql(&scope.relation.primary_time, all);
+    let (first_text, last_text) = first_last_text_sql(&scope.relation.primary_time, all);
     let sql = format!(
         "SELECT {key} AS ox_key, count(*), {first}, {last}, \
-         count(*) FILTER (WHERE {marked}) \
+         count(*) FILTER (WHERE {marked}), {first_text}, {last_text} \
          FROM {from} WHERE ({where_sql}){conditions} \
          GROUP BY ox_key ORDER BY count(*) DESC, ox_key ASC NULLS LAST LIMIT ? OFFSET ?",
         key = keys[parent.len()],
@@ -100,14 +127,18 @@ pub fn groups(
     while let Some(row) = rows.next()? {
         let full_key: Option<String> = row.get(0)?;
         let (key, key_clipped) = clip_text(full_key.clone());
-        out.push(GroupRow {
-            key,
-            key_clipped,
-            full_key,
-            count: as_count(row.get(1)?),
-            first: row.get(2)?,
-            last: row.get(3)?,
-            suspicious: as_count(row.get(4)?),
+        out.push(GroupSpan {
+            row: GroupRow {
+                key,
+                key_clipped,
+                full_key,
+                count: as_count(row.get(1)?),
+                first: row.get(2)?,
+                last: row.get(3)?,
+                suspicious: as_count(row.get(4)?),
+            },
+            first_text: row.get(5)?,
+            last_text: row.get(6)?,
         });
     }
     Ok(Listing::from_fetched(out, limit))
@@ -193,6 +224,32 @@ pub(super) fn first_last_sql(primary: &Option<String>, all: &[ColumnInfo]) -> (S
     }
 }
 
+/// SQL for the text of a row holding the earliest and of one holding the
+/// latest primary time of a group, as the source wrote it; NULL when the
+/// relation has no typed primary time.
+fn first_last_text_sql(primary: &Option<String>, all: &[ColumnInfo]) -> (String, String) {
+    let column = primary
+        .as_deref()
+        .and_then(|name| all.iter().find(|c| c.name == name));
+    match column.and_then(|c| Some((c, c.typed_column.as_deref()?))) {
+        Some((c, typed)) => {
+            let t = format!("{ROW_ALIAS}.{}", quote_ident(typed));
+            let text = format!(
+                "CAST({ROW_ALIAS}.{} AS VARCHAR)",
+                quote_ident(&c.text_column)
+            );
+            (
+                format!("arg_min({text}, {t}) FILTER (WHERE {t} IS NOT NULL)"),
+                format!("arg_max({text}, {t}) FILTER (WHERE {t} IS NOT NULL)"),
+            )
+        }
+        None => (
+            "CAST(NULL AS VARCHAR)".to_string(),
+            "CAST(NULL AS VARCHAR)".to_string(),
+        ),
+    }
+}
+
 /// The typed physical column of the relation's primary time, if it has one.
 pub(super) fn typed_primary_time<'a>(
     primary: &Option<String>,
@@ -207,7 +264,7 @@ pub(super) fn typed_primary_time<'a>(
 /// The time semantics of the relation's typed primary time: how the times
 /// a pivot compares and returns are zoned. `None` without a typed primary
 /// time. An `Unknown` time is compared as written, as if it were UTC.
-pub(super) fn primary_time_semantics(
+pub(crate) fn primary_time_semantics(
     primary: &Option<String>,
     all: &[ColumnInfo],
 ) -> Option<TimeSemantics> {

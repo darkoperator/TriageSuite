@@ -155,6 +155,12 @@ it were UTC: `around` windows, `find --from/--to`, the merged rows of
 row (in the order of the wrapped list); `histogram` and `stack` print one for
 the time they show. `null` means the relation has no primary time.
 
+`histogram` buckets in UTC (`"zone": "UTC"`). Each bucket carries its UTC
+`start`, a `label` (the start as `YYYY-MM-DD HH:MM:SS`) and an `end_label`
+(its last whole second). Buckets under a day are aligned to the epoch; a day
+starts at midnight, a week at midnight on a Monday, and the widest bucket
+(`bucket_seconds` 2592000) is a calendar month starting on the 1st.
+
 A column the suite already typed keeps its type, so `column declare` on it is
 `invalid`. A relation's primary time must be a typed timestamp column. After a
 `column declare` on a relation that has no primary time, and whose primary

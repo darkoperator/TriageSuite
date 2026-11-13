@@ -249,13 +249,19 @@ pub fn histogram(
 ) -> Result<Reply> {
     let q = grid_query(relation, query)?;
     let case = ctx.read_case()?;
-    let h = oxl_engine::histogram(&case, &q, column, buckets)?;
+    // The CLI speaks UTC: storage's own zone, and the one an agent's
+    // `--from`/`--at` take. The labels are the engine's own text.
+    let h = oxl_engine::histogram(&case, &q, column, buckets, "UTC")?;
     let list: Vec<_> = h
         .buckets
         .iter()
-        .map(|b| json!({"start": b.start, "count": b.count, "suspicious": b.suspicious}))
+        .map(|b| {
+            json!({"start": b.start, "label": b.label, "end_label": b.end_label,
+                   "count": b.count, "suspicious": b.suspicious})
+        })
         .collect();
     Ok(Reply::new(json!({
+        "zone": h.zone,
         "time_semantics": zoning(h.time_semantics),
         "bucket_seconds": h.bucket_seconds,
         "untimed": h.untimed,

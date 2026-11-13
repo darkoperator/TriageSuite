@@ -14,8 +14,16 @@
 //! in the grid, and `matches` gives the positions of those the search
 //! selects, in the grid's order, for the app to step between.
 
+mod page;
+mod rules;
+mod time;
 mod values;
 
+pub use page::{page_view, ColumnMeta, GridCell, GridPage, PageOptions};
+pub use rules::{
+    default_colour_rules, ColourRule, RuleColour, RuleScope, MAX_RULES, MAX_RULE_NAME,
+};
+pub use time::{date_range_chip, groups_view, histogram_view, GroupView};
 pub use values::{values, ValueCount, ValueOrder};
 
 use crate::case::Case;
@@ -168,11 +176,7 @@ impl GridState {
         let mut seen = BTreeSet::new();
         for chip in &self.chips {
             let id = &chip.id;
-            let id_ok = (1..=MAX_CHIP_ID).contains(&id.len())
-                && id
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-            if !id_ok {
+            if !valid_id(id) {
                 return Err(EngineError::Invalid(format!(
                     "chip id {} is not 1 to {MAX_CHIP_ID} of letters, digits, '_' and '-'",
                     shown(id)
@@ -191,6 +195,15 @@ impl GridState {
         }
         Ok(())
     }
+}
+
+/// The id rule chips and colour rules share: 1 to `MAX_CHIP_ID` of
+/// `[A-Za-z0-9_-]`.
+fn valid_id(id: &str) -> bool {
+    (1..=MAX_CHIP_ID).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// Untrusted text for a message: quoted with its control characters

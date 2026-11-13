@@ -198,7 +198,7 @@ fn groups_count_marks() {
     );
     // Counts are rows, not rows times marks.
     assert_eq!(g[1].count, 3);
-    let h = histogram(&case, &q(EVENTS), None, 60).unwrap();
+    let h = histogram(&case, &q(EVENTS), None, 60, "UTC").unwrap();
     assert_eq!(h.buckets.iter().map(|b| b.suspicious).sum::<u64>(), 1);
     assert_eq!(
         h.buckets.iter().find(|b| b.suspicious == 1).unwrap().start,
@@ -240,7 +240,7 @@ fn groups_follow_the_query_scope() {
 #[test]
 fn histogram_buckets_the_filtered_rows_in_utc() {
     let (_d, case) = loaded();
-    let h = histogram(&case, &q(EVENTS), None, 60).unwrap();
+    let h = histogram(&case, &q(EVENTS), None, 60, "UTC").unwrap();
     assert_eq!(
         (h.column.as_str(), h.bucket_seconds, h.untimed),
         ("TimeCreated", 60, 2)
@@ -248,7 +248,7 @@ fn histogram_buckets_the_filtered_rows_in_utc() {
     assert_eq!(h.buckets.iter().map(|b| b.count).sum::<u64>(), 9);
     assert_eq!(h.buckets[0].start, "2026-01-05T02:13:00.000000Z");
     assert_eq!(
-        histogram(&case, &q(EVENTS), None, 5)
+        histogram(&case, &q(EVENTS), None, 5, "UTC")
             .unwrap()
             .bucket_seconds,
         300
@@ -259,19 +259,19 @@ fn histogram_buckets_the_filtered_rows_in_utc() {
     assert!(starts.windows(2).all(|w| w[0] < w[1]));
     // The span fits in 21 minute-buckets, so 21 would fit and 20 would not.
     assert_eq!(
-        histogram(&case, &q(EVENTS), None, 21)
+        histogram(&case, &q(EVENTS), None, 21, "UTC")
             .unwrap()
             .bucket_seconds,
         60
     );
     assert_eq!(
-        histogram(&case, &q(EVENTS), None, 20)
+        histogram(&case, &q(EVENTS), None, 20, "UTC")
             .unwrap()
             .bucket_seconds,
         300
     );
     // A column can be named; the result carries its name.
-    let named = histogram(&case, &q(EVENTS), Some("TimeCreated"), 60).unwrap();
+    let named = histogram(&case, &q(EVENTS), Some("TimeCreated"), 60, "UTC").unwrap();
     assert_eq!(named.buckets.len(), h.buckets.len());
 }
 
@@ -283,23 +283,28 @@ fn histogram_follows_the_filter_and_picks_wider_steps() {
         ..q("petriage_timeline")
     };
     // 2026-01-04 09:00 to 2026-01-05 02:33 touches four epoch-aligned 6-hour buckets, two day buckets.
-    let h = histogram(&case, &ws01, None, 4).unwrap();
+    let h = histogram(&case, &ws01, None, 4, "UTC").unwrap();
     assert!(BUCKET_LADDER.contains(&h.bucket_seconds));
     assert_eq!(h.bucket_seconds, 21_600);
     assert_eq!(h.buckets.iter().map(|b| b.count).sum::<u64>(), 4);
     assert_eq!(h.buckets[0].start, "2026-01-04T06:00:00.000000Z");
-    // One bucket takes the first step that covers the span: weeks align to the epoch (a Thursday).
-    let one = histogram(&case, &q("petriage_timeline"), None, 1).unwrap();
-    assert_eq!(one.bucket_seconds, 604_800);
+    // One bucket takes the first step that covers the span. Weeks start on
+    // a Monday, so Jan 3 to Jan 5 touches two (Dec 29 and Jan 5), and the
+    // one bucket is a month, which starts on the 1st.
+    let one = histogram(&case, &q("petriage_timeline"), None, 1, "UTC").unwrap();
+    assert_eq!(one.bucket_seconds, 2_592_000);
     assert_eq!(one.buckets[0].start, "2026-01-01T00:00:00.000000Z");
     assert_eq!(one.buckets.len(), 1);
     assert_eq!(one.buckets[0].count, 5);
+    let two = histogram(&case, &q("petriage_timeline"), None, 2, "UTC").unwrap();
+    assert_eq!(two.bucket_seconds, 604_800);
+    assert_eq!(two.buckets[0].start, "2025-12-29T00:00:00.000000Z");
 }
 
 #[test]
 fn histogram_on_an_app_typed_column() {
     let (_d, case) = loaded();
-    let h = histogram(&case, &q("ext_hayabusa_csv_timeline"), None, 60).unwrap();
+    let h = histogram(&case, &q("ext_hayabusa_csv_timeline"), None, 60, "UTC").unwrap();
     assert_eq!(h.buckets.iter().map(|b| b.count).sum::<u64>(), 4);
     assert_eq!(h.untimed, 1);
     assert_eq!(h.column, "Timestamp");
@@ -316,7 +321,7 @@ fn empty_inputs_give_empty_results() {
         .unwrap()
         .items;
     assert!(g.is_empty());
-    let h = histogram(&case, &q("rbtriage_main"), None, 60).unwrap();
+    let h = histogram(&case, &q("rbtriage_main"), None, 60, "UTC").unwrap();
     assert_eq!(h.column, "DeletedOn");
     assert_eq!((h.buckets.len(), h.untimed), (0, 0));
 
@@ -329,7 +334,7 @@ fn empty_inputs_give_empty_results() {
         .unwrap()
         .items
         .is_empty());
-    let h = histogram(&case, &none, None, 60).unwrap();
+    let h = histogram(&case, &none, None, 60, "UTC").unwrap();
     assert_eq!((h.buckets.len(), h.untimed), (0, 0));
     assert_eq!(h.column, "TimeCreated");
 }
@@ -366,14 +371,17 @@ fn bad_arguments_are_invalid() {
     );
 
     let hcode = |r: oxl_engine::Result<oxl_engine::Histogram>| r.unwrap_err().code();
-    assert_eq!(hcode(histogram(&case, &q(EVENTS), None, 0)), "invalid");
+    assert_eq!(
+        hcode(histogram(&case, &q(EVENTS), None, 0, "UTC")),
+        "invalid"
+    );
     // A column that is not a timestamp, and one the relation lacks.
     assert_eq!(
-        hcode(histogram(&case, &q(EVENTS), Some("Channel"), 60)),
+        hcode(histogram(&case, &q(EVENTS), Some("Channel"), 60, "UTC")),
         "invalid"
     );
     assert_eq!(
-        hcode(histogram(&case, &q(EVENTS), Some("nope"), 60)),
+        hcode(histogram(&case, &q(EVENTS), Some("nope"), 60, "UTC")),
         "not_found"
     );
 
@@ -394,7 +402,7 @@ beta,SRV01
         .relations[0]
         .name
         .clone();
-    let err = histogram(&other, &q(&rel), None, 60).unwrap_err();
+    let err = histogram(&other, &q(&rel), None, 60, "UTC").unwrap_err();
     assert_eq!(err.code(), "invalid");
     assert!(err.to_string().contains("no timestamp column"), "{err}");
 }

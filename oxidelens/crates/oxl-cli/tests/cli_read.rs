@@ -297,7 +297,14 @@ fn count_groups_histogram_and_stack() {
     let h = ox(&["--case", p, "histogram", "evtxtriage_events"]).1;
     assert_eq!(h["data"]["bucket_seconds"], 60);
     assert_eq!(inner(&h["data"]["untrusted"])["column"], "TimeCreated");
-    assert!(h["data"]["buckets"][0]["count"].as_u64().is_some());
+    // The CLI's histogram is in UTC: each bucket's start as before, with its
+    // labels on the UTC clock beside it.
+    assert_eq!(h["data"]["zone"], "UTC");
+    assert_eq!(
+        h["data"]["buckets"][0],
+        json!({"start": "2026-01-05T02:13:00.000000Z", "label": "2026-01-05 02:13:00",
+               "end_label": "2026-01-05 02:13:59", "count": 1, "suspicious": 0})
+    );
     let s = ox(&[
         "--case",
         p,

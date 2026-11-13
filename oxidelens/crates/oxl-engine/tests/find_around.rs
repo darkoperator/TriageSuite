@@ -420,7 +420,7 @@ fn every_pivot_says_how_its_times_are_zoned() {
         relation: rel.into(),
         ..Default::default()
     };
-    let h = oxl_engine::histogram(&case, &q("fw_csv"), None, 60).unwrap();
+    let h = oxl_engine::histogram(&case, &q("fw_csv"), None, 60, "UTC").unwrap();
     assert_eq!(h.time_semantics, Some(TimeSemantics::Unknown));
     let st = oxl_engine::stack(
         &case,
