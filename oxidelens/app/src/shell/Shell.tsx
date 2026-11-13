@@ -8,6 +8,7 @@ import {
 } from "../api";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
+import type { ColourRule } from "../contract/generated/ColourRule";
 import type { DamagedSettings } from "../contract/generated/DamagedSettings";
 import type { Session } from "../contract/generated/Session";
 import type { Settings } from "../contract/generated/Settings";
@@ -112,6 +113,19 @@ export default function Shell() {
       if (layout === null) delete layouts[relation];
       else layouts[relation] = layout;
       updateSettings({ layouts });
+    },
+    [updateSettings],
+  );
+
+  /** One dataset's colour rules: the whole map is rebuilt from the latest (optimistic) settings, then queued. */
+  const saveColourRules = useCallback(
+    (relation: string, rules: ColourRule[] | null) => {
+      const base = settingsRef.current;
+      if (!base) return;
+      const colour_rules = { ...base.colour_rules };
+      if (rules === null) delete colour_rules[relation];
+      else colour_rules[relation] = rules;
+      updateSettings({ colour_rules });
     },
     [updateSettings],
   );
@@ -252,10 +266,10 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, setHistogram,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
           }
         : null,
-    [summary, settings, change, openTab, openScopedTab, rightPane, scroll, reportError, saveLayout, setHistogram],
+    [summary, settings, change, openTab, openScopedTab, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram],
   );
 
   const dismissNote = damaged && (

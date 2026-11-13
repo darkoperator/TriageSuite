@@ -64,6 +64,15 @@
   --rule-blue: rgba(91, 141, 239, 0.16);
   --rule-teal: rgba(86, 200, 190, 0.14);
   --rule-grey: rgba(154, 165, 180, 0.14);
+  /* The 3 px stripe at a rule row's left edge and the colour picker's swatch: the same hues, solid. Red and amber sit a step
+     apart from the reserved malicious and suspicious marks; a mark is a glyph on an untinted cell, never a wash or stripe. */
+  --rule-red-bar: #d9696d;
+  --rule-orange-bar: #e8946f;
+  --rule-amber-bar: #d9a441;
+  --rule-green-bar: #6bb893;
+  --rule-blue-bar: #6f93e0;
+  --rule-teal-bar: #4fb3aa;
+  --rule-grey-bar: #8b95a4;
 
   --scrim: rgba(0, 0, 0, 0.45);
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -117,6 +126,13 @@
   --rule-blue: rgba(91, 141, 239, 0.18);
   --rule-teal: rgba(30, 160, 150, 0.16);
   --rule-grey: rgba(90, 102, 119, 0.14);
+  --rule-red-bar: #c8575c;
+  --rule-orange-bar: #d27a54;
+  --rule-amber-bar: #c08a20;
+  --rule-green-bar: #3a9a73;
+  --rule-blue-bar: #5b8def;
+  --rule-teal-bar: #2a9a92;
+  --rule-grey-bar: #7a8696;
 
   --scrim: rgba(0, 0, 0, 0.3);
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.18);

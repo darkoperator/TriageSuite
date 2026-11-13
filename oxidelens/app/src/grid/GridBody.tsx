@@ -3,9 +3,11 @@
 // a class name or a style.
 import type { Virtualizer } from "@tanstack/react-virtual";
 import type { MouseEvent, ReactNode } from "react";
+import type { ColourRule } from "../contract/generated/ColourRule";
 import type { GridCell } from "../contract/generated/GridCell";
 import { displaySafe } from "../text";
 import { MARK_WIDTH } from "./GridHeader";
+import { cellRuleClass, rowRuleClass } from "./ruleClasses";
 import type { GridRow } from "./useGridData";
 
 export interface GridBodyProps {
@@ -16,6 +18,11 @@ export interface GridBodyProps {
   cellIdx: number[];
   /** Per visible column: the `left` offset of a pinned column, else null. */
   pinLeft: (number | null)[];
+  /** Per visible column: its name, to find the cells a cell-scope rule tints. */
+  colNames: string[];
+  /** The rules the page was asked with, and per rule the columns its conditions name. `GridRow.rule` indexes both. */
+  rules: ColourRule[];
+  ruleColumns: string[][];
   width: number;
   rowHeight: number;
   isSelected(index: number): boolean;
@@ -51,7 +58,12 @@ export default function GridBody(p: GridBodyProps): ReactNode {
       {p.virtualizer.getVirtualItems().map((v) => {
         const row = p.rowAt(v.index);
         const isSelected = row !== null && p.isSelected(v.index);
-        const classes = ["grid-row", v.index % 2 === 1 ? "row-odd" : "", isSelected ? "row-selected" : "", row?.hit ? "row-hit" : ""];
+        // The matched rule's colour is one of a fixed set of classes (`ruleClasses.ts`); nothing from the row picks it.
+        const rule = row && row.rule !== null ? p.rules[row.rule] : undefined;
+        const tinted = rule && rule.scope === "cell" ? new Set(p.ruleColumns[row!.rule!] ?? []) : null;
+        const classes = [
+          "grid-row", v.index % 2 === 1 ? "row-odd" : "", isSelected ? "row-selected" : "", row?.hit ? "row-hit" : "", rowRuleClass(rule),
+        ];
         return (
           <div
             key={v.index}
@@ -84,7 +96,7 @@ export default function GridBody(p: GridBodyProps): ReactNode {
                   key={c}
                   role="gridcell"
                   aria-colindex={c + 2}
-                  className={left === null ? "cell" : "cell cell-pinned"}
+                  className={[left === null ? "cell" : "cell cell-pinned", tinted?.has(p.colNames[c]) ? cellRuleClass(rule) : ""].filter(Boolean).join(" ")}
                   data-pinned={left === null ? undefined : "true"}
                   data-focused={focused ? "true" : undefined}
                   style={{ width: w, left: left ?? undefined }}

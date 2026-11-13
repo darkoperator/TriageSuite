@@ -28,6 +28,54 @@
 .grid-row.row-odd .cell-mark { background: var(--bg); }
 .mark-suspicious { color: var(--suspicious); }
 
+/* Colour rules. The classes are the fixed set of ruleClasses.ts; no value from the data reaches a style. A row rule is a
+   faint wash (a background-image over whatever the row's own state paints, so selection and hover still show) and a 3 px
+   stripe on the left edge of the mark cell. The mark cell keeps its own opaque background, so the wash never reaches it:
+   the mark glyph is never covered and never takes a rule colour. A cell rule tints only the cells it names. */
+.grid-row.rule-row-red { background-image: linear-gradient(var(--rule-red), var(--rule-red)); }
+.grid-row.rule-row-orange { background-image: linear-gradient(var(--rule-orange), var(--rule-orange)); }
+.grid-row.rule-row-amber { background-image: linear-gradient(var(--rule-amber), var(--rule-amber)); }
+.grid-row.rule-row-green { background-image: linear-gradient(var(--rule-green), var(--rule-green)); }
+.grid-row.rule-row-blue { background-image: linear-gradient(var(--rule-blue), var(--rule-blue)); }
+.grid-row.rule-row-teal { background-image: linear-gradient(var(--rule-teal), var(--rule-teal)); }
+.grid-row.rule-row-grey { background-image: linear-gradient(var(--rule-grey), var(--rule-grey)); }
+.grid-row.rule-row-red .cell-mark { box-shadow: inset 3px 0 0 var(--rule-red-bar); }
+.grid-row.rule-row-orange .cell-mark { box-shadow: inset 3px 0 0 var(--rule-orange-bar); }
+.grid-row.rule-row-amber .cell-mark { box-shadow: inset 3px 0 0 var(--rule-amber-bar); }
+.grid-row.rule-row-green .cell-mark { box-shadow: inset 3px 0 0 var(--rule-green-bar); }
+.grid-row.rule-row-blue .cell-mark { box-shadow: inset 3px 0 0 var(--rule-blue-bar); }
+.grid-row.rule-row-teal .cell-mark { box-shadow: inset 3px 0 0 var(--rule-teal-bar); }
+.grid-row.rule-row-grey .cell-mark { box-shadow: inset 3px 0 0 var(--rule-grey-bar); }
+.cell.rule-cell-red { background-image: linear-gradient(var(--rule-red), var(--rule-red)); }
+.cell.rule-cell-orange { background-image: linear-gradient(var(--rule-orange), var(--rule-orange)); }
+.cell.rule-cell-amber { background-image: linear-gradient(var(--rule-amber), var(--rule-amber)); }
+.cell.rule-cell-green { background-image: linear-gradient(var(--rule-green), var(--rule-green)); }
+.cell.rule-cell-blue { background-image: linear-gradient(var(--rule-blue), var(--rule-blue)); }
+.cell.rule-cell-teal { background-image: linear-gradient(var(--rule-teal), var(--rule-teal)); }
+.cell.rule-cell-grey { background-image: linear-gradient(var(--rule-grey), var(--rule-grey)); }
+
+.rules-dialog { display: flex; flex-direction: column; width: min(760px, 94vw); max-height: 80vh; background: var(--card); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-pop); font: var(--ui-font); outline: none; }
+.rules-list { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 6px 8px; list-style: none; }
+.rule-item { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.rule-line { display: flex; align-items: center; gap: 6px; }
+.rule-handle { flex: none; color: var(--faint); cursor: grab; user-select: none; }
+.rule-name { flex: 1; min-width: 100px; }
+.rule-line button, .rules-foot button { background: none; border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 8px; color: var(--text-2); cursor: pointer; font: inherit; }
+.rule-line button:disabled, .rules-foot button:disabled { opacity: 0.45; cursor: default; }
+.rule-swatch { flex: none; width: 12px; height: 12px; border-radius: 3px; }
+.swatch-red { background: var(--rule-red-bar); }
+.swatch-orange { background: var(--rule-orange-bar); }
+.swatch-amber { background: var(--rule-amber-bar); }
+.swatch-green { background: var(--rule-green-bar); }
+.swatch-blue { background: var(--rule-blue-bar); }
+.swatch-teal { background: var(--rule-teal-bar); }
+.swatch-grey { background: var(--rule-grey-bar); }
+.rule-error { margin: 2px 0 0 28px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.rules-empty { padding: 14px 12px; color: var(--muted); }
+.rules-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.rules-note { color: var(--muted); }
+.rules-close { margin-left: auto; }
+
 .cell-menu { position: fixed; z-index: 20; display: flex; flex-direction: column; min-width: 200px; padding: 4px; background: var(--card); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-pop); font: var(--ui-font); }
 .cell-menu button { text-align: left; background: none; border: 0; border-radius: 4px; padding: 4px 10px; color: var(--text); }
 .cell-menu button:hover:not(:disabled), .cell-menu button:focus-visible { background: var(--accent-soft); }

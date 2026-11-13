@@ -1,6 +1,7 @@
 // What a screen inside the shell can ask of it. A tab body, the right pane's content and the saved-views section read
 // this through `useShell()`.
 import { createContext, useContext, type ReactNode } from "react";
+import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
 import type { Settings } from "../contract/generated/Settings";
@@ -28,6 +29,11 @@ export interface ShellContext {
    * queue, built on the latest layouts, so a change made while another write is in flight is never lost.
    */
   saveLayout(relation: string, layout: ColumnLayout | null): void;
+  /**
+   * Saves one dataset's colour rules (the whole list, in order) in the settings; `null` forgets the entry, so the
+   * relation follows the engine's defaults again. Through the same write queue as the layouts.
+   */
+  saveColourRules(relation: string, rules: ColourRule[] | null): void;
   /** Switches the histogram strip on or off; shown at once, written through the settings queue. */
   setHistogram(on: boolean): void;
   /** Shows a command error (code and message) in the status bar. */

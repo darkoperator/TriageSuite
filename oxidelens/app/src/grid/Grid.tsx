@@ -10,8 +10,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
-import { columns as readColumns, gridEmptyColumns, gridPage, isCmdError, viewSave } from "../api";
+import { columns as readColumns, defaultColourRules, gridEmptyColumns, gridPage, isCmdError, viewSave } from "../api";
 import type { Chip } from "../contract/generated/Chip";
+import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { GridPage } from "../contract/generated/GridPage";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
@@ -26,6 +27,7 @@ import ChipBar from "./ChipBar";
 import {
   MARK_COLUMN, MAX_CHIPS, cellChip, filterColumns, filterRowChip, filterRowId, groupChips, hash, removeChip, toggleChip, upsertChip,
 } from "./chips";
+import ColourRules from "./ColourRules";
 import ColumnManager from "./ColumnManager";
 import { cellText, rowsAsTsv, writeClipboard } from "./copy";
 import FilterPanel from "./FilterPanel";
@@ -44,6 +46,7 @@ import {
 } from "./layout";
 import { measureText } from "./measure";
 import { BLOCK_ROWS, blockOf } from "./blocks";
+import { filterFromChips, newRule, rulesStatus } from "./ruleClasses";
 import { MAX_COPY_ROWS, contains, emptySelection, indices, selectOnly, selectRange, size, toggle, type Selection } from "./selection";
 import SearchBox from "./SearchBox";
 import { stableKey, useGridData } from "./useGridData";
@@ -58,13 +61,15 @@ const LAYOUT_SAVE_MS = 250;
 const fmt = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
+const NO_RULES: ColourRule[] = [];
+
 interface Focus {
   row: number;
   col: number;
 }
 
 export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyProps): ReactNode {
-  const { summary, settings, change, setGridStatus, reportError, saveLayout, openScoped, setHistogram } = useShell();
+  const { summary, settings, change, setGridStatus, reportError, saveLayout, saveColourRules, openScoped, setHistogram } = useShell();
   const relation = tab.relation ?? "";
 
   const [state, setState] = useState<GridState>(() => tab.seed?.state ?? initialGridState(relation));
@@ -99,8 +104,41 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const fetched = useMemo(() => (resolved && allMetas ? fetchedColumns(resolved, allMetas) : null), [resolved, allMetas]);
   const shownState = useMemo<GridState>(() => ({ ...state, columns: fetched }), [state, fetched]);
 
+  // Colour rules: this relation's saved list, or (no saved entry) the engine's defaults, read once. Until one of them is
+  // known no page is asked for, so the first rows are never drawn untinted and then tinted. An edit stores the whole list.
+  // What the shell's settings hold is what is shown: an edit is applied to that latest list and goes through the settings
+  // queue, so another tab on the relation sees it, and a rejected write falls back to the confirmed list.
+  const savedRules: ColourRule[] | null = settings.colour_rules[relation] ?? null;
+  const [defaultRules, setDefaultRules] = useState<ColourRule[] | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  useEffect(() => {
+    if (savedRules !== null || defaultRules !== null) return;
+    let live = true;
+    defaultColourRules(relation, `tab:${tab.id}:rules`).then(
+      (r) => live && setDefaultRules(r),
+      (e: unknown) => {
+        if (!live) return;
+        if (!(isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case"))) reportError(e);
+        setDefaultRules([]);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [savedRules, defaultRules, relation, tab.id, reportError]);
+  const rules = useMemo(() => savedRules ?? defaultRules ?? NO_RULES, [savedRules, defaultRules]);
+  const rulesReady = savedRules !== null || defaultRules !== null;
+  const setRules = (next: ColourRule[]) => {
+    saveColourRules(relation, next);
+  };
+  const resetRules = () => {
+    setDefaultRules(null);
+    saveColourRules(relation, null);
+  };
+
   const data = useGridData({
-    tabId: tab.id, state: shownState, zone: summary.display_zone, enabled: active && allMetas !== null && !grouped, onError: reportError,
+    tabId: tab.id, state: shownState, zone: summary.display_zone, rules, enabled: active && allMetas !== null && rulesReady && !grouped,
+    onError: reportError,
   });
   const { want, refresh, rowAt, beginCopy, loadedTexts } = data;
   const tree = useGroupTree({
@@ -332,6 +370,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const totalColumns = allMetas?.length ?? shownColumns;
   const counts = data.counts;
   const selectedCount = size(selection);
+  const rulesText = rulesStatus(rules, savedRules === null);
   const groupedBy = by.map((c) => displaySafe(c === MARK_COLUMN ? "Mark" : c)).join(" › ");
   const statusNode = useMemo(
     () =>
@@ -344,9 +383,10 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
             {`${fmt(totalColumns - shownColumns)} hidden ▾`}
           </button>
           {!grouped && ` · ${fmt(counts!.failed_values)} ${plural(counts!.failed_values, "value", "values")} failed to convert`}
+          {rulesText !== null && ` · ${rulesText}`}
         </>
       ),
-    [counts, grouped, groupedBy, selectedCount, shownColumns, totalColumns],
+    [counts, grouped, groupedBy, selectedCount, shownColumns, totalColumns, rulesText],
   );
   useEffect(() => {
     if (!active) return;
@@ -621,6 +661,9 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         >
           Histogram
         </button>
+        <button type="button" className="scope-button" aria-haspopup="dialog" aria-expanded={rulesOpen} title="Colour rules" onClick={() => setRulesOpen(true)}>
+          {`Colours ${rules.filter((r) => r.enabled).length}`}
+        </button>
       </div>
       <ChipBar
         search={state.search}
@@ -715,6 +758,9 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
             rowAt={rowAt}
             widths={widths}
             cellIdx={cellIdx}
+            colNames={names}
+            rules={rules}
+            ruleColumns={data.ruleColumns}
             pinLeft={pinLeft}
             width={width}
             rowHeight={rowHeight}
@@ -795,6 +841,21 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
             setAdvancedOpen(false);
             gridRef.current?.focus();
           }}
+        />
+      )}
+      {rulesOpen && (
+        <ColourRules
+          rules={rules}
+          usingDefaults={savedRules === null}
+          errors={data.ruleErrors}
+          canFromFilter={filterFromChips(state.chips) !== null}
+          onChange={setRules}
+          onFromFilter={() => {
+            const filter = filterFromChips(state.chips);
+            if (filter) setRules([...rules, newRule(filter, rules)]);
+          }}
+          onReset={resetRules}
+          onClose={() => setRulesOpen(false)}
         />
       )}
       {viewer && (

@@ -90,6 +90,9 @@ export class GridStore {
   counts: GridCounts | null = null;
   /** The zone the latest page's `display` text is in. */
   zone: string | null = null;
+  /** The latest page's `rule_columns` and `rule_errors` (the rules are one list for every page of a version). */
+  ruleColumns: string[][] = [];
+  ruleErrors: Array<[number, string]> = [];
   private onError: (e: unknown) => void = () => {};
 
   setErrorHandler(f: (e: unknown) => void): void {
@@ -127,6 +130,8 @@ export class GridStore {
     this.cache.clear();
     this.failed.clear();
     this.counts = null;
+    this.ruleColumns = [];
+    this.ruleErrors = [];
     this.notify();
     this.pump();
   }
@@ -190,6 +195,8 @@ export class GridStore {
         this.cache.set(block, page, new Set(blocksCovering(this.first, this.last)));
         if (!this.columns || !sameColumns(this.columns, page.columns)) this.columns = page.columns;
         this.zone = page.zone;
+        this.ruleColumns = page.rule_columns;
+        this.ruleErrors = page.rule_errors;
         this.notify();
       },
       (e: unknown) => {
@@ -303,6 +310,8 @@ export class GridStore {
 }
 
 const NO_RULES: ColourRule[] = [];
+const NO_RULE_COLUMNS: string[][] = [];
+const NO_RULE_ERRORS: Array<[number, string]> = [];
 
 export interface GridDataArgs {
   tabId: string;
@@ -320,6 +329,10 @@ export interface GridData {
   counts: GridCounts | null;
   total: number;
   zone: string | null;
+  /** Per rule sent: the columns its conditions name (a cell-scope rule tints them); empty until a page of this state arrives. */
+  ruleColumns: string[][];
+  /** Enabled rules the engine skipped, by index into the rules sent, and why. */
+  ruleErrors: Array<[number, string]>;
   rowAt(index: number): GridRow | null;
   want(first: number, last: number): void;
   refresh(): void;
@@ -362,7 +375,8 @@ export function useGridData({ tabId, state, zone, rules = NO_RULES, enabled, onE
   const loadedTexts = useCallback((column: string) => (store.cacheKey === key ? store.loadedTexts(column) : []), [store, key]);
   const rowAt = useCallback((i: number) => (store.cacheKey === key ? store.rowAt(i) : null), [store, key]);
   return {
-    columns: store.columns, counts: fresh ? store.counts : null, total: store.totalRows(), zone: store.zone, rowAt, want,
+    columns: store.columns, counts: fresh ? store.counts : null, total: store.totalRows(), zone: store.zone,
+    ruleColumns: fresh ? store.ruleColumns : NO_RULE_COLUMNS, ruleErrors: fresh ? store.ruleErrors : NO_RULE_ERRORS, rowAt, want,
     refresh, beginCopy, loadedTexts, revision,
   };
 }

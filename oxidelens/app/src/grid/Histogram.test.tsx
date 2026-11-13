@@ -56,7 +56,7 @@ async function mount(
   const setHistogram = vi.fn();
   const ctx: ShellContext = {
     summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped: () => {}, setGridStatus: () => {},
-    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError, saveLayout: vi.fn(), setHistogram,
+    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError, saveLayout: vi.fn(), setHistogram, saveColourRules: vi.fn(),
   };
   const utils = render(<Host ctx={ctx} tab={tab} />);
   await waitFor(() => expect(dataRows().length).toBeGreaterThan(0));

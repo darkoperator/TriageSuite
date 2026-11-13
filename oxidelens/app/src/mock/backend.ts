@@ -366,17 +366,12 @@ const clip = (text: string | null): [string | null, boolean] =>
 
 function colourRulesFor(relation: string): ColourRule[] {
   if (relation === "mock_hayabusa") {
-    const rule = (id: string, level: string, colour: ColourRule["colour"]): ColourRule => ({
-      id, name: `Level ${level}`, enabled: true, colour, scope: "row",
+    // The engine's shape: ids `hayabusa-<level>`, names `Hayabusa level: <word>`, crit red, high orange, med amber, low green.
+    const rule = (level: string, word: string, colour: ColourRule["colour"]): ColourRule => ({
+      id: `hayabusa-${level}`, name: `Hayabusa level: ${word}`, enabled: true, colour, scope: "row",
       filter: { column: "Level", op: "eq", value: level, case_sensitive: false },
     });
-    return [rule("r-crit", "crit", "red"), rule("r-high", "high", "orange"), rule("r-med", "med", "amber"), rule("r-low", "low", "blue")];
-  }
-  if (relation === "mock_events") {
-    return [{
-      id: "r-failed", name: "Failed logon", enabled: true, colour: "red", scope: "row",
-      filter: { column: "EventId", op: "eq", value: "4625", case_sensitive: false },
-    }];
+    return [rule("crit", "critical", "red"), rule("high", "high", "orange"), rule("med", "medium", "amber"), rule("low", "low", "green")];
   }
   return [];
 }
@@ -473,7 +468,7 @@ const handlers: Handlers = {
       const rules = a.options.rules;
       const ruleErrors: Array<[number, string]> = [];
       const usable = rules.map((r, i) => {
-        const missing = leaves(r.filter).find((l) => !sel.rel.columns.some((c) => c.name === l.column));
+        const missing = leaves(r.filter).find((l) => l.column !== "_mark" && !sel.rel.columns.some((c) => c.name === l.column));
         if (missing && r.enabled) ruleErrors.push([i, `the relation has no column ${missing.column}`]);
         return r.enabled && !missing;
       });
@@ -487,7 +482,7 @@ const handlers: Handlers = {
           const at = rules.findIndex((r, n) => usable[n] && nodeMatches(r.filter, sel.rel, sel.rel.rows[i], marks.get(rowIdOf(sel.rel, i)) ?? null));
           return at < 0 ? null : at;
         }),
-        rule_columns: rules.map((r) => [...new Set(leaves(r.filter).map((l) => l.column))]),
+        rule_columns: rules.map((r) => [...new Set(leaves(r.filter).map((l) => l.column).filter((n) => n !== "_mark"))]),
         rule_errors: ruleErrors,
         search_hits: picked.map((i) => a.state.search.mode === "find" && sel.hits(sel.rel.rows[i])),
         truncated: a.offset + a.limit < sel.rows.length,

@@ -55,7 +55,7 @@ async function mount(tab: Tab = events): Promise<Mounted> {
   const openScoped = vi.fn();
   const ctx: ShellContext = {
     summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped, setGridStatus: () => {},
-    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(), setHistogram: vi.fn(),
+    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(), setHistogram: vi.fn(), saveColourRules: vi.fn(),
   };
   const tree = (c: ShellContext) => (
     <ShellCtx.Provider value={c}>
