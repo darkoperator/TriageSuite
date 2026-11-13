@@ -10,6 +10,7 @@ pub(crate) mod stage;
 mod supersede;
 
 pub use file::{load_file, relation_name_for_file, FileOptions};
+pub(crate) use run::canonical_path;
 pub use run::{load_run, load_run_with};
 pub(crate) use sessions::backfill_sessions;
 pub use sessions::{sessions, Session, SessionRelation};

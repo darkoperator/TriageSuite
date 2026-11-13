@@ -14,6 +14,7 @@
 //! in the grid, and `matches` gives the positions of those the search
 //! selects, in the grid's order, for the app to step between.
 
+mod export;
 mod page;
 mod row;
 mod rules;
@@ -22,6 +23,7 @@ mod split;
 mod time;
 mod values;
 
+pub use export::{export_csv, ExportReport};
 pub use page::{page_view, ColumnMeta, GridCell, GridPage, PageOptions};
 pub use row::{
     around_totals, cell_value, merged_view, row_view, CellValue, FieldView, MergedView, Provenance,

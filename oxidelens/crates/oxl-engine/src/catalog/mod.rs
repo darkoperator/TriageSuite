@@ -11,6 +11,9 @@
 
 pub mod appmap;
 mod populate;
+mod zones;
+
+pub use zones::{host_zones, HostZone};
 
 pub use triage_core::output::duckdb::types::{SqlType, TimeSemantics};
 

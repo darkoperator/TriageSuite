@@ -60,7 +60,8 @@ regex = "1"
 # The untrusted-data boundary must be unpredictable to whoever wrote the
 # evidence, so the CLI takes it from the operating system's random source.
 getrandom = "0.3"
-# Engine tests read the CSV files the loader was given, to compare.
+# The engine writes the grid's CSV export; its tests read the CSV files the
+# loader was given, to compare.
 csv = "1"
 # O_NONBLOCK, so opening an `@file` that is a FIFO cannot block.
 libc = "0.2"

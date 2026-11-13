@@ -735,7 +735,7 @@ fn publish_new(from: &Path, to: &Path) -> Result<()> {
     })
 }
 
-fn wal_path(path: &Path) -> PathBuf {
+pub(crate) fn wal_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(".wal");
     PathBuf::from(name)

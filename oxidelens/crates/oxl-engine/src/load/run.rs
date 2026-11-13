@@ -131,7 +131,7 @@ pub(super) fn discard(conn: &Connection, source_id: Option<i64>) {
 /// verbatim `\\?\` prefix `canonicalize` adds is taken off again, because
 /// the path is what the analyst sees and what the case records. A read goes
 /// through `read_path`, which puts the prefix back where it is needed.
-pub(super) fn canonical_path(out_root: &Path) -> Result<PathBuf> {
+pub(crate) fn canonical_path(out_root: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(out_root).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             // Both loaders come through here: a run's root, or a file.

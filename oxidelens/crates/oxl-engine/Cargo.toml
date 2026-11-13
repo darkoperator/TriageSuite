@@ -19,6 +19,8 @@ regex.workspace = true
 tempfile.workspace = true
 # A case's id (ox.meta case_id), from the operating system's random source.
 getrandom.workspace = true
+# The grid's CSV export.
+csv.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 # O_NOFOLLOW and O_NONBLOCK, so a run's session file is never read through a
@@ -37,7 +39,6 @@ ts = []
 # so a unit test inside src/ links a second copy: it may take a directory
 # tree from it (`two_hosts`) but never a `Case` or any other engine type.
 oxl-fixtures.workspace = true
-csv.workspace = true
 tempfile.workspace = true
 triage-testkit.workspace = true
 
