@@ -40,6 +40,18 @@ pub fn err(command: &str, e: &EngineError) -> Value {
     }})
 }
 
+/// The reply to a command that panicked: the code `engine`, like any other
+/// fault of the program, and the panic's text inside the wrapper.
+pub fn panicked(command: &str, what: &str) -> Value {
+    json!({"ok": false, "command": command, "error": {
+        "code": "engine",
+        "untrusted": wrap(&json!({"message": format!("engine: the command stopped on a fault: {what}")})),
+    }})
+}
+
+/// The exit code of a panic: that of the `engine` code.
+pub const PANIC_EXIT: i32 = 10;
+
 pub fn exit_code(e: &EngineError) -> i32 {
     match e {
         EngineError::Invalid(_) => 2,

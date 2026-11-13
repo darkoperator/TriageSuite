@@ -1060,6 +1060,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "getrandom 0.3.4",
+ "libc",
  "oxl-engine",
  "oxl-fixtures",
  "serde_json",

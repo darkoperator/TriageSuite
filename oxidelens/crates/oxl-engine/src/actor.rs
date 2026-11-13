@@ -41,6 +41,24 @@ impl Actor {
         }
     }
 
+    /// The analyst an operating system user name stands for: its characters
+    /// outside `[A-Za-z0-9._-]` dropped, the rest cut to 64, and `analyst`
+    /// when nothing is left. Pure, and total: the result always passes
+    /// `parse` as `label()`.
+    pub fn from_os_user(raw: &str) -> Actor {
+        let mut name: String = raw
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            .collect();
+        // Only ASCII is left, so cutting at a byte count is cutting at a
+        // character.
+        name.truncate(MAX_NAME);
+        if name.is_empty() {
+            name.push_str("analyst");
+        }
+        Actor::Analyst(name)
+    }
+
     /// The text `parse` accepts for this actor.
     pub fn label(&self) -> String {
         match self {
@@ -51,5 +69,29 @@ impl Actor {
 
     pub fn is_agent(&self) -> bool {
         matches!(self, Actor::Agent(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn os_user_sanitiser() {
+        for (raw, label) in [
+            ("", "analyst:analyst"),
+            ("!!!", "analyst:analyst"),
+            ("..", "analyst:.."),
+            ("a:b", "analyst:ab"),
+            ("Jürgen", "analyst:Jrgen"),
+            ("carlos.perez", "analyst:carlos.perez"),
+        ] {
+            let actor = Actor::from_os_user(raw);
+            assert_eq!(actor.label(), label, "{raw:?}");
+            assert_eq!(Actor::parse(&actor.label()).unwrap(), actor, "{raw:?}");
+        }
+        let actor = Actor::from_os_user(&"x".repeat(200));
+        assert_eq!(actor.label().len(), "analyst:".len() + 64);
+        assert_eq!(Actor::parse(&actor.label()).unwrap(), actor);
     }
 }

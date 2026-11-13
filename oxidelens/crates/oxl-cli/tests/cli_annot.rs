@@ -607,3 +607,93 @@ fn note_text_can_come_from_a_file() {
         2
     );
 }
+
+#[test]
+fn bad_rows_message_is_bounded() {
+    let (d, p) = loaded();
+    let mut ids: Vec<String> = (1..=10_000).map(|i| i.to_string()).collect();
+    ids[5_000] = "x7".to_string();
+    // Too long for a Windows command line, so the list comes from a file.
+    let file = d.path().join("ids.txt");
+    std::fs::write(&file, ids.join(",")).unwrap();
+    let at = format!("@{}", file.display());
+    let (code, v) = ox(&["--case", &p, "mark", "set", "--rows", &at]);
+    assert_eq!(code, 2);
+    let message = inner(&v["error"]["untrusted"])["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(message.chars().count() < 300, "{} chars", message.len());
+    assert!(message.contains("x7"), "{message}");
+}
+
+/// A FIFO named as `@file` is refused without being opened (opening one
+/// blocks until a writer appears). Unix only, so it does not run on Windows.
+#[cfg(unix)]
+#[test]
+fn at_file_that_is_a_fifo_is_invalid_promptly() {
+    let (d, p) = loaded();
+    let fifo = d.path().join("ids.fifo");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let at = format!("@{}", fifo.display());
+    // A regression would block in the open, so the child is watched, and
+    // killed when it outlives its deadline: the test fails, it does not hang.
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_oxidelens"))
+        .env_remove("OXIDELENS_CASE")
+        .env_remove("OXIDELENS_ACTOR")
+        .args(["--json", "--case", &p, "mark", "set", "--rows", &at])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the CLI blocked on a FIFO named as @file");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut out).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(v["error"]["code"], "invalid");
+}
+
+#[test]
+fn at_file_over_the_cap_is_invalid() {
+    let (d, p) = loaded();
+    let cap = 1024 * 1024;
+    let at = |n: usize| {
+        let f = d.path().join(format!("ids{n}.txt"));
+        let mut text = "1 ".repeat(n / 2 + 1);
+        text.truncate(n);
+        std::fs::write(&f, text).unwrap();
+        format!("@{}", f.display())
+    };
+    let (code, v) = ox(&["--case", &p, "mark", "set", "--rows", &at(cap + 1)]);
+    assert_eq!((code, v["error"]["code"].as_str()), (2, Some("invalid")));
+    // The cap itself is allowed: the file is read, and what it says decides.
+    let (_, v) = ox(&["--case", &p, "mark", "set", "--rows", &at(cap)]);
+    let message = v["error"]["untrusted"].as_str().unwrap_or("");
+    assert!(!message.contains("larger than"), "{v}");
+    // A directory is no file to read.
+    let dir = format!("@{}", d.path().display());
+    for args in [
+        vec!["mark", "set", "--rows", dir.as_str()],
+        vec!["note", "add", "--row", "1", "--text", dir.as_str()],
+    ] {
+        let mut full = vec!["--case", p.as_str()];
+        full.extend(args);
+        let (code, v) = ox(&full);
+        assert_eq!((code, v["error"]["code"].as_str()), (2, Some("invalid")));
+    }
+}

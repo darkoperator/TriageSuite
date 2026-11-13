@@ -65,15 +65,40 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write) -> i32
                 }
                 _ => {}
             }
-            let err = EngineError::Invalid(e.to_string().trim_end().to_string());
-            // Usage errors happen before a command is known, and the flag
-            // choosing the format may not have parsed: print compact.
-            emit(out, &envelope::err("usage", &err), true);
+            // clap's text opens with its own `error: `; the envelope says
+            // `invalid:` already, so one prefix is enough.
+            let text = help_text.trim_end();
+            let err =
+                EngineError::Invalid(text.strip_prefix("error: ").unwrap_or(text).to_string());
+            // The flag choosing the format may not have parsed, so it is read
+            // from the raw arguments, as for help.
+            emit(out, &envelope::err("usage", &err), compact);
             return envelope::exit_code(&err);
         }
     };
     let name = cli.command.name();
-    match cmd::execute(&cli) {
+    // A panic anywhere below still ends in one envelope and a code, never a
+    // bare crash that leaves stdout empty for the reader.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(debug_assertions)]
+        if std::env::var_os("OXIDELENS_TEST_PANIC").is_some() {
+            panic!("OXIDELENS_TEST_PANIC is set");
+        }
+        cmd::execute(&cli)
+    }));
+    let result = match result {
+        Ok(result) => result,
+        Err(payload) => {
+            let what = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no message".to_string());
+            emit(out, &envelope::panicked(name, &what), cli.json);
+            return envelope::PANIC_EXIT;
+        }
+    };
+    match result {
         Ok(reply) => {
             emit(
                 out,

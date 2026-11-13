@@ -26,6 +26,21 @@ pub fn ox_raw(args: &[&str]) -> (i32, String) {
     )
 }
 
+/// Run `oxidelens <args>` without `--json`; returns the exit code and raw stdout.
+pub fn ox_plain(args: &[&str]) -> (i32, String) {
+    let out = Command::cargo_bin("oxidelens")
+        .unwrap()
+        .env_remove("OXIDELENS_CASE")
+        .env_remove("OXIDELENS_ACTOR")
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap(),
+        String::from_utf8(out.stdout).unwrap(),
+    )
+}
+
 /// The JSON between the wrapper lines of an `untrusted` string.
 pub fn inner(wrapped: &Value) -> Value {
     let text = wrapped.as_str().expect("untrusted is a string");

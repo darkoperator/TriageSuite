@@ -188,7 +188,7 @@ pub struct FindArgs {
     #[arg(long)]
     pub rows: bool,
     #[command(flatten)]
-    pub page: PageArgs,
+    pub page: RowsPageArgs,
 }
 
 #[derive(Args, Debug)]
@@ -209,7 +209,7 @@ pub struct AroundArgs {
     #[arg(long)]
     pub rows: bool,
     #[command(flatten)]
-    pub page: PageArgs,
+    pub page: RowsPageArgs,
 }
 
 #[derive(Args, Debug)]
@@ -219,6 +219,28 @@ pub struct PageArgs {
     pub limit: u32,
     #[arg(long, default_value_t = 0)]
     pub offset: u64,
+}
+
+/// `--limit` and `--offset` of a command that pages only with `--rows`: given
+/// without it they would change nothing, and a silent no-op hides a mistake.
+#[derive(Args, Debug)]
+pub struct RowsPageArgs {
+    /// Rows to return, at least 1; needs --rows.
+    #[arg(long, requires = "rows", value_parser = clap::value_parser!(u32).range(1..))]
+    limit: Option<u32>,
+    /// Rows to skip; needs --rows.
+    #[arg(long, requires = "rows")]
+    offset: Option<u64>,
+}
+
+impl RowsPageArgs {
+    /// The page asked for, the defaults where a flag was left out.
+    pub fn page(&self) -> PageArgs {
+        PageArgs {
+            limit: self.limit.unwrap_or(DEFAULT_LIMIT),
+            offset: self.offset.unwrap_or(0),
+        }
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]

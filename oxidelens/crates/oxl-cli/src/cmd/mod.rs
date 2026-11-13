@@ -69,12 +69,13 @@ fn no_case() -> EngineError {
 }
 
 pub fn execute(cli: &Cli) -> Result<Reply> {
-    if let Command::Capabilities = cli.command {
-        return Ok(describe::capabilities());
-    }
     let ctx = Ctx {
         case: cli.case.clone(),
-        actor: resolve_actor(cli.actor.as_deref())?,
+        actor: match cli.command {
+            // `capabilities` needs no actor, so a bad --as does not stop it.
+            Command::Capabilities => Actor::from_os_user(""),
+            _ => resolve_actor(cli.actor.as_deref())?,
+        },
     };
     match &cli.command {
         Command::Case(CaseCmd::New { path, name }) => case::new(&ctx, path.as_deref(), name),
@@ -155,15 +156,7 @@ fn resolve_actor(given: Option<&str>) -> Result<Actor> {
         return Actor::parse(text);
     }
     let user = std::env::var(if cfg!(windows) { "USERNAME" } else { "USER" }).unwrap_or_default();
-    let mut name: String = user
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        .collect();
-    name.truncate(64);
-    if name.is_empty() {
-        return Ok(Actor::Analyst("unknown".to_string()));
-    }
-    Actor::parse(&format!("analyst:{name}"))
+    Ok(Actor::from_os_user(&user))
 }
 
 #[cfg(test)]

@@ -19,11 +19,49 @@ pub(super) const MAX_WINDOW_SECONDS: u64 = 24 * 3600;
 /// because the caller named it; a failure to read it is the caller's
 /// mistake, so it is `invalid`.
 pub(super) fn text_arg(text: &str) -> Result<String> {
-    match text.strip_prefix('@') {
-        None => Ok(text.to_string()),
-        Some(path) => std::fs::read_to_string(path)
-            .map_err(|e| EngineError::Invalid(format!("cannot read {path}: {e}"))),
+    text_arg_capped(text, MAX_FILE_ARG)
+}
+
+/// The most an `@file` argument may hold: well over any filter, note, SQL text
+/// or row list a person writes, and a bound on what a stray path can pull in.
+const MAX_FILE_ARG: u64 = 1024 * 1024;
+
+fn text_arg_capped(text: &str, cap: u64) -> Result<String> {
+    use std::io::Read;
+    let Some(path) = text.strip_prefix('@') else {
+        return Ok(text.to_string());
+    };
+    let cannot =
+        |why: &dyn std::fmt::Display| EngineError::Invalid(format!("cannot read {path}: {why}"));
+    let not_regular = || cannot(&"it is not a regular file");
+    // A cheap refusal first, without opening a path that is plainly no file.
+    if !std::fs::metadata(path).map_err(|e| cannot(&e))?.is_file() {
+        return Err(not_regular());
     }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // Opening a FIFO for reading blocks until a writer appears, and a path
+    // can become one between the check above and this open. Non-blocking, the
+    // open returns at once; it makes no difference to reading a regular file.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(|e| cannot(&e))?;
+    // The guarantee: what was opened, not what the path named a moment ago.
+    if !file.metadata().map_err(|e| cannot(&e))?.is_file() {
+        return Err(not_regular());
+    }
+    let mut bytes = Vec::new();
+    // One byte past the cap is enough to know the file is over it.
+    file.take(cap + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| cannot(&e))?;
+    if bytes.len() as u64 > cap {
+        return Err(cannot(&format!("it is larger than {cap} bytes")));
+    }
+    String::from_utf8(bytes).map_err(|_| cannot(&"it is not valid UTF-8"))
 }
 
 fn grid_query(relation: &str, args: &QueryArgs) -> Result<GridQuery> {
@@ -71,8 +109,8 @@ fn parse_sort(text: &str) -> Result<SortKey> {
         )));
     }
     let (column, descending) = match text.rsplit_once(':') {
-        Some((column, "desc")) => (column, true),
-        Some((column, "asc")) => (column, false),
+        Some((column, dir)) if dir.eq_ignore_ascii_case("desc") => (column, true),
+        Some((column, dir)) if dir.eq_ignore_ascii_case("asc") => (column, false),
         _ => (text, false),
     };
     if column.is_empty() {
@@ -297,12 +335,9 @@ pub fn find(ctx: &Ctx, args: &FindArgs) -> Result<Reply> {
     };
     let case = ctx.read_case()?;
     if args.rows {
-        let rows = oxl_engine::merged_rows(
-            &case,
-            &MergedSource::Find(req),
-            args.page.limit,
-            args.page.offset,
-        )?;
+        let page = args.page.page();
+        let rows =
+            oxl_engine::merged_rows(&case, &MergedSource::Find(req), page.limit, page.offset)?;
         return Ok(merged_reply(&rows));
     }
     let found = oxl_engine::find(&case, &req, &mut |_, _| true)?;
@@ -347,7 +382,8 @@ pub fn around(ctx: &Ctx, args: &AroundArgs) -> Result<Reply> {
             at,
             window_seconds,
         };
-        let rows = oxl_engine::merged_rows(&case, &source, args.page.limit, args.page.offset)?;
+        let page = args.page.page();
+        let rows = oxl_engine::merged_rows(&case, &source, page.limit, page.offset)?;
         return Ok(merged_reply(&rows));
     }
     let found = oxl_engine::around(&case, &host, &at, window_seconds)?;
@@ -455,6 +491,8 @@ mod tests {
         assert_eq!((k.column.as_str(), k.descending), ("EventId", true));
         let k = parse_sort("a:b").unwrap();
         assert_eq!((k.column.as_str(), k.descending), ("a:b", false));
+        let k = parse_sort("Name:DESC").unwrap();
+        assert_eq!((k.column.as_str(), k.descending), ("Name", true));
         assert!(parse_sort(":desc").is_err());
         assert!(parse_sort("").is_err());
     }

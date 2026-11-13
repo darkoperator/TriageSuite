@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{inner, ox, ox_raw};
+use common::{inner, ox, ox_plain, ox_raw};
 use serde_json::Value;
 
 fn loaded() -> (tempfile::TempDir, String) {
@@ -31,6 +31,49 @@ fn loaded() -> (tempfile::TempDir, String) {
 fn first_row(p: &str, search: &str) -> String {
     let (_, v) = ox(&["--case", p, "rows", "evtxtriage_events", "--search", search]);
     v["data"]["row_ids"][0].as_i64().unwrap().to_string()
+}
+
+/// Stand-ins in `calls` for ids a reply gives: the `note add` reply's id and
+/// the last source `sources` lists. `run_calls` replaces them just before a call.
+const NOTE_ID: &str = "{note id}";
+const SOURCE_ID: &str = "{source id}";
+
+/// The id of the newest source the case's own `sources` reply lists as not
+/// removed.
+fn newest_source(p: &str) -> i64 {
+    let (_, v) = ox(&["--case", p, "sources"]);
+    let list = inner(&v["data"]["untrusted"])["sources"].clone();
+    list.as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["removed"] == false)
+        .map(|s| s["id"].as_i64().unwrap())
+        .max()
+        .unwrap()
+}
+
+/// Run each call in `calls` in order, with the stand-in ids replaced by what
+/// the case's own replies gave. `check` sees the arguments, the exit code and
+/// the raw output.
+fn run_calls(p: &str, dir: &std::path::Path, mut check: impl FnMut(&[String], i32, &str)) {
+    let mut note_id = "1".to_string();
+    for mut args in calls(p, dir) {
+        for a in args.iter_mut() {
+            if a == NOTE_ID {
+                *a = note_id.clone();
+            } else if a == SOURCE_ID {
+                *a = newest_source(p).to_string();
+            }
+        }
+        let mut full = vec!["--case", p];
+        full.extend(args.iter().map(String::as_str));
+        let (code, raw) = ox_raw(&full);
+        if args.len() > 1 && args[..2] == ["note", "add"] && code == 0 {
+            let v: Value = serde_json::from_str(&raw).unwrap();
+            note_id = v["data"]["id"].as_i64().unwrap().to_string();
+        }
+        check(&args, code, &raw);
+    }
 }
 
 /// One representative successful call per command, in an order that works
@@ -97,8 +140,8 @@ fn calls(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
             "svc_backup on WS01 from 203.0.113.7",
         ]),
         s(&["note", "list", "--row", &r]),
-        s(&["note", "delete", "1"]),
-        s(&["source", "remove", "4"]),
+        s(&["note", "delete", NOTE_ID]),
+        s(&["source", "remove", SOURCE_ID]),
         s(&[
             "column",
             "declare",
@@ -146,19 +189,17 @@ fn every_successful_command_emits_the_envelope_keys() {
     let (d, p) = loaded();
     let known = oxl_cli::command_paths();
     let mut exercised = std::collections::BTreeSet::new();
-    for args in calls(&p, d.path()) {
-        let mut full = vec!["--case", p.as_str()];
-        full.extend(args.iter().map(String::as_str));
-        let (code, v) = ox(&full);
+    run_calls(&p, d.path(), |args, code, raw| {
+        let v: Value = serde_json::from_str(raw).unwrap();
         assert_eq!(code, 0, "{args:?} -> {v}");
         let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
         keys.sort_unstable();
         assert_eq!(keys, ["command", "data", "ok", "truncated"], "{args:?}");
-        exercised.insert(path_of(&args, &known));
+        exercised.insert(path_of(args, &known));
         assert_eq!(v["ok"], true, "{args:?}");
         let name = v["command"].as_str().unwrap().to_string();
         assert!(known.contains(&name), "{args:?} -> {name}");
-    }
+    });
     // A command added without a contract call here would pass every test in
     // this file unchecked, so the calls must cover clap's whole tree.
     let all: std::collections::BTreeSet<String> = known.into_iter().collect();
@@ -196,15 +237,12 @@ fn a_command_that_only_reads_runs_while_the_case_is_read_elsewhere() {
             "{path} is no known command"
         );
     }
-    let calls = calls(&p, d.path());
 
     // This process reads the case for as long as the commands below run.
     let _reader = oxl_engine::Case::open_read_only(std::path::Path::new(&p)).unwrap();
-    for args in calls {
-        let mut full = vec!["--case", p.as_str()];
-        full.extend(args.iter().map(String::as_str));
-        let (code, v) = ox(&full);
-        if CHANGES_THE_CASE.contains(&path_of(&args, &known).as_str()) {
+    run_calls(&p, d.path(), |args, code, raw| {
+        let v: Value = serde_json::from_str(raw).unwrap();
+        if CHANGES_THE_CASE.contains(&path_of(args, &known).as_str()) {
             // A change needs the case to itself, and says so.
             assert_eq!(
                 (code, v["error"]["code"].as_str()),
@@ -214,7 +252,7 @@ fn a_command_that_only_reads_runs_while_the_case_is_read_elsewhere() {
         } else {
             assert_eq!(code, 0, "{args:?} -> {v}");
         }
-    }
+    });
 }
 
 /// The command path an argument list runs: the known path its leading words spell.
@@ -272,14 +310,11 @@ fn assert_clean(label: &str, raw: &str) {
 fn no_evidence_text_escapes_the_wrapper() {
     let (d, p) = loaded();
     let mut checked = 0;
-    for args in calls(&p, d.path()) {
-        let mut full = vec!["--case", p.as_str()];
-        full.extend(args.iter().map(String::as_str));
-        let (code, raw) = ox_raw(&full);
+    run_calls(&p, d.path(), |args, code, raw| {
         assert_eq!(code, 0, "{args:?}: {raw}");
-        assert_clean(&args.join(" "), &raw);
+        assert_clean(&args.join(" "), raw);
         checked += 1;
-    }
+    });
     assert!(checked > 20);
 
     // The same calls as an agent: its own reasons and labels stay clean too.
@@ -323,4 +358,168 @@ fn no_evidence_text_escapes_the_wrapper() {
         assert_eq!(code, 0);
         assert_clean(&args.join(" "), &raw);
     }
+}
+
+/// The ids `note delete` and `source remove` take come from the replies that
+/// gave them, never from a count of what the call list did before.
+#[test]
+fn contract_ids_come_from_replies() {
+    let (d, p) = loaded();
+    let mut note_added = None;
+    let mut deleted = None;
+    let mut listed = None;
+    let mut removed = None;
+    run_calls(&p, d.path(), |args, code, raw| {
+        assert_eq!(code, 0, "{args:?}: {raw}");
+        let reply: Value = serde_json::from_str(raw).unwrap();
+        match (args[0].as_str(), args.get(1).map(String::as_str)) {
+            // The id the `note add` reply gave.
+            ("note", Some("add")) => note_added = reply["data"]["id"].as_i64(),
+            ("note", Some("delete")) => {
+                deleted = Some(args[2].clone());
+                // The `sources` reply taken just before the removal that
+                // follows in the call list.
+                listed = Some(newest_source(&p));
+            }
+            ("source", Some("remove")) => removed = Some(args[2].clone()),
+            _ => {}
+        }
+    });
+    let note_added = note_added.expect("a note was added");
+    assert_eq!(deleted, Some(note_added.to_string()));
+    let listed = listed.expect("sources were listed before the removal");
+    assert_eq!(removed, Some(listed.to_string()));
+}
+
+#[test]
+fn usage_errors_follow_the_compact_flag() {
+    let (code, raw) = ox_plain(&["nonsense"]);
+    assert_eq!(code, 2);
+    assert!(raw.trim_end().lines().count() > 1, "{raw}");
+    let (code, raw) = ox_plain(&["--json", "nonsense"]);
+    assert_eq!(code, 2);
+    assert_eq!(raw.trim_end().lines().count(), 1, "{raw}");
+}
+
+#[test]
+fn usage_error_message_has_one_prefix() {
+    let (code, raw) = ox_raw(&["nonsense"]);
+    assert_eq!(code, 2);
+    let v: Value = serde_json::from_str(&raw).unwrap();
+    let message = inner(&v["error"]["untrusted"])["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(message.starts_with("invalid: "), "{message}");
+    assert!(!message.contains("error: "), "{message}");
+}
+
+/// The trigger exists in debug builds only, which is what the tests run.
+#[cfg(debug_assertions)]
+#[test]
+fn a_panic_prints_an_engine_envelope() {
+    let out = assert_cmd::Command::cargo_bin("oxidelens")
+        .unwrap()
+        .env("OXIDELENS_TEST_PANIC", "1")
+        .args(["--json", "capabilities"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(10));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(stdout.trim_end().lines().count(), 1, "{stdout}");
+    let v: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["command"], "capabilities");
+    assert_eq!(v["error"]["code"], "engine");
+    assert!(inner(&v["error"]["untrusted"])["message"].is_string());
+}
+
+#[test]
+fn capabilities_lists_error_codes() {
+    let (_, v) = ox(&["capabilities"]);
+    let codes = v["data"]["error_codes"].as_array().unwrap();
+    let find = |code: &str| {
+        codes
+            .iter()
+            .find(|c| c["code"] == code)
+            .unwrap_or_else(|| panic!("{code} is not listed"))
+    };
+    for (code, exit) in [
+        ("invalid", 2),
+        ("not_found", 3),
+        ("refused", 4),
+        ("case_locked", 5),
+        ("needs_upgrade", 6),
+        ("engine", 10),
+        ("io", 10),
+        ("internal", 11),
+    ] {
+        assert_eq!(find(code)["exit"], exit, "{code}");
+    }
+    assert_eq!(codes.len(), 8);
+    let meaning = |code: &str| find(code)["meaning"].as_str().unwrap().to_string();
+    assert!(
+        meaning("invalid").contains("input"),
+        "{}",
+        meaning("invalid")
+    );
+    assert!(
+        meaning("refused").contains("rule"),
+        "{}",
+        meaning("refused")
+    );
+}
+
+#[test]
+fn capabilities_states_rows_min() {
+    let (_, v) = ox(&["capabilities"]);
+    assert_eq!(v["data"]["limits"]["rows_min"], 1);
+}
+
+fn describe(v: &Value, name: &str) -> String {
+    v["data"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap()["description"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn capabilities_semantics_wording() {
+    let (_, v) = ox(&["capabilities"]);
+    let declare = describe(&v, "column declare");
+    assert!(
+        declare
+            .contains("--semantics is required for TIMESTAMP (without it the call is `invalid`)"),
+        "{declare}"
+    );
+    let wrapper = v["data"]["untrusted_wrapper"].as_str().unwrap();
+    assert!(wrapper.contains("caller-written"), "{wrapper}");
+    assert!(wrapper.contains("[A-Za-z0-9._:-]"), "{wrapper}");
+    assert!(
+        !wrapper.contains("produced by the tool itself"),
+        "{wrapper}"
+    );
+}
+
+#[test]
+fn capabilities_states_the_one_row_and_ai_tag_rules() {
+    let (_, v) = ox(&["capabilities"]);
+    let mark = describe(&v, "mark set");
+    assert!(
+        mark.contains("An agent may mark at most 1,000 rows per call (a row id given twice counts once toward that)"),
+        "{mark}"
+    );
+    let tag = describe(&v, "tag add");
+    assert!(
+        tag.contains(
+            "A row id given twice counts once, and counts once toward an agent's per-call cap"
+        ),
+        "{tag}"
+    );
+    assert!(describe(&v, "tag add").contains("at least one character after ai:"));
 }

@@ -24,17 +24,21 @@ use serde_json::json;
 /// commas included, is `invalid`: a stray comma is a typo, and acting on the
 /// rest would hide it.
 fn parse_rows(text: &str) -> Result<Vec<i64>> {
+    // Names the entry that is wrong, cut short: the whole list can be tens of
+    // thousands of ids, and an error that repeats it is no help.
     let invalid = |what: &str| {
+        let shown: String = what.chars().take(40).collect();
+        let cut = if shown.len() < what.len() { "..." } else { "" };
         EngineError::Invalid(format!(
             "--rows is a comma-separated list of integers, or @file holding integers \
-             separated by commas, spaces or new lines; not {what:?}"
+             separated by commas, spaces or new lines; not {shown:?}{cut}"
         ))
     };
     let id = |word: &str| {
         let digits = !word.is_empty() && word.bytes().all(|b| b.is_ascii_digit());
         match word.parse::<i64>() {
             Ok(id) if digits => Ok(id),
-            _ => Err(invalid(text)),
+            _ => Err(invalid(word)),
         }
     };
     if !text.starts_with('@') {
@@ -45,7 +49,7 @@ fn parse_rows(text: &str) -> Result<Vec<i64>> {
     for entry in content.split(',') {
         let words: Vec<&str> = entry.split_ascii_whitespace().collect();
         if words.is_empty() {
-            return Err(invalid(text));
+            return Err(invalid(entry));
         }
         for word in words {
             out.push(id(word)?);

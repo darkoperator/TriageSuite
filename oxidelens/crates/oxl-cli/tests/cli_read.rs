@@ -658,3 +658,57 @@ fn read_commands_need_a_case() {
     assert_invalid(&["query", "select 1"]);
     assert_invalid(&["schema"]);
 }
+
+#[test]
+fn find_limit_without_rows_is_invalid() {
+    let (_d, p) = loaded();
+    assert_invalid(&["--case", &p, "find", "203.0.113.7", "--limit", "5"]);
+    assert_invalid(&["--case", &p, "find", "203.0.113.7", "--offset", "1"]);
+    let rows = [
+        "--case",
+        &p,
+        "find",
+        "203.0.113.7",
+        "--rows",
+        "--limit",
+        "5",
+    ];
+    assert_eq!(ox(&rows).0, 0);
+}
+
+#[test]
+fn around_limit_without_rows_is_invalid() {
+    let (_d, p) = loaded();
+    let r = svch0st_row(&p).to_string();
+    let base = [
+        "--case",
+        p.as_str(),
+        "around",
+        "--row",
+        r.as_str(),
+        "--window",
+        "5m",
+    ];
+    for extra in [["--limit", "5"], ["--offset", "1"]] {
+        let mut args = base.to_vec();
+        args.extend(extra);
+        assert_invalid(&args);
+    }
+    let mut args = base.to_vec();
+    args.extend(["--rows", "--limit", "5"]);
+    assert_eq!(ox(&args).0, 0);
+}
+
+#[test]
+fn sort_direction_ignores_case() {
+    let (_d, p) = loaded();
+    let rows = |sort: &str| {
+        let (code, v) = ox(&["--case", &p, "rows", "evtxtriage_events", "--sort", sort]);
+        assert_eq!(code, 0, "{sort}: {v}");
+        ids(&v)
+    };
+    let desc = rows("UserName:desc");
+    assert_eq!(rows("UserName:DESC"), desc);
+    assert_eq!(rows("UserName:Desc"), desc);
+    assert_eq!(rows("UserName:ASC"), rows("UserName:asc"));
+}

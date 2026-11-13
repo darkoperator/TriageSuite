@@ -21,7 +21,7 @@ tempfile.workspace = true
 # Integration tests only (files under tests/): oxl-fixtures depends on this
 # crate, and a unit test inside src/ that used it would link a second copy.
 oxl-fixtures.workspace = true
-csv = "1"
+csv.workspace = true
 tempfile.workspace = true
 triage-testkit.workspace = true
 
