@@ -224,10 +224,17 @@ describe("settings dialog", () => {
     await waitFor(() => expect(lastSent().histogram).toBe(false));
   });
 
-  it("forget_recent_cases_writes_an_empty_list_through_the_queue", async () => {
+  it("forget_recent_cases_calls_recent_clear_not_the_settings_queue", async () => {
     const { user } = await openSettings();
-    await user.click(screen.getByRole("button", { name: "Forget recent cases" }));
-    await waitFor(() => expect(lastSent().recent).toEqual([]));
+    const forget = screen.getByRole("button", { name: "Forget recent cases" });
+    await user.click(forget);
+    // The recent list is the backend's: emptied by its own command, never by a whole-settings write.
+    await waitFor(() => expect(callsOf("recent_clear")).toHaveLength(1));
+    expect(callsOf("recent_clear")[0].args ?? {}).toEqual({});
+    expect(callsOf("settings_update")).toHaveLength(0);
+    await waitFor(() => expect(forget).toBeDisabled());
+    const reply = await mockCall<{ settings: { recent: string[] } }>("settings_get");
+    expect(reply.settings.recent).toEqual([]);
   });
 
   it("focus_moves_in_returns_to_the_gear_and_escape_closes", async () => {

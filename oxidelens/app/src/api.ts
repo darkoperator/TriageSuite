@@ -220,8 +220,14 @@ export const viewImport = (path: string) => call<CommandResult["view_import"]>("
 
 // settings
 export const settingsGet = () => call<CommandResult["settings_get"]>("settings_get");
+/** Saves the whole settings object; the backend keeps its own `recent` list whatever this one holds. */
 export const settingsUpdate = (settings: Settings) =>
   call<CommandResult["settings_update"]>("settings_update", { settings } satisfies Args<"settings_update">);
+/** Forgets every recent case (the list is the backend's). */
+export const recentClear = () => call<CommandResult["recent_clear"]>("recent_clear");
+/** Forgets one recent case. */
+export const recentRemove = (path: string) =>
+  call<CommandResult["recent_remove"]>("recent_remove", { path } satisfies Args<"recent_remove">);
 
 // cancelling
 export const queryCancel = (queryIds: string[]) =>

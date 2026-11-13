@@ -164,6 +164,28 @@ describe("saved views", () => {
     expect(screen.queryByRole("region", { name: "View notices" })).toBeNull();
   });
 
+  it("a_colour_rule_naming_a_missing_column_is_kept_switched_off_and_stays_inert", async () => {
+    const ghost = { id: "r1", name: "Ghost rule", enabled: true, scope: "row", colour: "red", filter: { column: "NoSuchRule", op: "eq", value: "x", case_sensitive: false } };
+    const user = await openCase();
+    await savedView("Ghost rules", "mock_*", { colour_rules: [ghost] as ViewDoc["colour_rules"] });
+    await openDataset(user, "mock_hayabusa");
+    await user.click(await viewButton(/^Ghost rules/));
+    // The rule is kept, switched off, in what the settings hold for the relation and in the colour-rule editor.
+    await waitFor(() => expect(callsOf("settings_update").length).toBeGreaterThan(0));
+    const sent = callsOf("settings_update").at(-1)!.args as { settings: Settings };
+    expect(sent.settings.colour_rules.mock_hayabusa).toEqual([{ ...ghost, enabled: false }]);
+    expect(screen.getByRole("button", { name: /^Colours/ })).toHaveTextContent("Colours 0");
+    await user.click(screen.getByRole("button", { name: /^Colours/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Colour rules" });
+    const tick = within(dialog).getByRole("checkbox", { name: "Ghost rule enabled" });
+    expect(tick).not.toBeChecked();
+    // Switched back on while the column is still missing, it tints nothing: the engine skips it and says why.
+    await user.click(tick);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/skipped: .*NoSuchRule/);
+    const pages = callsOf("grid_page").map((c) => c.args as { options: { rules: { id: string; enabled: boolean }[] } });
+    expect(pages.at(-1)!.options.rules).toEqual([expect.objectContaining({ id: "r1", enabled: true })]);
+  });
+
   it("apply_writes_layout_and_colour_rules_through_the_settings_queue", async () => {
     const layout = { order: ["Channel"], widths: {}, hidden: [], pinned: [] };
     const rules = [{ id: "r1", name: "Red", enabled: true, scope: "row", colour: "red", filter: { column: "Channel", op: "eq", value: "Sysmon", case_sensitive: false } }];
@@ -176,6 +198,42 @@ describe("saved views", () => {
     expect(last.settings.layouts.mock_events).toEqual(layout);
     expect(last.settings.colour_rules.mock_events).toEqual(rules);
     expect(await screen.findByRole("region", { name: "View notices" })).toHaveTextContent(/saved for mock_events on this machine/);
+  });
+
+  it("a_layout_applied_in_one_tab_reaches_another_tab_of_the_relation_and_its_next_edit_builds_on_it", async () => {
+    // Two tabs of mock_events: the dataset tab, and a session's tab scoped to a host.
+    overrideCommand("sessions", () => [{ source_id: 1, name: "Sess", unmatched: 0, relations: [{ relation: "mock_events", host: "WS01" }] }]);
+    const layout = { order: ["Channel", "EventId"], widths: { Channel: 300 }, hidden: [], pinned: [] };
+    const user = await openCase();
+    await savedView("Styled", "mock_*", { layout });
+    await openDataset(user, "mock_events");
+    const heads = () => screen.getAllByRole("columnheader").map((h) => h.querySelector(".col-name")?.textContent).filter(Boolean);
+    expect(heads()[0]).not.toBe("Channel");
+    await user.click(pane().getByRole("button", { name: /^Sess/ }));
+    await screen.findByRole("tab", { name: "Sess · mock_events", selected: true });
+    await waitFor(() => expect(heads().length).toBeGreaterThan(1));
+
+    // The view is applied in the session's tab and its layout written for the relation.
+    await user.click(await viewButton(/^Styled/));
+    await waitFor(() => expect(heads()[0]).toBe("Channel"));
+    await waitFor(() => expect((callsOf("settings_update").at(-1)!.args as { settings: Settings }).settings.layouts.mock_events).toEqual(layout));
+
+    // The dataset tab shows it too.
+    await user.click(screen.getByRole("tab", { name: "mock_events" }));
+    await waitFor(() => expect(heads().slice(0, 2)).toEqual(["Channel", "EventId"]));
+    const channel = screen.getAllByRole("columnheader").find((h) => h.querySelector(".col-name")?.textContent === "Channel")!;
+    expect(parseInt(channel.style.width, 10)).toBe(300);
+
+    // Its next edit is made on top of that layout, not the one it opened with.
+    const writes = callsOf("settings_update").length;
+    const grip = within(screen.getAllByRole("columnheader").find((h) => h.querySelector(".col-name")?.textContent === "EventId")!).getByRole("separator");
+    fireEvent.mouseDown(grip, { clientX: 100 });
+    fireEvent.mouseMove(document, { clientX: 150 });
+    fireEvent.mouseUp(document, { clientX: 150 });
+    await waitFor(() => expect(callsOf("settings_update").length).toBeGreaterThan(writes));
+    const saved = (callsOf("settings_update").at(-1)!.args as { settings: Settings }).settings.layouts.mock_events;
+    expect(saved.order.slice(0, 2)).toEqual(["Channel", "EventId"]);
+    expect(saved.widths).toMatchObject({ Channel: 300, EventId: 150 });
   });
 
   it("pattern_views_list_for_matching_relations", async () => {

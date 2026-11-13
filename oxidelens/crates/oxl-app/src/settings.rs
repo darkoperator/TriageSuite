@@ -68,7 +68,10 @@ pub struct Settings {
     /// The name the app's changes are recorded under; the operating
     /// system's user when unset. 1 to 64 characters of `[A-Za-z0-9._-]`.
     pub analyst: Option<String>,
-    /// Case file paths, newest first, at most `MAX_RECENT`.
+    /// Case file paths, newest first, at most `MAX_RECENT`. The backend's
+    /// alone: opening a case adds one, `recent_remove` forgets one,
+    /// `recent_clear` empties the list, and `settings_update` keeps the
+    /// stored list whatever it is sent.
     pub recent: Vec<String>,
     /// Column layouts by dataset (relation) name.
     pub layouts: BTreeMap<String, ColumnLayout>,
@@ -103,8 +106,9 @@ pub struct DamagedSettings {
     pub reason: String,
 }
 
-/// What `settings_get` and `settings_update` answer: the settings, and the
-/// damaged file the defaults replaced, until a settings update succeeds.
+/// What `settings_get`, `settings_update`, `recent_clear` and
+/// `recent_remove` answer: the settings, and the damaged file the defaults
+/// replaced, until a settings update succeeds.
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 pub struct SettingsReply {
     pub settings: Settings,
@@ -177,13 +181,24 @@ impl Settings {
         if self.colour_rules.values().any(|r| r.len() > MAX_RULES) {
             return invalid(format!("at most {MAX_RULES} colour rules per dataset"));
         }
-        let size = serde_json::to_vec(self).map_or(usize::MAX, |b| b.len());
-        if size > MAX_SETTINGS_BYTES {
-            return invalid(format!(
-                "the settings are {size} bytes; the most is {MAX_SETTINGS_BYTES}"
-            ));
-        }
         Ok(())
+    }
+
+    /// The bytes the settings file holds for these settings, once `check`
+    /// accepts them and they are within `MAX_SETTINGS_BYTES`. The cap is
+    /// checked on exactly what is written, so a file a save wrote is never
+    /// one the next start refuses as too large.
+    fn file_bytes(&self) -> Result<Vec<u8>, CmdError> {
+        self.check()?;
+        let bytes = serde_json::to_vec_pretty(self)
+            .map_err(|e| CmdError::new("internal", format!("settings to JSON: {e}")))?;
+        if bytes.len() > MAX_SETTINGS_BYTES {
+            return Err(CmdError::invalid(format!(
+                "the settings are {} bytes; the most is {MAX_SETTINGS_BYTES}",
+                bytes.len()
+            )));
+        }
+        Ok(bytes)
     }
 
     /// Settings read from a file brought within what `check` accepts: each
@@ -314,9 +329,9 @@ impl SettingsStore {
     /// Check `settings`, write them, and make them current. On a failed
     /// write the current settings and the file are both unchanged.
     pub fn save(&self, settings: &Settings) -> Result<Settings, CmdError> {
-        settings.check()?;
+        let bytes = settings.file_bytes()?;
         let mut current = self.lock();
-        self.write(settings)?;
+        self.write(&bytes)?;
         *current = settings.clone();
         // The analyst has now chosen settings over the defaults that
         // replaced the damaged file.
@@ -324,24 +339,41 @@ impl SettingsStore {
         Ok(settings.clone())
     }
 
+    /// `save`, but with the stored `recent` list in place of the one in
+    /// `settings`: the recent cases are the backend's (a case opened adds
+    /// one, `recent_clear` empties them), so a whole-settings save from the
+    /// window that was in flight when a case opened cannot put back an older
+    /// list. The stored list is read under the same lock the save holds.
+    pub fn save_keeping_recent(&self, settings: &Settings) -> Result<Settings, CmdError> {
+        let mut current = self.lock();
+        let next = Settings {
+            recent: current.recent.clone(),
+            ..settings.clone()
+        };
+        let bytes = next.file_bytes()?;
+        self.write(&bytes)?;
+        *current = next.clone();
+        *self.damaged.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        Ok(next)
+    }
+
     /// Change the current settings with `change` and save the result.
     pub fn update(&self, change: impl FnOnce(&mut Settings)) -> Result<Settings, CmdError> {
         let mut current = self.lock();
         let mut next = current.clone();
         change(&mut next);
-        next.check()?;
-        self.write(&next)?;
+        let bytes = next.file_bytes()?;
+        self.write(&bytes)?;
         *current = next.clone();
         Ok(next)
     }
 
-    fn write(&self, settings: &Settings) -> Result<(), CmdError> {
+    /// Write `text` (from `Settings::file_bytes`) as the settings file.
+    fn write(&self, text: &[u8]) -> Result<(), CmdError> {
         let Some(dir) = &self.dir else {
             return Ok(());
         };
         let io = |e: std::io::Error| CmdError::new("io", format!("saving the settings: {e}"));
-        let text = serde_json::to_vec_pretty(settings)
-            .map_err(|e| CmdError::new("internal", format!("settings to JSON: {e}")))?;
         std::fs::create_dir_all(dir).map_err(io)?;
         let n = self.seq.fetch_add(1, Ordering::SeqCst);
         let partial = dir.join(format!(
@@ -355,7 +387,7 @@ impl SettingsStore {
                 .write(true)
                 .create_new(true)
                 .open(&partial)?;
-            f.write_all(&text)?;
+            f.write_all(text)?;
             f.sync_all()?;
             drop(f);
             std::fs::rename(&partial, dir.join(SETTINGS_FILE))
@@ -551,6 +583,34 @@ mod tests {
     }
 
     #[test]
+    fn size_cap_is_checked_on_the_bytes_written() {
+        // Compact JSON under the cap, the pretty JSON the file holds over it:
+        // a save that succeeded here would be called damaged at next start.
+        let mut s = Settings::default();
+        s.layouts.insert(
+            "evtxtriage_events".into(),
+            ColumnLayout {
+                order: vec![String::new(); 300_000],
+                widths: BTreeMap::new(),
+                hidden: vec![],
+                pinned: vec![],
+            },
+        );
+        let compact = serde_json::to_vec(&s).unwrap().len();
+        let pretty = serde_json::to_vec_pretty(&s).unwrap().len();
+        assert!(compact < MAX_SETTINGS_BYTES, "{compact}");
+        assert!(pretty > MAX_SETTINGS_BYTES, "{pretty}");
+
+        let d = tempfile::tempdir().unwrap();
+        let (store, _) = SettingsStore::load(d.path());
+        // (No `unwrap_err`: its panic would print 300,000 names.)
+        assert!(matches!(store.save(&s), Err(e) if e.code == "invalid"));
+        assert!(matches!(store.update(|c| *c = s.clone()), Err(e) if e.code == "invalid"));
+        assert!(files(d.path()).is_empty(), "{:?}", files(d.path()));
+        assert!(store.get() == Settings::default());
+    }
+
+    #[test]
     fn recent_is_newest_first_and_capped() {
         let mut s = Settings::default();
         for n in 0..12 {
@@ -567,13 +627,13 @@ mod tests {
     fn actor_from_settings_or_os() {
         let mut s = Settings::default();
         assert_eq!(
-            app_actor(&s, Some("Carlos Perez")),
-            Actor::Analyst("CarlosPerez".into())
+            app_actor(&s, Some("Jane Doe")),
+            Actor::Analyst("JaneDoe".into())
         );
         assert_eq!(app_actor(&s, None), Actor::Analyst("analyst".into()));
         s.analyst = Some("jdoe".into());
         assert_eq!(
-            app_actor(&s, Some("Carlos Perez")),
+            app_actor(&s, Some("Jane Doe")),
             Actor::Analyst("jdoe".into())
         );
         // A name no actor can carry is not used.

@@ -24,7 +24,10 @@ histogram: boolean,
  */
 analyst: string | null, 
 /**
- * Case file paths, newest first, at most `MAX_RECENT`.
+ * Case file paths, newest first, at most `MAX_RECENT`. The backend's
+ * alone: opening a case adds one, `recent_remove` forgets one,
+ * `recent_clear` empties the list, and `settings_update` keeps the
+ * stored list whatever it is sent.
  */
 recent: Array<string>, 
 /**

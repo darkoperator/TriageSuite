@@ -152,6 +152,8 @@ pub struct AppliedView {
     pub state: GridState,
     pub group_by: Vec<String>,
     pub layout: Option<ColumnLayout>,
+    /// The view's colour rules, in order; switched off where they name a
+    /// missing column.
     pub colour_rules: Vec<ColourRule>,
     pub warnings: Vec<ViewWarning>,
 }
@@ -369,9 +371,10 @@ pub fn delete_view(case: &mut Case, id: i64, actor: &Actor) -> Result<()> {
     Ok(())
 }
 
-/// View `id` as it applies to `relation`. A chip whose filter names a column
-/// the relation lacks comes back switched off; a sort key, group column or
-/// colour rule naming one is dropped; layout entries naming one are dropped
+/// View `id` as it applies to `relation`. A chip or colour rule whose filter
+/// names a column the relation lacks comes back switched off (kept, so the
+/// analyst sees it); a sort key or group column naming one is dropped;
+/// layout entries naming one are dropped
 /// and counted in one `layout` warning; a host the case lacks is dropped, and
 /// every host when the relation has no host column. Each has a warning.
 /// `NotFound` for a view that is unknown or deleted, and for an unknown
@@ -432,19 +435,21 @@ pub fn apply_view(case: &Case, id: i64, relation: &str) -> Result<AppliedView> {
     });
 
     let mut colour_rules = doc.colour_rules;
-    colour_rules.retain(|rule| {
+    for rule in &mut colour_rules {
         let mut missing = Vec::new();
         filter_columns(&rule.filter, &mut missing);
         missing.retain(|c| !has(c));
-        for column in &missing {
+        if !missing.is_empty() {
+            rule.enabled = false;
+        }
+        for column in missing {
             warnings.push(ViewWarning {
                 part: format!("colour_rule:{}", rule.id),
-                name: column.clone(),
-                message: format!("{}; the colour rule is dropped", lacks(column)),
+                message: format!("{}; the colour rule is switched off", lacks(&column)),
+                name: column,
             });
         }
-        missing.is_empty()
-    });
+    }
 
     let mut hosts = Vec::new();
     for host in doc.hosts {

@@ -75,6 +75,8 @@ export const COMMANDS = [
   "view_import",
   "settings_get",
   "settings_update",
+  "recent_clear",
+  "recent_remove",
   "query_cancel",
 ] as const;
 
@@ -123,6 +125,8 @@ export type CommandArgs = {
   view_import: { path: string };
   settings_get: Record<string, never>;
   settings_update: { settings: Settings };
+  recent_clear: Record<string, never>;
+  recent_remove: { path: string };
   query_cancel: { queryIds: Array<string> };
 };
 
@@ -168,6 +172,8 @@ export type CommandResult = {
   view_import: SavedView;
   settings_get: SettingsReply;
   settings_update: SettingsReply;
+  recent_clear: SettingsReply;
+  recent_remove: SettingsReply;
   query_cancel: null;
 };
 

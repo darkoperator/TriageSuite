@@ -391,6 +391,59 @@ fn settings_update_checks_and_saves() {
 }
 
 #[test]
+fn recent_is_the_backends_and_recent_clear_empties_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (store, _) = oxl_app::settings::SettingsStore::load(d.path());
+    let state = oxl_app::state::AppState::new(store, Arc::new(common::Recorder::default()));
+    let stored = vec!["C:\\cases\\ws01.duckdb".to_string()];
+    state.settings.update(|s| s.add_recent(&stored[0])).unwrap();
+
+    // The window's whole-settings save carries an older (or any other)
+    // list: it is ignored, and the stored one is kept.
+    let mut s = cmd::settings::settings_get(&state).unwrap().settings;
+    s.font_size = 14;
+    s.recent = vec!["C:\\cases\\older.duckdb".to_string()];
+    let saved = cmd::settings::settings_update(&state, s).unwrap();
+    assert_eq!(saved.settings.font_size, 14);
+    assert_eq!(saved.settings.recent, stored);
+    s = cmd::settings::settings_get(&state).unwrap().settings;
+    s.recent.clear();
+    assert_eq!(
+        cmd::settings::settings_update(&state, s)
+            .unwrap()
+            .settings
+            .recent,
+        stored
+    );
+    let (reread, _) = oxl_app::settings::SettingsStore::load(d.path());
+    assert_eq!(reread.get().recent, stored);
+    assert_eq!(reread.get().font_size, 14);
+
+    // `recent_remove` forgets one case; a path not in the list changes
+    // nothing.
+    state
+        .settings
+        .update(|s| s.add_recent("C:\\cases\\srv01.duckdb"))
+        .unwrap();
+    let removed = cmd::settings::recent_remove(&state, "C:\\cases\\srv01.duckdb").unwrap();
+    assert_eq!(removed.settings.recent, stored);
+    let removed = cmd::settings::recent_remove(&state, "C:\\cases\\gone.duckdb").unwrap();
+    assert_eq!(removed.settings.recent, stored);
+
+    // `recent_clear` is how the list is emptied; the rest is unchanged.
+    let cleared = cmd::settings::recent_clear(&state).unwrap();
+    assert!(cleared.settings.recent.is_empty());
+    assert_eq!(cleared.settings.font_size, 14);
+    assert!(cmd::settings::settings_get(&state)
+        .unwrap()
+        .settings
+        .recent
+        .is_empty());
+    let (reread, _) = oxl_app::settings::SettingsStore::load(d.path());
+    assert!(reread.get().recent.is_empty());
+}
+
+#[test]
 fn a_damaged_settings_file_is_announced_once() {
     let d = tempfile::tempdir().unwrap();
     std::fs::write(d.path().join("settings.json"), b"{damaged").unwrap();

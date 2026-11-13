@@ -421,8 +421,15 @@ fn missing_columns_disable_with_warnings() {
         .collect();
     assert_eq!(sort_columns, ["TimeCreated"]);
     assert!(applied.group_by.is_empty());
-    let rule_ids: Vec<&str> = applied.colour_rules.iter().map(|r| r.id.as_str()).collect();
-    assert_eq!(rule_ids, ["ok"]);
+    // A colour rule naming a missing column stays, switched off (the spec:
+    // the affected clause stays, inactive, with a warning).
+    let rules: Vec<(&str, bool)> = applied
+        .colour_rules
+        .iter()
+        .map(|r| (r.id.as_str(), r.enabled))
+        .collect();
+    assert_eq!(rules, [("lvl", false), ("ok", true)]);
+    assert_eq!(applied.colour_rules[0].filter, doc.colour_rules[0].filter);
 
     let warnings: Vec<(&str, &str)> = applied
         .warnings
@@ -439,6 +446,11 @@ fn missing_columns_disable_with_warnings() {
         ]
     );
     assert!(applied.warnings.iter().all(|w| !w.message.is_empty()));
+    assert!(
+        applied.warnings[3].message.contains("switched off"),
+        "{:?}",
+        applied.warnings[3]
+    );
     // The disabled chip is not applied: the Channel chip alone.
     assert_eq!(count_view(&case, &applied.state).unwrap().rows, 8);
 

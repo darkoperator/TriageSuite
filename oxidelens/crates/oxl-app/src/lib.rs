@@ -75,5 +75,7 @@ handlers![
     [cmd::views::commands] view_import,
     [cmd::settings::commands] settings_get,
     [cmd::settings::commands] settings_update,
+    [cmd::settings::commands] recent_clear,
+    [cmd::settings::commands] recent_remove,
     [cmd::commands] query_cancel,
 ];

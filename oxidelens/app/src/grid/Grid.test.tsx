@@ -367,6 +367,55 @@ describe("grid", () => {
     });
   });
 
+  it("a_case_change_that_rereads_the_rows_clears_the_selection_so_copy_takes_nothing_stale", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    await user.click(cellOf(rowOf(2), "Channel"));
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(5), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(statusText(status)).toContain(" · 4 selected · "));
+    // A load moves rows: from now on the same offsets hold other evidence.
+    overrideCommand("grid_page", async (args) => {
+      const page = (await mockCall("grid_page", args)) as GridPage;
+      const i = page.columns.findIndex((c) => c.name === "RecordId");
+      page.cells = page.cells.map((row) => row.map((cell, k) => (k === i ? { ...cell!, text: `moved-${cell?.text}` } : cell)));
+      return page;
+    });
+    rerender(
+      <ShellCtx.Provider value={{ ...ctx, change: { generation: 1, kinds: ["sources"] } }}>
+        <Grid tab={events} active scrollOffset={0} onScroll={() => {}} />
+      </ShellCtx.Provider>,
+    );
+    await waitFor(() => expect(cellOf(rowOf(2), "RecordId").textContent).toMatch(/^moved-/));
+    // Nothing the analyst picked survives onto the moved rows: no row is selected, the status says so, and Copy rows
+    // (Ctrl+Shift+C, or the cell menu) copies nothing.
+    expect(dataRows().filter((r) => r.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    await waitFor(() => expect(statusText(status)).toContain(" · 0 selected · "));
+    screen.getByRole("grid").focus();
+    await user.keyboard("{Control>}{Shift>}c{/Shift}{/Control}");
+    await act(() => new Promise((r) => setTimeout(r, 100)));
+    expect(copy.writeClipboard).not.toHaveBeenCalled();
+    // Shift-click has no anchor left to extend from: it selects the one row clicked.
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(7), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(statusText(status)).toContain(" · 1 selected · "));
+  });
+
+  it("a_views_only_case_change_keeps_the_selection", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    await user.click(cellOf(rowOf(2), "Channel"));
+    await waitFor(() => expect(statusText(status)).toContain(" · 1 selected · "));
+    rerender(
+      <ShellCtx.Provider value={{ ...ctx, change: { generation: 1, kinds: ["views"] } }}>
+        <Grid tab={events} active scrollOffset={0} onScroll={() => {}} />
+      </ShellCtx.Provider>,
+    );
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(rowOf(2)).toHaveAttribute("aria-selected", "true");
+    expect(statusText(status)).toContain(" · 1 selected · ");
+  });
+
   it("arrows_move_the_cell_focus_and_the_cell_menu_copies", async () => {
     const { user } = await mount();
     await user.click(cellOf(rowOf(0), "Channel"));

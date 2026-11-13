@@ -12,4 +12,9 @@ export type AppliedView = {
  * The chips (switched off where they name a missing column), search,
  * hosts and sort, over the dataset; every column shown.
  */
-state: GridState, group_by: Array<string>, layout: ColumnLayout | null, colour_rules: Array<ColourRule>, warnings: Array<ViewWarning>, };
+state: GridState, group_by: Array<string>, layout: ColumnLayout | null, 
+/**
+ * The view's colour rules, in order; switched off where they name a
+ * missing column.
+ */
+colour_rules: Array<ColourRule>, warnings: Array<ViewWarning>, };

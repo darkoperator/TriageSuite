@@ -53,14 +53,44 @@ describe("welcome", () => {
     expect(screen.getByRole("button", { name: "New case…" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open case…" })).toBeInTheDocument();
 
-    // Removing a recent case saves the whole settings object without it.
+    // Removing a recent case asks the backend, which owns the list; no whole-settings write carries it.
     await user.click(screen.getByRole("button", { name: /Remove .*acme\.case\.duckdb/ }));
-    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(1));
-    const sent = (callsOf("settings_update")[0].args as { settings: { recent: string[]; theme: string } }).settings;
-    expect(sent.recent).toEqual([]);
-    expect(sent.theme).toBe("dark");
-    expect(screen.queryByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ })).toBeNull();
+    await waitFor(() => expect(callsOf("recent_remove")).toHaveLength(1));
+    expect(callsOf("recent_remove")[0].args).toEqual({ path: "/cases/acme.case.duckdb" });
+    expect(callsOf("settings_update")).toHaveLength(0);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ })).toBeNull());
     expect(open).not.toBeInTheDocument();
+  });
+
+  it("a_settings_write_in_flight_when_a_case_opens_keeps_the_new_recent_case", async () => {
+    vi.mocked(dialogs.pickCaseFile).mockResolvedValue("/cases/second.duckdb");
+    await openRecent();
+    // A pane toggle's write is held until the next case has opened and put itself first in `recent`.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("settings_update", async (a) => {
+      await gate;
+      return mockCall("settings_update", a as Record<string, unknown>);
+    });
+    fireEvent.keyDown(document.body, { key: "[", ctrlKey: true });
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(1));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Close case" }));
+    await user.click(await screen.findByRole("button", { name: "Open case…" }));
+    await screen.findByRole("tab", { name: "Overview" });
+    release();
+    await waitFor(async () => {
+      const reply = await mockCall<{ settings: { left_pane: string } }>("settings_get");
+      expect(reply.settings.left_pane).toBe("rail");
+    });
+    // The held write carried the older list; the backend kept its own, and the window shows it.
+    const reply = await mockCall<{ settings: { recent: string[] } }>("settings_get");
+    expect(reply.settings.recent).toEqual(["/cases/second.duckdb", "/cases/acme.case.duckdb"]);
+    await user.click(screen.getByRole("button", { name: "Close case" }));
+    const list = await screen.findByRole("list");
+    expect(within(list).getAllByRole("button", { name: /^\/cases\// }).map((b) => b.textContent)).toEqual([
+      "/cases/second.duckdb", "/cases/acme.case.duckdb",
+    ]);
   });
 
   it("opens a recent case, and a new case through the save dialog with a name asked for", async () => {

@@ -3,8 +3,9 @@ import type { DamagedSettings } from "./DamagedSettings";
 import type { Settings } from "./Settings";
 
 /**
- * What `settings_get` and `settings_update` answer: the settings, and the
- * damaged file the defaults replaced, until a settings update succeeds.
+ * What `settings_get`, `settings_update`, `recent_clear` and
+ * `recent_remove` answer: the settings, and the damaged file the defaults
+ * replaced, until a settings update succeeds.
  */
 export type SettingsReply = { settings: Settings, damaged: DamagedSettings | null, 
 /**

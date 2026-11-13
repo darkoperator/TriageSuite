@@ -207,10 +207,27 @@ The **analyst name** is what the app's changes are recorded under
 colour rules are keyed by dataset (relation) name, so they follow a dataset
 from case to case on one machine. Applying a saved view that carries a layout
 or colour rules writes them into the settings for that dataset: applying a
-view is the analyst choosing them.
+view is the analyst choosing them. A colour rule of the view that names a
+column the dataset lacks is kept, switched off, with a warning (switched back
+on, the engine skips it and says why). Every open tab of a dataset follows
+its layout in the settings: when it changes to one a tab is not showing (a
+view applied, or a column edited, in another tab), the tab takes it, and its
+next edit builds on it. A tab's own edit is saved 250 ms after the last one;
+until then it keeps what it shows, and that save is the latest write.
+
+The **recent cases** are the backend's alone. Opening or making a case puts
+it first; `recent_remove` forgets one (the *×* beside it on the welcome
+screen) and `recent_clear` forgets them all (*Forget recent cases* in the
+settings dialog). The window's other settings changes go through one queue
+that sends the whole settings object with `settings_update`, and that command
+keeps the stored `recent` whatever list it is sent, so a save that was on its
+way when a case opened cannot put back an older list. The queue's patch type
+(`SettingsPatch`) has no `recent` field.
 
 The settings file is written whole: a save writes a `.partial` file beside it
-and renames it over the old one. A file that cannot be read is moved aside to
+and renames it over the old one. The 1 MiB cap a start reads is checked on
+exactly the bytes a save writes (the file is pretty-printed JSON), so a save
+the app accepted is never one the next start refuses as too large. A file that cannot be read is moved aside to
 `settings.json.damaged-<yyyyMMddHHmmss>` and the defaults are used; the
 window hears `settings-damaged`, and every settings reply names the damaged
 file until a save succeeds.

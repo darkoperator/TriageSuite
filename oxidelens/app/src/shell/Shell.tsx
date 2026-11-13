@@ -3,8 +3,8 @@
 // keeps: the settings, the case summary, the open tabs, the job line. Screens inside it read `useShell()`.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  caseClose, caseSummary, isCmdError, loadFile, loadRun, onJob, onSettingsDamaged, queryCancel, sessions as readSessions,
-  settingsGet, settingsUpdate,
+  caseClose, caseSummary, isCmdError, loadFile, loadRun, onJob, onSettingsDamaged, queryCancel, recentClear, recentRemove,
+  sessions as readSessions, settingsGet, settingsUpdate,
 } from "../api";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
 import { sessionTabs } from "../views/sessions";
@@ -15,7 +15,7 @@ import type { Session } from "../contract/generated/Session";
 import type { Settings as SettingsData } from "../contract/generated/Settings";
 import type { SettingsReply } from "../contract/generated/SettingsReply";
 import { pickCsvFile, pickRunFolder } from "../dialogs";
-import Settings from "../settings/Settings";
+import Settings, { type SettingsPatch } from "../settings/Settings";
 import { displaySafe } from "../text";
 import { applyAppearance } from "../theme/appearance";
 import Welcome from "../welcome/Welcome";
@@ -101,7 +101,7 @@ export default function Shell() {
   // The queue is an ordered list. Consecutive plain changes coalesce; an awaited save (`saveSettings`) is its own entry,
   // written alone and in order, so its refusal drops only its own patch and its waiter gets its own write's outcome.
   type Waiter = { resolve(r: SettingsReply): void; reject(e: unknown): void };
-  type Entry = { patch: Partial<SettingsData>; waiter: Waiter | null };
+  type Entry = { patch: SettingsPatch; waiter: Waiter | null };
   const queued = useRef<Entry[]>([]);
   const writing = useRef(false);
   const [actor, setActor] = useState("");
@@ -132,7 +132,7 @@ export default function Shell() {
 
   /** Saves a change to the settings, shown at once; the file follows through the queue. */
   const enqueue = useCallback(
-    (patch: Partial<SettingsData>, waiter: Waiter | null) => {
+    (patch: SettingsPatch, waiter: Waiter | null) => {
       const base = settingsRef.current;
       if (!base) return false;
       const last = queued.current[queued.current.length - 1];
@@ -144,14 +144,14 @@ export default function Shell() {
     },
     [applySettings, pump],
   );
-  const updateSettings = useCallback((patch: Partial<SettingsData>) => void enqueue(patch, null), [enqueue]);
+  const updateSettings = useCallback((patch: SettingsPatch) => void enqueue(patch, null), [enqueue]);
 
   /**
    * Like `updateSettings`, for a change whose refusal the caller shows: resolves with the reply of the write that carried
    * the patch, rejects with that write's error. It rides the same queue, so no older object is written last.
    */
   const saveSettings = useCallback(
-    (patch: Partial<SettingsData>) =>
+    (patch: SettingsPatch) =>
       new Promise<SettingsReply>((resolve, reject) => {
         if (!enqueue(patch, { resolve, reject })) reject({ code: "internal", message: "the settings are not loaded yet" });
       }),
@@ -185,6 +185,26 @@ export default function Shell() {
   );
 
   const setHistogram = useCallback((on: boolean) => updateSettings({ histogram: on }), [updateSettings]);
+
+  /**
+   * Forgets one recent case or all of them through the backend's own command, outside the queue. The answer's list is
+   * taken into both the confirmed and the shown settings; a queued write in flight answers the same list, since the
+   * backend keeps its own whatever a write sends.
+   */
+  const forgetRecent = useCallback(
+    (path: string | null) => {
+      (path === null ? recentClear() : recentRemove(path)).then(
+        (r) => {
+          const recent = r.settings.recent;
+          if (confirmed.current) confirmed.current = { ...confirmed.current, recent };
+          if (settingsRef.current) applySettings({ ...settingsRef.current, recent });
+          setActor(r.actor);
+        },
+        reportError,
+      );
+    },
+    [applySettings, reportError],
+  );
 
   /** Settings read from the backend: the new confirmed state, shown unless a change is still on its way. */
   const adoptSettings = useCallback(
@@ -374,7 +394,7 @@ export default function Shell() {
         <Welcome
           recent={settings?.recent ?? []}
           onOpened={enterCase}
-          onRemoveRecent={(p) => updateSettings({ recent: (settingsRef.current?.recent ?? []).filter((r) => r !== p) })}
+          onRemoveRecent={(p) => forgetRecent(p)}
           onError={reportError}
         />
         {error !== null && (
@@ -405,7 +425,10 @@ export default function Shell() {
           onSettings={setSettingsOpen}
         />
         {settingsOpen !== null && (
-          <Settings settings={settings!} actor={actor} update={updateSettings} save={saveSettings} returnTo={settingsOpen} onClose={() => setSettingsOpen(null)} />
+          <Settings
+            settings={settings!} actor={actor} update={updateSettings} save={saveSettings} onForgetRecent={() => forgetRecent(null)} returnTo={settingsOpen}
+            onClose={() => setSettingsOpen(null)}
+          />
         )}
         <div className="shell-main">
           {left === "open" ? (

@@ -81,6 +81,8 @@ pub const COMMANDS: &[&str] = &[
     "view_import",
     "settings_get",
     "settings_update",
+    "recent_clear",
+    "recent_remove",
     "query_cancel",
 ];
 
@@ -304,6 +306,8 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         cmd!(c, view_import(path: String) -> SavedView),
         cmd!(c, settings_get() -> SettingsReply),
         cmd!(c, settings_update(settings: Settings) -> SettingsReply),
+        cmd!(c, recent_clear() -> SettingsReply),
+        cmd!(c, recent_remove(path: String) -> SettingsReply),
         cmd!(c, query_cancel(queryIds: Vec<String>) -> ()),
     ]
 }

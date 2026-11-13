@@ -1,6 +1,7 @@
 // The settings dialog, opened from the top bar's gear: theme, cell font size, analyst name (and the actor label the
 // app records changes under), the histogram switch and *Forget recent cases*. Every write goes through the shell's one
 // settings queue: `update` for plain changes, `save` for the analyst name, whose refusal it shows beside the field.
+// The recent cases are the exception: the list is the backend's, and *Forget recent cases* asks it (`recent_clear`).
 import { useRef, useState, type KeyboardEvent } from "react";
 import { isCmdError } from "../api";
 import type { Settings as SettingsData } from "../contract/generated/Settings";
@@ -11,14 +12,22 @@ import "./settings.css";
 
 export const FONT_SIZE_CHOICES = [10, 11, 12, 13, 14, 15, 16];
 
+/**
+ * A change the settings queue writes. Never `recent`: that list is the backend's (opening a case adds to it,
+ * `recent_remove` and `recent_clear` take from it), and `settings_update` keeps its own whatever it is sent.
+ */
+export type SettingsPatch = Partial<Omit<SettingsData, "recent">>;
+
 export default function Settings({
-  settings, actor, update, save, onClose, returnTo,
+  settings, actor, update, save, onForgetRecent, onClose, returnTo,
 }: {
   settings: SettingsData;
   /** The effective actor label the engine records changes under. */
   actor: string;
-  update(patch: Partial<SettingsData>): void;
-  save(patch: Partial<SettingsData>): Promise<SettingsReply>;
+  update(patch: SettingsPatch): void;
+  save(patch: SettingsPatch): Promise<SettingsReply>;
+  /** Empties the recent cases through the backend. */
+  onForgetRecent(): void;
   onClose(): void;
   returnTo: HTMLElement | null;
 }) {
@@ -101,7 +110,7 @@ export default function Settings({
         </div>
 
         <div className="settings-row">
-          <button type="button" disabled={settings.recent.length === 0} onClick={() => update({ recent: [] })}>Forget recent cases</button>
+          <button type="button" disabled={settings.recent.length === 0} onClick={onForgetRecent}>Forget recent cases</button>
         </div>
 
         <div className="settings-buttons">

@@ -102,9 +102,12 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const [panel, setPanel] = useState<{ column: string; x: number; y: number; opener?: HTMLElement | null } | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [clearToken, setClearToken] = useState(0);
-  // The column layout: what the settings held when the grid opened, then what the analyst does. Opening writes nothing;
-  // a change is saved `LAYOUT_SAVE_MS` after the last one (see `edit`).
-  const [layout, setLayout] = useState<ColumnLayout | null>(() => settings.layouts[relation] ?? null);
+  // The column layout: what the settings hold for the relation, and what the analyst does here. Opening writes nothing;
+  // a change is saved `LAYOUT_SAVE_MS` after the last one (see `edit`). When the settings' layout for the relation
+  // changes to one this tab is not showing (a view applied, or an edit, in another tab of the relation), the tab adopts it,
+  // so its next edit builds on it; the latest write wins for every tab.
+  const settingsLayout = settings.layouts[relation] ?? null;
+  const [layout, setLayout] = useState<ColumnLayout | null>(settingsLayout);
   const layoutRef = useRef<ColumnLayout | null>(layout);
   const saveTimer = useRef<number | undefined>(undefined);
   const savePending = useRef(false);
@@ -191,6 +194,14 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     setFocus(null);
     scheduleSave();
   };
+  useEffect(() => {
+    // An edit of this tab still waiting to be saved is about to be the latest write; it is not dropped for an older one.
+    if (savePending.current) return;
+    if (stableKey(settingsLayout) === stableKey(layoutRef.current)) return; // a reply to this tab's own write, or the same
+    layoutRef.current = settingsLayout;
+    setLayout(settingsLayout);
+    setFocus(null);
+  }, [settingsLayout]);
 
   /** Every edit of what the grid shows goes through here: the selection's row positions mean nothing afterwards. */
   const changeState = useCallback((edit: (s: GridState) => GridState) => {
@@ -337,7 +348,10 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     };
   }, [relation, tab.id, generation, reportError]);
 
-  // A write to the case (a mark, a load, a zone) re-reads the rows; filters, selection and scroll stay.
+  // A write to the case (a mark, a load, a zone) re-reads the rows; filters and scroll stay. The selection, its anchor
+  // and the focused cell are row offsets, and a load or a supersede can put other rows at the same offsets, so they are
+  // cleared with the re-read: Copy rows can never take rows the analyst did not pick. (The row detail is kept: it holds
+  // a row id.) A change to the saved views alone re-reads no rows and keeps them.
   const treeRefresh = tree.refresh;
   const seenGeneration = useRef(change.generation);
   // Rises with every re-read of the rows; the histogram strip re-reads with it.
@@ -346,6 +360,9 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     if (change.generation === seenGeneration.current) return;
     seenGeneration.current = change.generation;
     if (change.kinds.some((k) => k !== "views")) {
+      setSelection(emptySelection);
+      setFocus(null);
+      setMenu(null);
       setDataVersion((v) => v + 1);
       refresh();
       treeRefresh();

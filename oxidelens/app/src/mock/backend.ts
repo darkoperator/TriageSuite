@@ -777,7 +777,16 @@ const handlers: Handlers = {
     // The same refusal as the backend's `Settings::check`.
     if (a.settings.analyst !== null && !/^[A-Za-z0-9._-]{1,64}$/.test(a.settings.analyst))
       fail("invalid", "an analyst name is 1 to 64 characters of A-Z a-z 0-9 . _ -");
-    settings = { ...a.settings };
+    // As the backend: the recent list is its own, so the one sent is ignored.
+    settings = { ...a.settings, recent: settings.recent };
+    return { settings, damaged: null, actor: analyst() };
+  },
+  recent_clear: () => {
+    settings = { ...settings, recent: [] };
+    return { settings, damaged: null, actor: analyst() };
+  },
+  recent_remove: (a) => {
+    settings = { ...settings, recent: settings.recent.filter((p) => p !== a.path) };
     return { settings, damaged: null, actor: analyst() };
   },
 

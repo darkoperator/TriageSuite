@@ -84,7 +84,7 @@ mod tests {
             ("..", "analyst:.."),
             ("a:b", "analyst:ab"),
             ("Jürgen", "analyst:Jrgen"),
-            ("carlos.perez", "analyst:carlos.perez"),
+            ("jane.doe", "analyst:jane.doe"),
         ] {
             let actor = Actor::from_os_user(raw);
             assert_eq!(actor.label(), label, "{raw:?}");
