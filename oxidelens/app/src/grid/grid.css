@@ -1,0 +1,41 @@
+/* The grid, on the theme tokens only. Nothing from the data is a class name, a style value or markup. */
+.grid { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg); color: var(--text); font: var(--cell-font); }
+.grid-scroll { flex: 1; min-height: 0; overflow: auto; position: relative; }
+.grid-inner { position: relative; outline: none; min-height: 100%; }
+.grid-inner:focus-visible { box-shadow: inset 0 0 0 1px var(--cell-focus); }
+
+.grid-header { position: sticky; top: 0; z-index: 3; display: flex; height: var(--row-h); background: var(--raised); border-bottom: 1px solid var(--line-strong); font: var(--ui-font); color: var(--text-2); }
+.hcell { box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px; overflow: hidden; white-space: nowrap; cursor: pointer; user-select: none; border-right: 1px solid var(--line); }
+.hcell:hover { background: var(--raised-2); }
+.hcell-mark { position: sticky; left: 0; z-index: 4; padding: 0; cursor: default; background: var(--raised); }
+.hcell-mark:hover { background: var(--raised); }
+.col-name { overflow: hidden; text-overflow: ellipsis; }
+.tz-badge { flex: none; padding: 0 4px; font: var(--cell-font); font-size: 10px; color: var(--muted); border: 1px solid var(--line-faint); border-radius: 3px; }
+.sort-ind { flex: none; margin-left: auto; color: var(--accent-text); font-size: 10px; }
+
+.grid-body { position: relative; }
+.grid-row { position: absolute; top: 0; left: 0; display: flex; box-sizing: border-box; }
+.grid-row.row-odd { background: var(--row-stripe); }
+.grid-row:hover { background: var(--row-hover); }
+.grid-row.row-selected { background: var(--row-selected); }
+.grid-row.row-hit { background: var(--search-hit); }
+.cell { box-sizing: border-box; flex: none; display: flex; align-items: center; padding: 0 8px; overflow: hidden; white-space: nowrap; }
+.cell-text { overflow: hidden; text-overflow: ellipsis; }
+.cell-failed { text-decoration: underline dotted; text-underline-offset: 3px; }
+.cell[data-focused="true"] { outline: 1px solid var(--cell-focus); outline-offset: -1px; }
+.cell-mark { position: sticky; left: 0; z-index: 2; justify-content: center; padding: 0; background: inherit; }
+.grid-row .cell-mark { background: var(--bg); }
+.grid-row.row-odd .cell-mark { background: var(--bg); }
+.mark-suspicious { color: var(--suspicious); }
+
+.cell-menu { position: fixed; z-index: 20; display: flex; flex-direction: column; min-width: 200px; padding: 4px; background: var(--card); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-pop); font: var(--ui-font); }
+.cell-menu button { text-align: left; background: none; border: 0; border-radius: 4px; padding: 4px 10px; color: var(--text); }
+.cell-menu button:hover:not(:disabled), .cell-menu button:focus-visible { background: var(--accent-soft); }
+
+.viewer-scrim { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; background: var(--scrim); }
+.viewer { display: flex; flex-direction: column; width: min(720px, 90vw); max-height: 80vh; background: var(--card); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-pop); font: var(--ui-font); outline: none; }
+.viewer-title { padding: 8px 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.viewer-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; font: var(--cell-font); }
+.viewer-line { padding: 1px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.viewer-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.viewer-buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }

@@ -10,7 +10,7 @@
 // The status bar's areas are fed through the context: `setGridStatus(node)` for the grid-status area; the progress
 // area is the shell's own job line.
 import type { ReactNode } from "react";
-import { displaySafe } from "../text";
+import Grid from "../grid/Grid";
 import Overview from "./Overview";
 import { useShell } from "./context";
 import type { Tab } from "./tabs";
@@ -24,13 +24,9 @@ export interface TabBodyProps {
   onScroll(offset: number): void;
 }
 
-export function TabBody({ tab }: TabBodyProps): ReactNode {
-  if (tab.kind === "overview") return <Overview />;
-  return (
-    <div className="tab-placeholder">
-      The grid for <span className="mono">{displaySafe(tab.relation ?? "")}</span> arrives with the grid task.
-    </div>
-  );
+export function TabBody(props: TabBodyProps): ReactNode {
+  if (props.tab.kind === "overview") return <Overview />;
+  return <Grid {...props} />;
 }
 
 export function SavedViewsSection(): ReactNode {
