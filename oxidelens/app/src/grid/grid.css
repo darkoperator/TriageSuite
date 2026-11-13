@@ -235,3 +235,6 @@
 .hist-tick { position: absolute; top: 2px; }
 .hist-error { padding: 2px 0; }
 .hist-gap-sel { fill: var(--accent); }
+
+/* A row the tab's filters leave out: said so, with a way to see it. */
+.grid-notice { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--suspicious-bg); color: var(--text); font: var(--ui-font); }

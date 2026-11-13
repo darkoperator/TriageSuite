@@ -8,6 +8,7 @@ import type { ChipOrigin } from "../contract/generated/ChipOrigin";
 import type { FilterNode } from "../contract/generated/FilterNode";
 import type { GridState } from "../contract/generated/GridState";
 import type { Leaf } from "../contract/generated/Leaf";
+import type { MergedSource } from "../contract/generated/MergedSource";
 import type { Op } from "../contract/generated/Op";
 import type { SearchMode } from "../contract/generated/SearchMode";
 import type { SortKey } from "../contract/generated/SortKey";
@@ -21,12 +22,16 @@ export interface TabSeed {
 
 export interface Tab {
   id: string;
-  kind: "overview" | "dataset";
+  kind: "overview" | "dataset" | "merged";
   /** The relation a dataset tab shows; `null` for the Overview. */
   relation: string | null;
   /** A tab opened from a group: its own title and starting state. It is saved and restored with the case's tabs. */
   title?: string;
   seed?: TabSeed;
+  /** A merged tab (the rows around one row, opened from the row detail): what it lists. It is not saved with the tabs. */
+  merged?: { source: MergedSource };
+  /** A tab opened to show one row (the *open* link's "unfiltered" tab): the row it scrolls to when it first opens. Not saved. */
+  reveal?: number;
 }
 
 export interface TabsState {

@@ -288,5 +288,10 @@
     "output_file": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
     "output_file_listed": null
   },
+  "summary": "Security · 4625 · Failed logon · Administrator",
+  "anchor": {
+    "host": "WS01",
+    "at": "2026-01-05T02:13:58.204000Z"
+  },
   "zone": "UTC"
 }

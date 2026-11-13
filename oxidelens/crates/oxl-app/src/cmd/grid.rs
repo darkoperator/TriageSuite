@@ -131,6 +131,17 @@ pub fn grid_match_count(state: &AppState, at: At<'_>, grid: &GridState) -> Resul
     at.read(state, |c| oxl_engine::match_count(c, grid))
 }
 
+/// Where row `row_id` sits in what `grid` shows (`row_offset`): its offset in
+/// the grid's order, or `None` when the grid leaves it out.
+pub fn grid_row_offset(
+    state: &AppState,
+    at: At<'_>,
+    grid: &GridState,
+    row_id: i64,
+) -> Result<Option<u64>, CmdError> {
+    at.read(state, |c| oxl_engine::row_offset(c, grid, row_id))
+}
+
 /// Write what `grid` shows to `path` as CSV (`export_csv`), as a job: the
 /// window hears `job-started` and `job-finished` (kind `export`, the file's
 /// name as the label), and no `case-changed`, since the case is unchanged.
@@ -335,6 +346,17 @@ pub mod commands {
         state: GridState,
     ) -> Result<u64, CmdError> {
         super::grid_match_count(&app, At::new(&query_id, &slot), &state)
+    }
+
+    #[tauri::command(async)]
+    pub fn grid_row_offset(
+        app: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+        state: GridState,
+        row_id: i64,
+    ) -> Result<Option<u64>, CmdError> {
+        super::grid_row_offset(&app, At::new(&query_id, &slot), &state, row_id)
     }
 
     #[tauri::command(async)]

@@ -64,6 +64,7 @@ pub const COMMANDS: &[&str] = &[
     "grid_empty_columns",
     "grid_matches",
     "grid_match_count",
+    "grid_row_offset",
     "grid_export",
     "date_range_chip",
     "default_colour_rules",
@@ -250,6 +251,10 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
             ) -> Listing<MatchPos>
         ),
         read!(c, grid_match_count(state: GridState) -> u64),
+        read!(
+            c,
+            grid_row_offset(state: GridState, rowId: i64) -> Option<u64>
+        ),
         read!(
             c,
             grid_export(state: GridState, path: String, zoneTimes: Option<String>) -> ExportReport

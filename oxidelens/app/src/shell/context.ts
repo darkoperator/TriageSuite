@@ -14,8 +14,13 @@ export interface ShellContext {
   change: { generation: number; kinds: string[] };
   /** Opens (or switches to) the dataset tab of a relation. */
   openDataset(relation: string): void;
-  /** Opens a tab the grid made (a group's rows); a tab with the same id is switched to. */
+  /** Opens a tab the grid made (a group's rows) or the row detail made (a merged tab); a tab with the same id is switched to. */
   openScoped(tab: Tab): void;
+  /** Opens (or switches to) a relation's dataset tab and shows one row of it in the right pane (the merged tab's *open* link). */
+  openRow?(relation: string, rowId: number): void;
+  /** A row a tab was asked to show (`openRow`); the dataset tab it names takes it and calls `clearPendingRow`. */
+  pendingRow?: { tabId: string; rowId: number } | null;
+  clearPendingRow?(): void;
   /** What the status bar's grid-status area shows (rows, filters, hidden columns...); `null` clears it. */
   setGridStatus(node: ReactNode): void;
   /** What the right pane shows (row detail); `null` shows its empty hint. */

@@ -25,7 +25,7 @@ import TabPanel from "./TabPanel";
 import StatusBar from "./StatusBar";
 import TabStrip from "./TabStrip";
 import {
-  activate, closeTab, initialTabs, loadTabs, openDataset, openScoped, saveTabs, OVERVIEW_ID, ScrollStore, type Tab, type TabsState,
+  activate, closeTab, datasetTabId, initialTabs, loadTabs, openDataset, openScoped, saveTabs, OVERVIEW_ID, ScrollStore, type Tab, type TabsState,
 } from "./tabs";
 import TopBar from "./TopBar";
 import { useCaseChanged } from "./useCaseChanged";
@@ -248,6 +248,13 @@ export default function Shell() {
 
   const openTab = useCallback((relation: string) => setTabs((t) => openDataset(t, relation)), []);
   const openScopedTab = useCallback((tab: Tab) => setTabs((t) => openScoped(t, tab)), []);
+  // The merged tab's *open* link: the dataset tab opens and shows the row; the tab takes the request once it is mounted.
+  const [pendingRow, setPendingRow] = useState<{ tabId: string; rowId: number } | null>(null);
+  const openRow = useCallback((relation: string, rowId: number) => {
+    setTabs((t) => openDataset(t, relation));
+    setPendingRow({ tabId: datasetTabId(relation), rowId });
+  }, []);
+  const clearPendingRow = useCallback(() => setPendingRow(null), []);
 
   // ---- panes ------------------------------------------------------------------------------------------------------
   const togglePane = useCallback(
@@ -266,10 +273,10 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, pendingRow, clearPendingRow, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
           }
         : null,
-    [summary, settings, change, openTab, openScopedTab, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram],
+    [summary, settings, change, openTab, openScopedTab, openRow, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram],
   );
 
   const dismissNote = damaged && (

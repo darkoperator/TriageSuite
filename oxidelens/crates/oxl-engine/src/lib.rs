@@ -48,9 +48,9 @@ pub use query::{
     anchor_of, around, count, describe, find, group_filter, groups, histogram, merged_rows, page,
     query_sql, query_sql_within, stack, AroundCount, Bucket, Cell, Described, DescribedColumn,
     FindHit, FindMode, FindRequest, FindResult, GridQuery, GroupRow, Histogram, MarkState,
-    MergedRow, MergedSource, Page, SortKey, SqlResult, Stack, StackOrder, StackRow, BUCKET_LADDER,
-    CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_VALUE, SQL_MEMORY_LIMIT, SQL_TEXT_MAX, SQL_TIME_LIMIT,
-    SQL_TIME_LIMIT_MAX,
+    MergedRow, MergedSource, Page, RowAnchor, SortKey, SqlResult, Stack, StackOrder, StackRow,
+    BUCKET_LADDER, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_VALUE, SQL_MEMORY_LIMIT, SQL_TEXT_MAX,
+    SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};
@@ -58,12 +58,12 @@ pub use view::{
     apply_view, around_totals, cell_value, check_export_target, count_view, create_export_partial,
     date_range_chip, default_colour_rules, delete_view, empty_columns, export_csv,
     export_csv_guarded, export_view, groups_view, histogram_view, import_view, match_count,
-    matches, merged_view, page_view, row_view, save_view, split_value, values, views, AppliedView,
-    CellValue, Chip, ChipOrigin, ColourRule, ColumnLayout, ColumnMeta, ExportReport, FieldView,
-    GridCell, GridCounts, GridPage, GridState, GroupView, MatchPos, MergedView, PageOptions,
-    Provenance, RowView, RuleColour, RuleScope, SavedView, SearchMode, SearchState, ValueCount,
-    ValueOrder, ValuePart, ViewDoc, ViewKind, ViewWarning, WindowTotal, MAX_CHIPS, MAX_CHIP_ID,
-    MAX_CHIP_LABEL, MAX_COLUMN_WIDTH, MAX_PARTS, MAX_PIVOT_WINDOWS, MAX_RULES, MAX_RULE_NAME,
-    MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN, MAX_WINDOW_SECONDS,
-    MIN_COLUMN_WIDTH,
+    matches, merged_view, page_view, row_offset, row_view, save_view, split_value, values, views,
+    AppliedView, CellValue, Chip, ChipOrigin, ColourRule, ColumnLayout, ColumnMeta, ExportReport,
+    FieldView, GridCell, GridCounts, GridPage, GridState, GroupView, MatchPos, MergedView,
+    PageOptions, Provenance, RowView, RuleColour, RuleScope, SavedView, SearchMode, SearchState,
+    ValueCount, ValueOrder, ValuePart, ViewDoc, ViewKind, ViewWarning, WindowTotal, MAX_CHIPS,
+    MAX_CHIP_ID, MAX_CHIP_LABEL, MAX_COLUMN_WIDTH, MAX_PARTS, MAX_PIVOT_WINDOWS, MAX_RULES,
+    MAX_RULE_NAME, MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN,
+    MAX_WINDOW_SECONDS, MIN_COLUMN_WIDTH,
 };

@@ -1,0 +1,13 @@
+/* The merged tab: a plain table on the theme tokens. */
+.merged { height: 100%; overflow: auto; padding: 0 8px 8px; }
+.merged-table { width: 100%; border-collapse: collapse; font: var(--cell-font); color: var(--text-2); }
+.merged-table th { position: sticky; top: 0; text-align: left; font: var(--ui-font); color: var(--muted); background: var(--surface); padding: 4px 8px; }
+.merged-table td { padding: 0 8px; height: var(--row-h); white-space: nowrap; }
+.merged-table tbody tr:nth-child(odd) { background: var(--row-stripe); }
+.merged-table tbody tr:hover { background: var(--row-hover); }
+.merged-mark { width: 18px; }
+.merged-flag { color: var(--suspicious); }
+.merged-summary { max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.merged-time .badge { margin-left: 6px; }
+.merged-open { padding: 0 8px; border: none; background: transparent; color: var(--accent-text); }
+.merged-more { margin: 8px 0; }

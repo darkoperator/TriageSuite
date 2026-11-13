@@ -174,6 +174,9 @@ export const gridMatches = (state: GridState, from: number | null, backward: boo
   call<CommandResult["grid_matches"]>("grid_matches", { queryId, slot, state, from, backward, limit } satisfies Args<"grid_matches">);
 export const gridMatchCount = (state: GridState, slot: string, queryId = newQueryId()) =>
   call<CommandResult["grid_match_count"]>("grid_match_count", { queryId, slot, state } satisfies Args<"grid_match_count">);
+/** The row's place in what `state` shows (its offset in the state's order), or null when `state` leaves it out. */
+export const gridRowOffset = (state: GridState, rowId: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["grid_row_offset"]>("grid_row_offset", { queryId, slot, state, rowId } satisfies Args<"grid_row_offset">);
 export const gridExport = (
   state: GridState, path: string, zoneTimes: string | null, slot: string, queryId = newQueryId(),
 ) => call<CommandResult["grid_export"]>("grid_export", { queryId, slot, state, path, zoneTimes } satisfies Args<"grid_export">);

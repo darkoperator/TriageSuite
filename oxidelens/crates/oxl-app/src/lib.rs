@@ -58,6 +58,7 @@ handlers![
     [cmd::grid::commands] grid_empty_columns,
     [cmd::grid::commands] grid_matches,
     [cmd::grid::commands] grid_match_count,
+    [cmd::grid::commands] grid_row_offset,
     [cmd::grid::commands] grid_export,
     [cmd::grid::commands] date_range_chip,
     [cmd::grid::commands] default_colour_rules,

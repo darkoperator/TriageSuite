@@ -11,6 +11,7 @@
 // area is the shell's own job line.
 import type { ReactNode } from "react";
 import Grid from "../grid/Grid";
+import { MergedTab } from "../grid/MergedTab";
 import Overview from "./Overview";
 import { useShell } from "./context";
 import type { Tab } from "./tabs";
@@ -26,6 +27,7 @@ export interface TabBodyProps {
 
 export function TabBody(props: TabBodyProps): ReactNode {
   if (props.tab.kind === "overview") return <Overview />;
+  if (props.tab.kind === "merged") return <MergedTab tab={props.tab} active={props.active} />;
   return <Grid {...props} />;
 }
 

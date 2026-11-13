@@ -23,7 +23,10 @@ mod page;
 mod sql;
 mod stack;
 
-pub use around::{anchor_of, around, merged_rows, AroundCount, MergedRow, MergedSource};
+pub use around::{
+    anchor_of, around, merged_rows, row_anchor, row_summary, AroundCount, MergedRow, MergedSource,
+    RowAnchor,
+};
 pub use find::{find, FindHit, FindMode, FindRequest, FindResult, MAX_VALUE};
 pub(crate) use group::{as_count, group_key_sql, group_spans, primary_time_semantics};
 pub use group::{group_filter, groups, GroupRow};

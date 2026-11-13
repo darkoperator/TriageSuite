@@ -31,7 +31,7 @@ use crate::load::stage::source_schema;
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use triage_core::output::duckdb::sql::quote_ident;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -137,6 +137,58 @@ pub fn anchor_of(case: &Case, row_id: i64) -> Result<(String, String)> {
         ))
     })?;
     Ok((host, time))
+}
+
+/// Where and when a row happened, as `MergedSource::Around` takes it: the
+/// row's host and its primary time as R1 UTC text, from `anchor_of`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct RowAnchor {
+    pub host: String,
+    pub at: String,
+}
+
+/// The anchor of row `row_id` (`anchor_of`), or `None` for a row that has no
+/// host or no usable primary time, or whose source was removed.
+pub fn row_anchor(case: &Case, row_id: i64) -> Result<Option<RowAnchor>> {
+    match anchor_of(case, row_id) {
+        Ok((host, at)) => Ok(Some(RowAnchor { host, at })),
+        Err(EngineError::Invalid(_) | EngineError::NotFound(_)) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The one-line summary of row `row_id`, by the rule a merged row's summary
+/// follows (`summary_sql`), read from the row's own source table. `None` for
+/// a row of a removed source, an unknown row, or a summary with no text.
+pub fn row_summary(case: &Case, row_id: i64) -> Result<Option<String>> {
+    let conn = case.conn();
+    let Some((source, name, table)) = locate(conn, row_id)? else {
+        return Ok(None);
+    };
+    let removed: bool = conn.query_row(
+        "SELECT removed FROM ox.source WHERE id = ?",
+        params![source],
+        |r| r.get(0),
+    )?;
+    if removed {
+        return Ok(None);
+    }
+    // The rule is the merged list's, over the relation's columns; a column a
+    // later source brought is not in an earlier source's table, so there it
+    // reads as an empty cell, as it does through the relation's view.
+    let present = physical_columns(conn, &source_schema(source), &name)?;
+    let columns = catalog::columns(case, &name)?;
+    let sql = format!(
+        "SELECT {} FROM {table} AS {ROW_ALIAS} WHERE {ROW_ALIAS}._ox_row = ?",
+        summary_sql(&name, &columns, Some(&present))
+    );
+    let text: Option<String> = conn
+        .prepare(&sql)?
+        .query_map(params![row_id], |r| r.get(0))?
+        .next()
+        .transpose()?;
+    Ok(text.filter(|t| !t.is_empty()))
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -327,7 +379,7 @@ fn shown_rows(conn: &Connection, scope: &Scope, ids: &[i64]) -> Result<Vec<(i64,
     let sql = format!(
         "SELECT {ROW_ALIAS}._ox_row, {host}, {summary}, {mark} \
          FROM {from} WHERE {ROW_ALIAS}._ox_row IN ({slots})",
-        summary = summary_sql(&relation.name, &scope.columns),
+        summary = summary_sql(&relation.name, &scope.columns, None),
         mark = mark_sql(),
         from = scope.from_sql,
         slots = vec!["?"; ids.len()].join(", "),
@@ -348,8 +400,9 @@ fn shown_rows(conn: &Connection, scope: &Scope, ids: &[i64]) -> Result<Vec<(i64,
 /// a relation without an entry (or none of whose listed columns it has),
 /// the first four non-empty values among its columns that are neither
 /// metadata nor timestamps, in catalog order; joined by ` · ` and cut to
-/// `SUMMARY_CAP` characters.
-fn summary_sql(relation: &str, all: &[ColumnInfo]) -> String {
+/// `SUMMARY_CAP` characters. `present`, when given, names (lower-cased) the
+/// columns the table read has; any other column reads as NULL.
+fn summary_sql(relation: &str, all: &[ColumnInfo], present: Option<&BTreeSet<String>>) -> String {
     let listed: Vec<&ColumnInfo> = summary_for(relation)
         .unwrap_or_default()
         .iter()
@@ -370,10 +423,14 @@ fn summary_sql(relation: &str, all: &[ColumnInfo]) -> String {
     let texts: Vec<String> = columns
         .iter()
         .map(|c| {
-            format!(
-                "CAST({ROW_ALIAS}.{} AS VARCHAR)",
-                quote_ident(&c.text_column)
-            )
+            if present.is_some_and(|p| !p.contains(&c.text_column.to_lowercase())) {
+                "CAST(NULL AS VARCHAR)".to_string()
+            } else {
+                format!(
+                    "CAST({ROW_ALIAS}.{} AS VARCHAR)",
+                    quote_ident(&c.text_column)
+                )
+            }
         })
         .collect();
     let mut kept = format!(

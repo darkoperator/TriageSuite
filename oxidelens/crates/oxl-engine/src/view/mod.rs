@@ -408,6 +408,35 @@ pub fn matches(
     Ok(Listing::from_fetched(found, limit))
 }
 
+/// The place of row `row_id` in what `state` shows: its offset in the state's
+/// order (the numbering `page_view` and `matches` use), or `None` when the
+/// chips, the search (in filter mode) or the hosts leave it out, or it is not
+/// a row of the state's relation. In find mode the search does not narrow the
+/// rows, so a row it does not match still has its place.
+pub fn row_offset(case: &Case, state: &GridState, row_id: i64) -> Result<Option<u64>> {
+    let q = state.query()?;
+    let scope = scope(case, &q)?;
+    let order = order_sql(&scope, &q)?;
+    // Every row in scope is numbered in the grid's order, as `matches` does.
+    let sql = format!(
+        "SELECT ox_pos FROM (\
+           SELECT row_number() OVER (ORDER BY {order}) - 1 AS ox_pos, \
+                  {ROW_ALIAS}._ox_row AS ox_id \
+           FROM {} WHERE {}) \
+         WHERE ox_id = ?",
+        scope.from_sql, scope.where_sql
+    );
+    let mut params = scope.params;
+    params.push(SqlValue::BigInt(row_id));
+    let found: Option<i64> = case
+        .conn()
+        .prepare(&sql)?
+        .query_map(params_from_iter(params), |r| r.get(0))?
+        .next()
+        .transpose()?;
+    Ok(found.map(as_count))
+}
+
 /// How many rows `matches` would list in all. `Invalid` unless the search
 /// is in find mode; 0 for a blank search.
 pub fn match_count(case: &Case, state: &GridState) -> Result<u64> {

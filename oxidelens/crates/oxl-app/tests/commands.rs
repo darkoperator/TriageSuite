@@ -366,6 +366,23 @@ fn grid_matches_and_count_find_in_the_grids_order() {
 }
 
 #[test]
+fn grid_row_offset_answers_the_rows_place_or_none() {
+    let l = loaded();
+    let state = grid(EVENTS);
+    let page = g::grid_page(&l.state, at("t1:off"), &state, 20, 0, &utc()).unwrap();
+    let id = page.row_ids[3];
+    assert_eq!(
+        g::grid_row_offset(&l.state, at("t1:offr"), &state, id).unwrap(),
+        Some(3)
+    );
+    // A row id no source holds is not in the grid.
+    assert_eq!(
+        g::grid_row_offset(&l.state, at("t1:offr"), &state, -1).unwrap(),
+        None
+    );
+}
+
+#[test]
 fn grid_export_is_a_job_that_writes_the_file() {
     let l = loaded();
     let out = l.dir.path().join("events.csv");

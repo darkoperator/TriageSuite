@@ -10,7 +10,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
-import { columns as readColumns, defaultColourRules, gridEmptyColumns, gridPage, isCmdError, viewSave } from "../api";
+import { columns as readColumns, defaultColourRules, gridEmptyColumns, gridPage, gridRowOffset, isCmdError, viewSave } from "../api";
 import type { Chip } from "../contract/generated/Chip";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
@@ -18,6 +18,7 @@ import type { GridPage } from "../contract/generated/GridPage";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import type { GridState } from "../contract/generated/GridState";
 import type { SearchState } from "../contract/generated/SearchState";
+import RowDetail from "../detail/RowDetail";
 import { useShell } from "../shell/context";
 import { displaySafe } from "../text";
 import type { TabBodyProps } from "../shell/slots";
@@ -63,13 +64,19 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const NO_RULES: ColourRule[] = [];
 
+let revealCount = 0;
+/** A token no other reveal request of this window has: a counter and some randomness (never a clock). */
+const revealToken = () => `${(revealCount++).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
 interface Focus {
   row: number;
   col: number;
 }
 
 export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyProps): ReactNode {
-  const { summary, settings, change, setGridStatus, reportError, saveLayout, saveColourRules, openScoped, setHistogram } = useShell();
+  const {
+    summary, settings, change, setGridStatus, reportError, saveLayout, saveColourRules, openScoped, setHistogram, setRightPane, pendingRow, clearPendingRow,
+  } = useShell();
   const relation = tab.relation ?? "";
 
   const [state, setState] = useState<GridState>(() => tab.seed?.state ?? initialGridState(relation));
@@ -394,13 +401,105 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     return () => setGridStatus(null);
   }, [active, statusNode, setGridStatus]);
 
+  // ---- the row detail: what the right pane shows while this tab is the active one ----------------------------------------
+  // A single selection (a plain click) or Enter on the focused row shows that row; grouped lists have no rows to select.
+  const [detailRow, setDetailRow] = useState<number | null>(null);
+  const showDetailAt = (index: number) => {
+    const row = rowAt(index);
+    if (row) setDetailRow(row.id);
+  };
+  const detailNode = useMemo(
+    () =>
+      detailRow === null ? null : (
+        <RowDetail rowId={detailRow} onFilter={(chip) => applyChips((chips) => [...chips, chip])} onShowRow={setDetailRow} />
+      ),
+    [detailRow, applyChips],
+  );
+  useEffect(() => {
+    if (!active) return;
+    setRightPane(detailNode);
+    return () => setRightPane(null);
+  }, [active, detailNode, setRightPane]);
+
+  // ---- revealing a row: the merged tab's *open* link, or a tab opened to show one -----------------------------------------
+  // The row is shown in the right pane; where the engine places it in this tab's order, the grid scrolls to it and focuses
+  // it. A row the tab's filters leave out is said so, with a way to see it in an unfiltered tab. One reveal at a time: a
+  // newer one, or any change of the tab's state while the engine is answering, drops the answer.
+  const [hidden, setHidden] = useState<number | null>(null);
+  // Where to scroll, for the state it was computed under and the request that asked: either changing drops it.
+  const [scrollTarget, setScrollTarget] = useState<{ offset: number; key: string; seq: number } | null>(null);
+  const revealSeq = useRef(0);
+  const stateKey = useMemo(() => stableKey(state), [state]);
+  const reveal = useCallback(
+    async (rowId: number) => {
+      setDetailRow(rowId);
+      setHidden(null);
+      setScrollTarget(null);
+      const seq = ++revealSeq.current; // a newer request supersedes any older one still answering or waiting
+      if (by.length > 0) return; // a grouped list has no row positions
+      const asked = stateRef.current;
+      const key = stableKey(asked);
+      try {
+        const offset = await gridRowOffset(asked, rowId, `tab:${tab.id}:reveal`);
+        if (seq !== revealSeq.current || stableKey(stateRef.current) !== key) return;
+        if (offset === null) setHidden(rowId);
+        else setScrollTarget({ offset, key, seq });
+      } catch (e) {
+        if (seq !== revealSeq.current) return;
+        if (!(isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case"))) reportError(e);
+      }
+    },
+    [by.length, tab.id, reportError],
+  );
+  useEffect(() => {
+    if (pendingRow && pendingRow.tabId === tab.id) {
+      clearPendingRow?.();
+      void reveal(pendingRow.rowId);
+    }
+  }, [pendingRow, tab.id, clearPendingRow, reveal]);
+  // A tab opened to show a row asks once, when it first mounts (every request opens its own tab).
+  const revealed = useRef(false);
+  useEffect(() => {
+    if (tab.reveal !== undefined && !revealed.current) {
+      revealed.current = true;
+      void reveal(tab.reveal);
+    }
+  }, [tab.reveal, reveal]);
+  // The scroll waits for the tab to be shown and the row count to cover the row, and happens only if the target is still
+  // the one asked for under the tab's present state.
+  useEffect(() => {
+    if (scrollTarget === null) return;
+    if (scrollTarget.seq !== revealSeq.current || scrollTarget.key !== stateKey) {
+      setScrollTarget(null);
+      return;
+    }
+    if (!active || rowCount <= scrollTarget.offset) return;
+    virtualizer.scrollToIndex(scrollTarget.offset, { align: "center" });
+    setFocus({ row: scrollTarget.offset, col: 0 });
+    setSelection(selectOnly(scrollTarget.offset));
+    setScrollTarget(null);
+  }, [scrollTarget, stateKey, active, rowCount, virtualizer]);
+  /** The row is hidden by this tab's filters: the relation opens in a new, unfiltered tab that scrolls to the row. */
+  const openUnfiltered = (rowId: number) => {
+    // Every request opens a tab of its own (a fresh token in its id), so it is unfiltered whatever the earlier ones were
+    // changed to, and its one reveal is not already spent.
+    const seed = { state: initialGridState(relation), by: [] };
+    openScoped({
+      id: `reveal:${hash(stableKey([relation, rowId, revealToken()]))}`, kind: "dataset", relation, title: `${relation} · row ${rowId}`, seed, reveal: rowId,
+    });
+    setHidden(null);
+  };
+
   // ---- selection and focus ----------------------------------------------------------------------------------------
   const onCellClick = (e: MouseEvent, index: number, col: number) => {
     setFocus({ row: index, col });
     setMenu(null);
     if (e.shiftKey) setSelection((s) => selectRange(s, index));
     else if (e.ctrlKey || e.metaKey) setSelection((s) => toggle(s, index));
-    else setSelection(selectOnly(index));
+    else {
+      setSelection(selectOnly(index));
+      showDetailAt(index);
+    }
   };
 
   const onCellContextMenu = (e: MouseEvent, index: number, col: number) => {
@@ -557,6 +656,12 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         e.preventDefault();
         showValue();
         break;
+      case "Enter":
+        if (focus && t.tagName !== "BUTTON") {
+          e.preventDefault();
+          showDetailAt(focus.row);
+        }
+        break;
       case "ArrowDown": e.preventDefault(); moveFocus(1, 0); break;
       case "ArrowUp": e.preventDefault(); moveFocus(-1, 0); break;
       case "ArrowRight": e.preventDefault(); moveFocus(0, 1); break;
@@ -693,6 +798,13 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           applyChips={applyChips}
           onError={reportError}
         />
+      )}
+      {hidden !== null && (
+        <div className="grid-notice" role="status">
+          <span>This row is hidden by the current filters.</span>
+          <button type="button" onClick={() => openUnfiltered(hidden)}>{`Open ${displaySafe(relation)} unfiltered`}</button>
+          <button type="button" aria-label="Dismiss" onClick={() => setHidden(null)}>×</button>
+        </div>
       )}
       <GroupBar
         by={by}

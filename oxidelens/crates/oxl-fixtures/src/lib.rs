@@ -536,6 +536,31 @@ pub fn rerun_ws01_prefetch(dir: &Path) -> PathBuf {
     )
 }
 
+/// An older run of WS01 whose `evtxtriage_events` has none of the columns the
+/// relation's summary lists (`Channel`, `EventId`, `MapDescription`,
+/// `UserName`): header `TimeCreated,Computer,PayloadData1`, one row. Run id
+/// `20251231000000-hhhh`.
+pub fn narrow_evtx_run(dir: &Path) -> PathBuf {
+    write_run(
+        &dir.join("run-20251231000000-hhhh"),
+        "20251231000000-hhhh",
+        vec![DatasetSpec {
+            tool: "EvtxTriage",
+            dataset_id: "events",
+            view: "evtxtriage_events",
+            source: "internal",
+            evidence_path_column: None,
+            typed: &[("TimeCreated", SqlType::Timestamp, Some(TimeSemantics::Utc))],
+            files: vec![FileSpec {
+                host: "WS01",
+                path: "Processed-WS01-20251231000000/EventLogs/evtx.csv",
+                header: "TimeCreated,Computer,PayloadData1",
+                rows: &["2026-01-05T02:13:58.2040000Z,WS01,narrow-row-payload"],
+            }],
+        }],
+    )
+}
+
 /// EvtxTriage's per-channel copy of some of WS01's events, as the suite
 /// writes it beside the aggregate: dataset `Individual/<channel>`, view
 /// `evtxtriage_individual_<channel lower-cased>`.

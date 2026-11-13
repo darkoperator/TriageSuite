@@ -605,6 +605,13 @@ const handlers: Handlers = {
       const sel = select(a.state);
       return a.state.search.mode === "find" ? sel.rows.filter((r) => sel.hits(sel.rel.rows[r])).length : 0;
     }),
+  grid_row_offset: (a) =>
+    read(a.slot, a.queryId, () => {
+      const sel = select(a.state);
+      const index = a.rowId - sel.rel.firstId;
+      const at = sel.rows.indexOf(index);
+      return index >= 0 && index < sel.rel.rows.length && at >= 0 ? at : null;
+    }),
   grid_export: async (a) => {
     const rows = await read(a.slot, a.queryId, () => select(a.state).rows.length);
     mockEmit("job-started", { kind: "export", label: a.path.split(/[\\/]/).pop() ?? a.path });
@@ -641,11 +648,16 @@ const handlers: Handlers = {
           marked_by: theCase().marks.has(a.rowId) ? "analyst:analyst01" : null, tags: [], notes: [],
           evidence_path: fileIx >= 0 ? row[fileIx] : null, output_file: row[outIx],
         },
-        fields: rel.columns.map((meta, i) => ({ meta, text: row[i], display: isUtc(meta) ? shown(meta, row[i]) : null, failed: false })),
+        fields: rel.columns.map((meta, i) => ({ meta, text: row[i], display: isUtc(meta) && row[i] !== null ? `${shown(meta, row[i])} Z` : null, failed: false })),
         provenance: {
           host: row[hostIx], source_id: 1, run_id: row[0], evidence_path: fileIx >= 0 ? row[fileIx] : null,
           locator: ["row", String(a.rowId - rel.firstId + 2)], output_file: row[outIx], output_file_listed: true,
         },
+        summary: row[rel.columns.findIndex((c) => c.name === "Message" || c.name === "Details")]?.slice(0, 300) || null, // the engine cuts at 300
+        anchor: (() => {
+          const time = row[rel.columns.findIndex((c) => c.name === rel.info.primary_time)];
+          return time && row[hostIx] ? { host: row[hostIx]!, at: time } : null;
+        })(),
         zone: "UTC",
       };
     }),

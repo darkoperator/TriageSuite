@@ -1,0 +1,36 @@
+/* The row detail pane, on the theme tokens only (nothing from the data in a class or style). */
+.detail { font: var(--ui-font); color: var(--text-2); padding: 0 2px 12px; }
+.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0 8px; }
+.detail-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.detail-rel { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.detail-rowid { color: var(--muted); font: var(--cell-font); }
+.detail-mark { color: var(--suspicious); background: var(--suspicious-bg); border-radius: 3px; padding: 0 6px; }
+.detail-banner { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; margin: 0 0 8px; padding: 6px 8px; border-radius: 4px; background: var(--suspicious-bg); color: var(--text); }
+.detail-fields { margin: 0; }
+.field { padding: 3px 0; border-top: 1px solid var(--line); }
+.field dt { color: var(--muted); font-size: 11px; display: flex; gap: 6px; align-items: center; overflow-wrap: anywhere; }
+.field dd { margin: 0; font: var(--cell-font); color: var(--text); display: flex; gap: 6px; align-items: flex-start; }
+.field-value { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
+.field-null { flex: 1; color: var(--faint); }
+.field-actions { display: inline-flex; gap: 2px; opacity: 0; }
+.field:hover .field-actions, .field:focus-within .field-actions { opacity: 1; }
+.field-actions button { padding: 0 6px; line-height: 16px; }
+.badge { font-size: 10px; padding: 0 4px; border-radius: 3px; color: var(--muted); background: var(--raised); }
+.badge-warn { color: var(--suspicious); background: var(--suspicious-bg); }
+.detail-section { margin-top: 12px; }
+.detail-section h3 { margin: 8px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.detail-note { margin: 2px 0; color: var(--faint); }
+.pivot { display: flex; gap: 6px; flex-wrap: wrap; }
+.prov { margin: 0; }
+.prov-line { display: flex; gap: 8px; padding: 1px 0; }
+.prov-line dt { width: 92px; flex: none; color: var(--muted); }
+.prov-line dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font: var(--cell-font); }
+.prov-ok { color: var(--ok); }
+.prov-warn { color: var(--suspicious); }
+.detail-raw-actions { display: flex; gap: 6px; }
+.detail-raw { margin: 6px 0 0; padding: 6px; background: var(--card); border-radius: 4px; font: var(--cell-font); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.tag { padding: 0 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent-text); }
+.note { margin: 4px 0; padding: 4px 6px; background: var(--card); border-radius: 4px; }
+.note-meta { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; }

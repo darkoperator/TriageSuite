@@ -19,7 +19,8 @@ use crate::error::{EngineError, Result};
 use crate::listing::Listing;
 use crate::load::stage::source_schema;
 use crate::query::{
-    anchor_of, around, check_zone, merged_rows, MergedRow, MergedSource, ISO_FORMAT,
+    anchor_of, around, check_zone, merged_rows, row_anchor, row_summary, MergedRow, MergedSource,
+    RowAnchor, ISO_FORMAT,
 };
 use duckdb::{params, OptionalExt};
 use std::collections::HashMap;
@@ -81,6 +82,14 @@ pub struct RowView {
     /// The detail's fields in its order, each with its column's meta.
     pub fields: Vec<FieldView>,
     pub provenance: Provenance,
+    /// The row's one-line summary, by the rule merged rows follow (the
+    /// relation's `SUMMARY` columns, else its first plain values); `None`
+    /// when it has none or the row's source was removed.
+    pub summary: Option<String>,
+    /// Where and when the row happened, as `MergedSource::Around` takes it
+    /// (host and R1 UTC time); `None` for a row with no host or no usable
+    /// primary time.
+    pub anchor: Option<RowAnchor>,
     /// The zone `FieldView::display` is in.
     pub zone: String,
 }
@@ -124,10 +133,14 @@ pub fn row_view(case: &Case, row_id: i64, zone: &str) -> Result<RowView> {
     }
 
     let provenance = provenance(case, &detail)?;
+    let summary = row_summary(case, row_id)?;
+    let anchor = row_anchor(case, row_id)?;
     Ok(RowView {
         detail,
         fields,
         provenance,
+        summary,
+        anchor,
         zone: zone.to_string(),
     })
 }

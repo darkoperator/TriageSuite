@@ -54,7 +54,7 @@ export default function TabStrip({
             >
               {name}
             </button>
-            {t.kind === "dataset" && (
+            {t.kind !== "overview" && (
               <button type="button" className="tab-close" tabIndex={-1} aria-label={`Close ${name}`} onClick={() => onClose(t.id)}>
                 ×
               </button>
