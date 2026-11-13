@@ -319,6 +319,17 @@ pub const SUMMARY: &[(&str, &[&str])] = &[
     ("sumetriage_role_accesses", &["RoleDescription"]),
 ];
 
+/// The column that locates a row's record inside its evidence file, per
+/// relation: an event's record id in its `.evtx`, a file's entry in the
+/// `$MFT`. The row detail shows it beside the evidence path. Both were
+/// checked on a real case, and `locator_columns_exist` (tests/view_row.rs)
+/// loads each relation with the header its tool really writes
+/// (`triage-evtx/src/record.rs`, `triage-mft/src/mft.rs`).
+pub const LOCATOR: &[(&str, &str)] = &[
+    ("evtxtriage_events", "EventRecordId"),
+    ("mftriage_mft", "EntryNumber"),
+];
+
 /// The relation whose entries `relation` takes: for RETriage's copy of a
 /// dataset read from a hive's RegBack backup (`retriage_<dataset>_regback`),
 /// the dataset it copies, which the same plugin wrote with the same columns;
@@ -334,6 +345,15 @@ fn base_relation(relation: &str) -> &str {
 pub(crate) fn summary_for(relation: &str) -> Option<&'static [&'static str]> {
     let relation = base_relation(relation);
     SUMMARY
+        .iter()
+        .find(|(r, _)| *r == relation)
+        .map(|(_, c)| *c)
+}
+
+/// The `LOCATOR` column of `relation`, if it has one.
+pub(crate) fn locator_for(relation: &str) -> Option<&'static str> {
+    let relation = base_relation(relation);
+    LOCATOR
         .iter()
         .find(|(r, _)| *r == relation)
         .map(|(_, c)| *c)
@@ -391,7 +411,8 @@ mod tests {
             .iter()
             .map(|t| t.relation)
             .chain(PRIMARY_TIME.iter().map(|(r, _)| *r))
-            .chain(SUMMARY.iter().map(|(r, _)| *r));
+            .chain(SUMMARY.iter().map(|(r, _)| *r))
+            .chain(LOCATOR.iter().map(|(r, _)| *r));
         for name in names {
             assert_eq!(base_relation(name), name, "{name} would never be looked up");
         }

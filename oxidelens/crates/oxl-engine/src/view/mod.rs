@@ -15,12 +15,18 @@
 //! selects, in the grid's order, for the app to step between.
 
 mod page;
+mod row;
 mod rules;
 mod saved;
+mod split;
 mod time;
 mod values;
 
 pub use page::{page_view, ColumnMeta, GridCell, GridPage, PageOptions};
+pub use row::{
+    around_totals, cell_value, merged_view, row_view, CellValue, FieldView, MergedView, Provenance,
+    RowView, WindowTotal, MAX_PIVOT_WINDOWS, MAX_WINDOW_SECONDS,
+};
 pub use rules::{
     default_colour_rules, ColourRule, RuleColour, RuleScope, MAX_RULES, MAX_RULE_NAME,
 };
@@ -29,6 +35,7 @@ pub use saved::{
     SavedView, ViewDoc, ViewKind, ViewWarning, MAX_COLUMN_WIDTH, MAX_VIEW_BYTES,
     MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN, MIN_COLUMN_WIDTH,
 };
+pub use split::{split_value, ValuePart, MAX_PARTS};
 pub use time::{date_range_chip, groups_view, histogram_view, GroupView};
 pub use values::{values, ValueCount, ValueOrder};
 

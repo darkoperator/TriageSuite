@@ -45,8 +45,9 @@ duckdb = { version = "=1.10505.0", features = ["bundled", "json"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 # preserve_order keeps JSON property order = struct declaration order, the
-# same choice the suite makes.
-serde_json = { version = "1", features = ["preserve_order"] }
+# same choice the suite makes. raw_value lets the value viewer split a JSON
+# cell into its top-level entries with each value's text exactly as written.
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 thiserror = "2"
 # The clock only. Time values are ISO 8601 text cast inside DuckDB; nothing in
 # this workspace does date arithmetic.

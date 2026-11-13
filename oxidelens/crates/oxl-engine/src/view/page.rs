@@ -267,7 +267,9 @@ pub fn page_view(
             let failed: bool = row.get(3 + 3 * i)?;
             let typed: Option<String> = row.get(4 + 3 * i)?;
             let display = match typed {
-                Some(typed) if *render => display(text.as_deref(), &typed, &opts.zone),
+                Some(typed) if *render => {
+                    render_time(text.as_deref(), &typed, &opts.zone).map(|r| r.local)
+                }
                 _ => None,
             };
             let (text, clipped) = clip_text(text);
@@ -301,9 +303,8 @@ pub fn page_view(
 /// A converted UTC cell in `zone`: its text when that is UTC text, so the
 /// fraction stays as written; else its typed value (`typed`, R1), when the
 /// text converted from another form (a column declared UTC whose text has
-/// no `Z`).
-fn display(text: Option<&str>, typed: &str, zone: &str) -> Option<String> {
+/// no `Z`). The grid shows `local`; the row detail adds `offset`.
+pub(super) fn render_time(text: Option<&str>, typed: &str, zone: &str) -> Option<zone::Rendered> {
     text.and_then(|t| zone::render_utc_text(t, zone))
         .or_else(|| zone::render_utc_text(typed, zone))
-        .map(|r| r.local)
 }

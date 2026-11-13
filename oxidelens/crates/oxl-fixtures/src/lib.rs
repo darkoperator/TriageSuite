@@ -153,6 +153,234 @@ pub fn two_hosts(dir: &Path) -> PathBuf {
     root
 }
 
+/// [`two_hosts`] with the `run_manifest.json` the orchestrator writes at the
+/// run root, naming every output file of the run under its host's tools:
+/// EvtxTriage's and PETriage's for WS01 and SRV01, and Hayabusa's timeline
+/// for WS01 as an external tool. Paths are absolute, as the suite publishes
+/// them; the manifest records paths and counts, not hashes.
+pub fn two_hosts_with_manifest(dir: &Path) -> PathBuf {
+    let root = two_hosts(dir);
+    let ws = "Processed-WS01-20260101000000";
+    let srv = "Processed-SRV01-20260101000000";
+    let evtx_ws = format!("{ws}/EventLogs/evtx.csv");
+    let pf_ws = format!("{ws}/Execution/pf.csv");
+    let hayabusa_ws = format!("{ws}/Hayabusa/timeline.csv");
+    let evtx_srv = format!("{srv}/EventLogs/evtx.csv");
+    let pf_srv = format!("{srv}/Execution/pf.csv");
+    write_run_manifest(
+        &root,
+        "20260101000000-aaaa",
+        &[
+            ManifestFile::tool("WS01", "EvtxTriage", &evtx_ws),
+            ManifestFile::tool("WS01", "PETriage", &pf_ws),
+            ManifestFile::external("WS01", "hayabusa-csv", &hayabusa_ws),
+            ManifestFile::tool("SRV01", "EvtxTriage", &evtx_srv),
+            ManifestFile::tool("SRV01", "PETriage", &pf_srv),
+        ],
+    );
+    root
+}
+
+/// One output file a run manifest names.
+#[derive(Debug, Clone, Copy)]
+pub struct ManifestFile<'a> {
+    pub host: &'a str,
+    /// The tool's binary name (`EvtxTriage`), or an external tool's name
+    /// (`hayabusa-csv`).
+    pub tool: &'a str,
+    /// Listed under the host's `external_tools` rather than its `tools`.
+    pub external: bool,
+    /// Relative to the run root, `/`-separated.
+    pub path: &'a str,
+}
+
+impl<'a> ManifestFile<'a> {
+    pub fn tool(host: &'a str, tool: &'a str, path: &'a str) -> ManifestFile<'a> {
+        ManifestFile {
+            host,
+            tool,
+            external: false,
+            path,
+        }
+    }
+
+    pub fn external(host: &'a str, tool: &'a str, path: &'a str) -> ManifestFile<'a> {
+        ManifestFile {
+            host,
+            tool,
+            external: true,
+            path,
+        }
+    }
+}
+
+/// Write `root/run_manifest.json` in the shape the orchestrator writes
+/// (`triage-orchestrator/src/manifest.rs`, schema version 3): one entry per
+/// host in `files`' order, each with its tools' `output_paths` as absolute
+/// paths under `root`. The counts are synthetic and say nothing the tests
+/// rely on.
+pub fn write_run_manifest(root: &Path, run_id: &str, files: &[ManifestFile<'_>]) -> PathBuf {
+    let absolute = |relative: &str| -> String {
+        let native: PathBuf = relative.split('/').collect();
+        std::path::absolute(root.join(native))
+            .expect("an absolute path")
+            .display()
+            .to_string()
+    };
+    let mut hosts: Vec<&str> = Vec::new();
+    for f in files {
+        if !hosts.contains(&f.host) {
+            hosts.push(f.host);
+        }
+    }
+    let host_entries: Vec<serde_json::Value> = hosts
+        .iter()
+        .map(|host| {
+            let mut tools: Vec<(&str, Vec<String>)> = Vec::new();
+            let mut external: Vec<(&str, Vec<String>)> = Vec::new();
+            for f in files.iter().filter(|f| f.host == *host) {
+                let list = if f.external {
+                    &mut external
+                } else {
+                    &mut tools
+                };
+                match list.iter_mut().find(|(t, _)| *t == f.tool) {
+                    Some((_, paths)) => paths.push(absolute(f.path)),
+                    None => list.push((f.tool, vec![absolute(f.path)])),
+                }
+            }
+            let tools: Vec<serde_json::Value> = tools
+                .into_iter()
+                .map(|(tool, paths)| {
+                    serde_json::json!({
+                        "tool": tool,
+                        "key": tool.to_lowercase(),
+                        "time_filter": null,
+                        "files_matched": 1,
+                        "discovered_candidates": 1,
+                        "supported": 1,
+                        "unsupported": 0,
+                        "corrupt": 0,
+                        "unreadable": 0,
+                        "parsed": 1,
+                        "failed": 0,
+                        "deduplicated": 0,
+                        "records": 8,
+                        "output_paths": paths,
+                        "reason_samples": [],
+                    })
+                })
+                .collect();
+            let external: Vec<serde_json::Value> = external
+                .into_iter()
+                .map(|(tool, paths)| {
+                    serde_json::json!({
+                        "tool": tool,
+                        "found": true,
+                        "invoked": true,
+                        "exit_code": 0,
+                        "output_paths": paths,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "host": host,
+                "output_id": format!("Processed-{host}-{}", &run_id[..14]),
+                "os": "Windows 11",
+                "collection": format!("Collection-{host}"),
+                "inaccessible_entries": 0,
+                "tools": tools,
+                "external_tools": external,
+            })
+        })
+        .collect();
+    let manifest = serde_json::json!({
+        "schema_version": 3,
+        "run_id": run_id,
+        "orchestrator_version": "0.1.0",
+        "started_utc": format!("{}-{}-{}T00:00:00.0000000Z", &run_id[..4], &run_id[4..6], &run_id[6..8]),
+        "finished_utc": format!("{}-{}-{}T00:05:00.0000000Z", &run_id[..4], &run_id[4..6], &run_id[6..8]),
+        "capture_type": "velociraptor",
+        "final_exit_status": 0,
+        "hosts": host_entries,
+    });
+    let path = root.join("run_manifest.json");
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&manifest).expect("serialize a run manifest"),
+    )
+    .expect("write run_manifest.json");
+    path
+}
+
+/// The header EvtxTriage writes for `events`: `EventRecord`'s fields in
+/// order, as `triage-evtx/src/record.rs` renames them.
+pub const EVTX_REAL_HEADER: &str = "RecordNumber,EventRecordId,TimeCreated,EventId,Level,Provider,Channel,ProcessId,ThreadId,Computer,ChunkNumber,UserId,MapDescription,UserName,RemoteHost,PayloadData1,PayloadData2,PayloadData3,PayloadData4,PayloadData5,PayloadData6,ExecutableInfo,HiddenRecord,SourceFile,Keywords,ExtraDataOffset,Payload";
+
+/// The header MFTriage writes for `mft`: `MftRecord`'s fields in order, as
+/// `triage-mft/src/mft.rs` names them (PascalCase, `SI<FN`, `uSecZeros`).
+pub const MFT_REAL_HEADER: &str = "EntryNumber,SequenceNumber,InUse,ParentEntryNumber,ParentSequenceNumber,ParentPath,FileName,Extension,FileSize,ReferenceCount,ReparseTarget,IsDirectory,HasAds,IsAds,SI<FN,uSecZeros,Copied,SiFlags,NameType,Created0x10,Created0x30,LastModified0x10,LastModified0x30,LastRecordChange0x10,LastRecordChange0x30,LastAccess0x10,LastAccess0x30,UpdateSequenceNumber,LogfileSequenceNumber,SecurityId,ObjectIdFileDroid,LoggedUtilStream,ZoneIdContents,SourceFile";
+
+/// A run of WS01 whose `evtxtriage_events` and `mftriage_mft` carry the
+/// headers the suite really writes ([`EVTX_REAL_HEADER`],
+/// [`MFT_REAL_HEADER`]), one row each with synthetic values: event record
+/// 7351 of the Security log, and MFT entry 41, `rclone.exe`. Run id
+/// `20260114000000-mmmm`.
+pub fn real_headers_run(dir: &Path) -> PathBuf {
+    let ws = "Processed-WS01-20260114000000";
+    let evtx = format!("{ws}/EventLogs/evtx.csv");
+    let mft = format!("{ws}/FileSystem/mft.csv");
+    write_run(
+        &dir.join("run-20260114000000-mmmm"),
+        "20260114000000-mmmm",
+        vec![
+            DatasetSpec {
+                tool: "EvtxTriage",
+                dataset_id: "events",
+                view: "evtxtriage_events",
+                source: "internal",
+                evidence_path_column: Some("SourceFile"),
+                typed: &[
+                    ("RecordNumber", SqlType::UBigInt, None),
+                    ("EventRecordId", SqlType::UBigInt, None),
+                    ("TimeCreated", SqlType::Timestamp, Some(TimeSemantics::Utc)),
+                    ("EventId", SqlType::BigInt, None),
+                    ("ChunkNumber", SqlType::BigInt, None),
+                    ("ExtraDataOffset", SqlType::BigInt, None),
+                ],
+                files: vec![FileSpec {
+                    host: "WS01",
+                    path: &evtx,
+                    header: EVTX_REAL_HEADER,
+                    rows: &[
+                        r#"7351,7351,2026-01-05T02:13:58.2040000Z,4625,Information,Microsoft-Windows-Security-Auditing,Security,684,1220,WS01.acme.local,3,,Failed logon,Administrator,203.0.113.7,LogonType 10,,,,,,,,C:\Windows\System32\winevt\Logs\Security.evtx,Audit Failure,0,"{""EventData"":{""TargetUserName"":""Administrator""}}""#,
+                    ],
+                }],
+            },
+            DatasetSpec {
+                tool: "MFTriage",
+                dataset_id: "mft",
+                view: "mftriage_mft",
+                source: "internal",
+                evidence_path_column: Some("SourceFile"),
+                typed: &[
+                    ("EntryNumber", SqlType::UBigInt, None),
+                    ("Created0x10", SqlType::Timestamp, Some(TimeSemantics::Utc)),
+                ],
+                files: vec![FileSpec {
+                    host: "WS01",
+                    path: &mft,
+                    header: MFT_REAL_HEADER,
+                    rows: &[MFT_ROW],
+                }],
+            },
+        ],
+    )
+}
+
+/// MFT entry 41, `rclone.exe`, every time the same.
+const MFT_ROW: &str = r"41,3,true,5,5,.\Users\svc_backup\stage,rclone.exe,.exe,1024,1,,false,false,false,false,false,false,Archive,Windows,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,0,0,0,,,,C:\$MFT";
+
 /// [`two_hosts`] built in `dir/a`, and its run root copied to `dir/b`, which
 /// is returned: a run that moved after it was written, so its session file
 /// names the files where they were (`dir/a`), not where they are.
