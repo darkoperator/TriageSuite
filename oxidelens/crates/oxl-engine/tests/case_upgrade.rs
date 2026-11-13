@@ -145,11 +145,26 @@ fn a_step1_case_upgrades_in_place() {
     assert_eq!(case.info().unwrap().format, 2);
     let id = case.case_id().unwrap();
     assert!(is_case_id(&id), "{id:?}");
-    // The run's session was read from where the run is.
+    // The run's sessions were read from where the run is, in each host's
+    // `Processed-*/Sessions/` as the suite writes them, and merged by name.
     let found = sessions(&case).unwrap();
     assert_eq!(
         found.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
         ["Execution_Analysis"]
+    );
+    let fed: Vec<(&str, &str)> = found[0]
+        .relations
+        .iter()
+        .map(|r| (r.relation.as_str(), r.host.as_str()))
+        .collect();
+    assert_eq!(
+        fed,
+        [
+            ("evtxtriage_events", "SRV01"),
+            ("evtxtriage_events", "WS01"),
+            ("petriage_timeline", "SRV01"),
+            ("petriage_timeline", "WS01"),
+        ]
     );
     let upgrades = history(&case, Some("case"), 50, 0).unwrap().items;
     assert_eq!(upgrades.len(), 1, "{upgrades:?}");

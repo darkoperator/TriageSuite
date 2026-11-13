@@ -127,13 +127,15 @@ fn petriage_timeline(files: Vec<FileSpec<'_>>) -> DatasetSpec<'_> {
 /// `petriage_timeline` (5 rows) and `ext_hayabusa_csv_timeline` (5 rows,
 /// WS01 only, untyped). Run id `20260101000000-aaaa`.
 ///
-/// Like a real run it has a Timeline Explorer session at the run root,
-/// `Sessions/Execution_Analysis.tle_sess`, naming by absolute path WS01's
-/// prefetch and event files as built, and one file that is nowhere
-/// (`C:\gone\nowhere.csv`).
+/// Like a real run it has a Timeline Explorer session per host, in the
+/// host's own folder: `Processed-WS01-…/Sessions/Execution_Analysis.tle_sess`
+/// naming by absolute path WS01's prefetch and event files as built and one
+/// file that is nowhere (`C:\gone\nowhere.csv`), and a same-named session in
+/// `Processed-SRV01-…/Sessions/` naming SRV01's prefetch and event files.
 pub fn two_hosts(dir: &Path) -> PathBuf {
     let root = two_hosts_tree(dir);
     let ws = "Processed-WS01-20260101000000";
+    let srv = "Processed-SRV01-20260101000000";
     let absolute = |relative: &str| -> String {
         let native: PathBuf = relative.split('/').collect();
         std::path::absolute(root.join(native))
@@ -142,12 +144,20 @@ pub fn two_hosts(dir: &Path) -> PathBuf {
             .to_string()
     };
     write_session(
-        &root,
+        &root.join(ws),
         "Execution_Analysis",
         &[
             &absolute(&format!("{ws}/Execution/pf.csv")),
             &absolute(&format!("{ws}/EventLogs/evtx.csv")),
             r"C:\gone\nowhere.csv",
+        ],
+    );
+    write_session(
+        &root.join(srv),
+        "Execution_Analysis",
+        &[
+            &absolute(&format!("{srv}/Execution/pf.csv")),
+            &absolute(&format!("{srv}/EventLogs/evtx.csv")),
         ],
     );
     root
@@ -428,7 +438,9 @@ pub fn host_zones_run(dir: &Path) -> PathBuf {
 }
 
 /// Write `Sessions/<name>.tle_sess` under `root` as the suite writes one:
-/// JSON whose `SessionFiles` maps each file's path to an empty list.
+/// JSON whose `SessionFiles` maps each file's path to an empty list. The
+/// suite writes them in each host's `Processed-<HOST>-<stamp>/` folder; pass
+/// the run root itself for a session at the root, which a load also reads.
 pub fn write_session(root: &Path, name: &str, files: &[&str]) -> PathBuf {
     let files: serde_json::Map<String, serde_json::Value> = files
         .iter()

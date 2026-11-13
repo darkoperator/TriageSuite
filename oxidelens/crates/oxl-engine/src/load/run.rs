@@ -52,11 +52,13 @@ thread_local! {
 /// the case exactly as it was. EvtxTriage's per-channel copies are left out
 /// (see `RunOptions`).
 ///
-/// The run's Timeline Explorer sessions (`Sessions/*.tle_sess`) are kept
-/// with it: at most `MAX_SESSION_FILES` of them, each at most
-/// `MAX_SESSION_BYTES`. The rest, and any that is not a session, are left
-/// out and named under `sessions_skipped` in the load's history row; a
-/// session file never fails a load.
+/// The run's Timeline Explorer sessions (`Sessions/*.tle_sess` in each
+/// host's `Processed-*` folder or at the root; same-named ones merged) are
+/// kept with it: at most `MAX_SESSION_FILES` files across those folders,
+/// each at most `MAX_SESSION_BYTES`. The rest, and any that is not a
+/// session, are left out and named (by path below the run root) under
+/// `sessions_skipped` in the load's history row; a session file never fails
+/// a load.
 pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadReport> {
     load_run_with(case, out_root, RunOptions::default(), actor)
 }

@@ -1,0 +1,235 @@
+# The OxideLens app: developer notes
+
+The desktop app is a Tauri v2 shell (`crates/oxl-app`) around a React and
+TypeScript front end (`app/`). The engine (`crates/oxl-engine`) holds every
+rule; the backend drives it from a window, and the front end renders what the
+backend answers and keeps what it is showing. These notes cover how to run it,
+the contract between the two halves, how queries are superseded and
+cancelled, where state is kept, and the debug-only bridge an agent can drive
+the window through. All names in the examples are synthetic.
+
+## Running it
+
+You need the Rust toolchain, Node 22, and on Windows the WebView2 runtime
+(part of current Windows). The first build compiles DuckDB from source and
+takes several minutes; later builds are quick.
+
+```
+cd oxidelens
+npm --prefix app ci                 # the front end's packages, the Tauri CLI among them
+```
+
+**The app, in development.** From `crates/oxl-app`, run the Tauri CLI:
+
+```
+cd crates/oxl-app
+../../app/node_modules/.bin/tauri dev      # or `cargo tauri dev`, with tauri-cli 2 installed
+```
+
+(In PowerShell the same path with backslashes runs the CLI's `tauri.cmd`.)
+The CLI starts the Vite dev server (`beforeDevCommand`, http://localhost:5173)
+and builds and runs the debug binary, which loads the front end from it and
+reloads it as you edit. A debug build carries the MCP bridge (below) and opens
+a console window on Windows, where the backend's panics land.
+
+**The mock dev page.** The front end alone, in a browser, on a fake backend:
+
+```
+npm --prefix app run dev:mock      # http://localhost:5173, with a MOCK banner
+```
+
+`app/src/mock/` answers every command of the contract from a seeded
+5,000-row, 40-column `mock_events` relation (with hostile cell text: markup, a
+bidi override, a zero-width joiner, BEL, a formula, a 5,000-character value)
+and a Hayabusa-like `mock_hayabusa`, with the backend's supersede, cancel,
+`busy` and `case-changed` behaviour. It is a compile-time switch
+(`__OXL_MOCK__`, true only for that dev server), so no other build holds any of
+it. The mock holds no rules and shows every time in UTC: use it for layout and
+interaction, never to check what the engine answers.
+
+**A test build.** A release binary that serves the built front end itself:
+
+```
+cd crates/oxl-app
+../../app/node_modules/.bin/tauri build    # or `cargo tauri build`
+```
+
+The CLI builds the front end first (`beforeBuildCommand`) and then
+`target/release/oxl-app` (`.exe` on Windows). Bundling is switched off in
+`tauri.conf.json`, so there is no installer: copy the binary. A release build
+has no MCP bridge and no console window. `cargo build --release -p oxl-app`
+on its own is not a test build: without the CLI the binary is built in dev
+mode and looks for the dev server.
+
+**Tests and checks.** From `oxidelens/`: `cargo test`, `cargo clippy
+--all-targets -- -D warnings` and `cargo fmt --check`. From `app/`: `npm run
+lint`, `npm test` and `npm run build`. `scripts/check.sh` at the repository
+root runs them all. Three ignored tests are run on purpose:
+
+- `cargo test -p oxl-app --test record_fixtures -- --ignored` rewrites the
+  recorded engine answers the front end's tests use
+  (`app/src/test/fixtures/*.json`).
+- `cargo test -p oxl-app --test walkthrough -- --ignored --nocapture
+  real_case_walkthrough`, with `OXL_WALKTHROUGH_CASE` set to a case file, runs
+  the end-to-end walkthrough (below) on that case and prints what each step
+  saw and how long it took.
+- The same with `real_case_performance` and `OXL_PERF_CASE` prints the grid's
+  costs on that case, warm: the first page of the largest relation, a
+  filter-row change, group headers, the histogram, value counts, and
+  full-width blocks of the widest relations. The test's header lists the
+  variables that choose the columns.
+
+Both open the case through the app, which upgrades a format-1 case in place,
+and the walkthrough writes to it (the display zone and a saved view). **Run
+them on a copy, never on an analyst's case.**
+
+`tests/walkthrough.rs` is also an ordinary test on the two-host fixture: new
+case, load the run, open `evtxtriage_events`, filter row `Security`, exclude
+`4624` in the Values tab, group by `Channel` then `EventId`, brush the
+histogram, switch the zone to `America/New_York` and check a time, save a
+view, close and reopen the case, apply the view, export CSV, open a session.
+It calls the same command functions the window's `invoke` reaches, with the
+arguments the front end builds, so a change that breaks the window's main path
+fails `cargo test`. What it cannot see is rendering: layout, focus and drawing
+are checked by hand in the window.
+
+## The contract
+
+The window and the backend share one contract, generated from the Rust types
+and checked in under `app/src/contract/generated/`. Never edit those files by
+hand.
+
+**One TypeScript type per Rust type.** Every type a command takes or answers
+derives `ts_rs::TS` beside its serde derives (in the engine behind its `ts`
+feature), and ts-rs reads the serde attributes, so a rename, a default or an
+untagged variant is the same on both sides. Each type becomes one
+`<Type>.ts`. An `Option` is `T | null`, and every field is required in
+TypeScript: the front end always sends complete objects, and serde defaults
+are tolerance for other callers, not something the front end relies on. A
+64-bit integer (row ids, counts, offsets) is `number`, because what the
+window receives is JSON that `JSON.parse` reads into a `number`; every such
+value is far below 2^53.
+
+**`commands.ts`** holds `COMMANDS` (every command name, in the contract's
+order), `CommandArgs` (each command's arguments, named as `invoke` takes them:
+the Rust parameter in camelCase, so `query_id` is `queryId`), `CommandResult`,
+`EVENTS` with `EventPayload`, and `CommandError`. The order of `COMMANDS` is
+the order of `contract::COMMANDS` in `crates/oxl-app/src/contract.rs`, of the
+signature table beside it, and of the `handlers!` list in `src/lib.rs`; a test
+holds all three to one list.
+
+**Drift fails a test.** `cargo test -p oxl-app --test contract` compares the
+checked-in files byte for byte with what the Rust types generate, and calls
+every command through Tauri's own IPC to check it takes exactly the arguments
+the contract names. To regenerate after a change:
+
+```
+OXL_WRITE_CONTRACT=1 cargo test -p oxl-app --test contract
+```
+
+On the front end, `app/src/api.ts` is the only caller of `invoke` and
+`listen`: one typed wrapper per command, `isCmdError`, and the event
+listeners. The mock backend answers exactly the commands `api.ts` calls, and
+`app/src/mock/backend.test.ts` fails otherwise.
+
+**Adding a command:** write it as a plain function over `AppState` in
+`src/cmd/`, with a `#[tauri::command(async)]` wrapper in that module's
+`commands` (no command runs on the window's thread); add its name to
+`COMMANDS`, its signature to the table (with `read!` if it reads the case,
+which adds `queryId` and `slot`) and its wrapper to `handlers!`, all in the
+same place in the order; regenerate the contract; add the wrapper to `api.ts`
+and an answer to the mock.
+
+**Errors.** A failed command rejects with `{ code, message }`. `code` is
+what to branch on: the engine's `not_found`, `invalid`, `refused`,
+`case_locked`, `needs_upgrade`, `engine`, `io` and `internal`, and the app's
+own `no_case`, `busy` (another write is running), `superseded` and
+`interrupted`. `message` is for a person and is shown through `displaySafe`.
+
+## Query slots and cancellation
+
+No query runs on the window's thread, and every read can be superseded or
+cancelled.
+
+**Every read takes `queryId` and `slot` first.** The window makes a fresh
+query id for each call (`newQueryId()`); the slot names what the answer fills
+on screen. The grid's slots are per tab: `tab:<id>:page:<offset>`,
+`tab:<id>:counts`, `tab:<id>:hist`, `tab:<id>:hist-brush`, `tab:<id>:export`
+and so on.
+
+**A newer query on a slot supersedes the one there.** The registry
+(`src/queries.rs`) interrupts the older query, which answers `superseded`.
+Typing ten characters into the filter row in a second leaves exactly the last
+state's rows, counts and histogram on screen: the nine earlier queries end
+`superseded`, and the front end never draws an answer for a state it is no
+longer showing.
+
+**`query_cancel` stops queries by id**, and they answer `interrupted`. An id
+cancelled before its query starts is remembered (the newest 256), and that
+query answers `interrupted` without running. DuckDB clears an interrupt when
+the next statement starts, so a stopped query is interrupted again every
+50 ms until its call returns.
+
+**Reads run beside each other and beside a write.** The open case has one
+writer connection, the only one that changes the case, and 8 readers cloned
+from it. A read registers first, then waits for a reader (giving up as soon as
+it is superseded or cancelled), so a slot's queries keep the order they
+arrived in. A write that arrives while another write runs answers `busy`
+rather than queueing; after every successful write the backend sends
+`case-changed` with what it touched (`sources` for a load, `views`,
+`display_zone`), and the front end reads again what that affects.
+
+**A CSV export is a read and a job.** `grid_export` runs on a reader under its
+query id, announces `job-started` and `job-finished`, and registers a cancel
+flag with its query: `query_cancel` with the export's id (or a newer query on
+its slot, or the case closing) stops it between statements, and its partial
+file is removed. Stopped after its file was renamed into place, it answers
+its report, because the file is there. **One export runs at a time** across
+all tabs: the shell holds the one cancel slot, and a second export is refused
+in the window until the first ends.
+
+**Closing the case** stops every registered query, lets none register until
+it is done (`no_case`), waits for the readers to come back, and drops them
+before the writer, so the file can be opened again as soon as `case_close`
+returns. Quitting the app closes the case off the event loop's thread and
+waits for that a bounded time.
+
+## What is kept where
+
+| Where | What |
+|---|---|
+| **The case file** (travels with the case) | Sources, relations and rows; marks, tags and notes; the history; saved views and filter presets; the display zone (`ox.setting`, default `UTC`); the run sessions each load read |
+| **The settings file** (per machine): `settings.json` in the app's config directory | Theme (dark or light), the grid's font size (10 to 16 px), the side panes (open or folded), the histogram strip on or off, column layouts per dataset, colour rules per dataset, recent cases (the newest 10), the analyst name |
+| **The webview's localStorage** (per machine, per case) | The open tabs and each tab's scroll position, under `oxl.tabs.v1.<case_id>` |
+
+The **analyst name** is what the app's changes are recorded under
+(`analyst:<name>`); unset, it is the operating system's user. Layouts and
+colour rules are keyed by dataset (relation) name, so they follow a dataset
+from case to case on one machine. Applying a saved view that carries a layout
+or colour rules writes them into the settings for that dataset: applying a
+view is the analyst choosing them.
+
+The settings file is written whole: a save writes a `.partial` file beside it
+and renames it over the old one. A file that cannot be read is moved aside to
+`settings.json.damaged-<yyyyMMddHHmmss>` and the defaults are used; the
+window hears `settings-damaged`, and every settings reply names the damaged
+file until a save succeeds.
+
+**Opening a case from step 1** (format 1) upgrades it in place to format 2 in
+one transaction, with a `case_upgrade` history row; every source, relation,
+mark, tag and note is unchanged. A command that opens a case read-only (every
+CLI read) reads a format-1 case as it is.
+
+## The debug-only MCP bridge
+
+Debug builds register `tauri-plugin-mcp-bridge` (`src/main.rs`, under
+`cfg(debug_assertions)`), bound to `127.0.0.1`. It lets an agent with the
+Tauri MCP server drive and screenshot the window: the server connects to the
+plugin's WebSocket, on port 9223 or the next free one up to 9322. Release
+builds do not register it, and the `mcp-bridge:default` permission in
+`capabilities/default.json` then grants nothing. Treat a debug build as a
+development tool: anything on the machine can reach that port while it runs.
+
+The bridge drives the window as a user would. To check the backend's answers
+without a window, call the command functions directly, as
+`tests/walkthrough.rs` and `tests/commands.rs` do.

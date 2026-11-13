@@ -42,8 +42,13 @@ the registry for the development tools only.
 ```
 npm --prefix app ci
 npm --prefix app run dev:mock     # the front end in a browser, on the mock backend
-cargo tauri dev                   # the real app (from crates/oxl-app, with the Tauri CLI)
+cd crates/oxl-app && ../../app/node_modules/.bin/tauri dev    # the real app
 ```
+
+**[docs/APP.md](docs/APP.md)** is the app's developer notes: running it (dev,
+the mock page, a test build), the generated contract and how to add a
+command, query slots and cancellation, what is kept in the case and what per
+machine, and the debug-only MCP bridge.
 
 **Mock mode.** `npm run dev:mock` serves the front end on http://localhost:5173
 with a fake backend (`app/src/mock/`) in place of the desktop app: a seeded

@@ -5,7 +5,15 @@
     "relations": [
       {
         "relation": "evtxtriage_events",
+        "host": "SRV01"
+      },
+      {
+        "relation": "evtxtriage_events",
         "host": "WS01"
+      },
+      {
+        "relation": "petriage_timeline",
+        "host": "SRV01"
       },
       {
         "relation": "petriage_timeline",

@@ -36,10 +36,10 @@ CREATE TABLE ox.run_session (
     name VARCHAR NOT NULL,
     files_json VARCHAR NOT NULL
 );
-COMMENT ON TABLE ox.run_session IS 'One row per Timeline Explorer session (Sessions/<name>.tle_sess) a loaded run carried, read when it was loaded.';
-COMMENT ON COLUMN ox.run_session.source_id IS 'The ox.source (run) the session file came with.';
-COMMENT ON COLUMN ox.run_session.name IS 'The session''s name: its file name without .tle_sess.';
-COMMENT ON COLUMN ox.run_session.files_json IS 'The paths the session names, as written in the file (absolute, where the run was written), as a JSON array.';
+COMMENT ON TABLE ox.run_session IS 'One row per Timeline Explorer session name a loaded run carried, read when it was loaded: the <name>.tle_sess files of that name in the run''s Sessions folders (the root''s and each Processed-* host folder''s), merged.';
+COMMENT ON COLUMN ox.run_session.source_id IS 'The ox.source (run) the session files came with.';
+COMMENT ON COLUMN ox.run_session.name IS 'The session''s name: its files'' name without .tle_sess.';
+COMMENT ON COLUMN ox.run_session.files_json IS 'The paths the session''s files name, as written (absolute, where the run was written), each once, in the order read, as a JSON array.';
 
 CREATE TABLE ox.setting (
     key VARCHAR PRIMARY KEY,

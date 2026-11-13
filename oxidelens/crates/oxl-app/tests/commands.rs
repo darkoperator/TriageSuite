@@ -161,7 +161,16 @@ fn sessions_are_the_runs_session_files() {
         .iter()
         .map(|r| (r.relation.as_str(), r.host.as_str()))
         .collect();
-    assert_eq!(fed, [(EVENTS, "WS01"), (PREFETCH, "WS01")]);
+    // Each host's own Execution_Analysis, merged into one session.
+    assert_eq!(
+        fed,
+        [
+            (EVENTS, "SRV01"),
+            (EVENTS, "WS01"),
+            (PREFETCH, "SRV01"),
+            (PREFETCH, "WS01")
+        ]
+    );
     assert_eq!(s.unmatched, 1);
 }
 
