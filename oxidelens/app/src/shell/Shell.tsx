@@ -7,6 +7,7 @@ import {
   settingsGet, settingsUpdate,
 } from "../api";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
+import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { DamagedSettings } from "../contract/generated/DamagedSettings";
 import type { Session } from "../contract/generated/Session";
 import type { Settings } from "../contract/generated/Settings";
@@ -98,6 +99,19 @@ export default function Shell() {
       void pump();
     },
     [applySettings, pump],
+  );
+
+  /** One dataset's column layout: the layouts map is rebuilt from the latest (optimistic) settings, then queued. */
+  const saveLayout = useCallback(
+    (relation: string, layout: ColumnLayout | null) => {
+      const base = settingsRef.current;
+      if (!base) return;
+      const layouts = { ...base.layouts };
+      if (layout === null) delete layouts[relation];
+      else layouts[relation] = layout;
+      updateSettings({ layouts });
+    },
+    [updateSettings],
   );
 
   /** Settings read from the backend: the new confirmed state, shown unless a change is still on its way. */
@@ -233,10 +247,10 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, setGridStatus, setRightPane, rightPane, scroll, reportError,
+            summary, settings, change, openDataset: openTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout,
           }
         : null,
-    [summary, settings, change, openTab, rightPane, scroll, reportError],
+    [summary, settings, change, openTab, rightPane, scroll, reportError, saveLayout],
   );
 
   const dismissNote = damaged && (

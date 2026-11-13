@@ -10,17 +10,25 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
-import { columns as readColumns, isCmdError } from "../api";
+import { columns as readColumns, gridEmptyColumns, isCmdError } from "../api";
+import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { GridPage } from "../contract/generated/GridPage";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import type { GridState } from "../contract/generated/GridState";
 import { useShell } from "../shell/context";
+import { displaySafe } from "../text";
 import type { TabBodyProps } from "../shell/slots";
 import CellMenu from "./CellMenu";
+import ColumnManager from "./ColumnManager";
 import { cellText, rowsAsTsv, writeClipboard } from "./copy";
 import GridBody from "./GridBody";
-import GridHeader, { MARK_WIDTH, columnWidth } from "./GridHeader";
+import GridHeader, { MARK_WIDTH } from "./GridHeader";
 import { initialGridState, nextSort } from "./gridState";
+import HeaderMenu from "./HeaderMenu";
+import {
+  bestFitWidth, fetchedColumns, hide, materialise, moveColumn, resolve, setWidth, setWidths, show, showAll, togglePin,
+} from "./layout";
+import { measureText } from "./measure";
 import { BLOCK_ROWS, blockOf } from "./blocks";
 import { MAX_COPY_ROWS, contains, emptySelection, indices, selectOnly, selectRange, size, toggle, type Selection } from "./selection";
 import { useGridData } from "./useGridData";
@@ -28,6 +36,8 @@ import ValueViewer from "./ValueViewer";
 import "./grid.css";
 
 const NO_ROWS: unknown[] = [];
+/** A layout change is saved this long after the last one. */
+const LAYOUT_SAVE_MS = 250;
 const fmt = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -37,7 +47,7 @@ interface Focus {
 }
 
 export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyProps): ReactNode {
-  const { summary, settings, change, setGridStatus, reportError } = useShell();
+  const { summary, settings, change, setGridStatus, reportError, saveLayout } = useShell();
   const relation = tab.relation ?? "";
 
   const [state, setState] = useState<GridState>(() => initialGridState(relation));
@@ -45,14 +55,62 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const [focus, setFocus] = useState<Focus | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [viewer, setViewer] = useState<{ rowId: number; column: string } | null>(null);
-  const [catalogued, setCatalogued] = useState<number | null>(null);
+  const [allMetas, setAllMetas] = useState<ColumnMeta[] | null>(null);
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; column: string } | null>(null);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [emptyBusy, setEmptyBusy] = useState(false);
+  // The column layout: what the settings held when the grid opened, then what the analyst does. Opening writes nothing;
+  // a change is saved `LAYOUT_SAVE_MS` after the last one (see `edit`).
+  const [layout, setLayout] = useState<ColumnLayout | null>(() => settings.layouts[relation] ?? null);
+  const layoutRef = useRef<ColumnLayout | null>(layout);
+  const saveTimer = useRef<number | undefined>(undefined);
+  const savePending = useRef(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  const data = useGridData({ tabId: tab.id, state, zone: summary.display_zone, enabled: active, onError: reportError });
-  const { want, refresh, rowAt, beginCopy } = data;
+  // Hiding a column changes what the engine fetches (so the state changes and the grid refetches); order, width and
+  // pinning are drawn from the layout alone and never reach the state.
+  const resolved = useMemo(() => (allMetas ? resolve(layout, allMetas) : null), [layout, allMetas]);
+  const fetched = useMemo(() => (resolved && allMetas ? fetchedColumns(resolved, allMetas) : null), [resolved, allMetas]);
+  const shownState = useMemo<GridState>(() => ({ ...state, columns: fetched }), [state, fetched]);
+
+  const data = useGridData({
+    tabId: tab.id, state: shownState, zone: summary.display_zone, enabled: active && allMetas !== null, onError: reportError,
+  });
+  const { want, refresh, rowAt, beginCopy, loadedTexts } = data;
+
+  // ---- the layout: one edit function, saved after a pause -------------------------------------------------------------
+  const flushLayout = useCallback(() => {
+    window.clearTimeout(saveTimer.current);
+    if (!savePending.current) return;
+    savePending.current = false;
+    saveLayout(relation, layoutRef.current);
+  }, [relation, saveLayout]);
+  useEffect(() => flushLayout, [flushLayout]); // closing the tab does not lose a change still waiting
+
+  const scheduleSave = useCallback(() => {
+    savePending.current = true;
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flushLayout, LAYOUT_SAVE_MS);
+  }, [flushLayout]);
+  const edit = useCallback(
+    (apply: (l: ColumnLayout) => ColumnLayout) => {
+      if (!allMetas) return;
+      const next = apply(materialise(layoutRef.current, allMetas));
+      layoutRef.current = next;
+      setLayout(next);
+      scheduleSave();
+    },
+    [allMetas, scheduleSave],
+  );
+  const resetLayout = () => {
+    layoutRef.current = null;
+    setLayout(null);
+    setFocus(null);
+    scheduleSave();
+  };
 
   /** Every edit of what the grid shows goes through here: the selection's row positions mean nothing afterwards. */
   const changeState = useCallback((edit: (s: GridState) => GridState) => {
@@ -62,11 +120,10 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   }, []);
 
   // ---- columns ----------------------------------------------------------------------------------------------------
-  const metas = data.columns;
-  const meta = useMemo(() => new Map<string, ColumnMeta>((metas ?? []).map((c) => [c.name, c])), [metas]);
+  const meta = useMemo(() => new Map<string, ColumnMeta>((allMetas ?? []).map((c) => [c.name, c])), [allMetas]);
   const columnDefs = useMemo<ColumnDef<unknown>[]>(
-    () => (metas ?? []).map((c) => ({ id: c.name, header: c.name, size: columnWidth(c) })),
-    [metas],
+    () => (resolved?.shown ?? []).map((c) => ({ id: c.name, header: c.name, size: resolved!.width(c.name) })),
+    [resolved],
   );
   const sorting = useMemo<SortingState>(() => state.sort.map((k) => ({ id: k.column, desc: k.descending })), [state.sort]);
   // TanStack Table's functions are not memoizable; the grid only reads the column model from it during render.
@@ -78,13 +135,22 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const names = leaves.map((c) => c.id);
   const widths = leaves.map((c) => c.getSize());
   const width = MARK_WIDTH + widths.reduce((a, b) => a + b, 0);
+  // Pages hold the columns in catalog order; the grid draws them in layout order.
+  const pageColumns = data.columns;
+  const cellIdx = names.map((n) => pageColumns?.findIndex((c) => c.name === n) ?? -1);
+  const pinLeft: (number | null)[] = [];
+  let offset = MARK_WIDTH;
+  names.forEach((n, i) => {
+    pinLeft.push(resolved?.pinned.has(n) ? offset : null);
+    offset += widths[i];
+  });
 
   // How many columns the relation has, for the status line (the grid's own page only carries the shown ones).
   const generation = change.generation;
   useEffect(() => {
     let live = true;
     readColumns(relation, `tab:${tab.id}:columns`).then(
-      (c) => live && setCatalogued(c.length),
+      (c) => live && setAllMetas(c),
       (e: unknown) => {
         if (live && !(isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case"))) reportError(e);
       },
@@ -132,18 +198,27 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   // ---- the status line --------------------------------------------------------------------------------------------
   const shownColumns = names.length;
-  const totalColumns = Math.max(catalogued ?? shownColumns, shownColumns);
+  const totalColumns = allMetas?.length ?? shownColumns;
   const counts = data.counts;
   const selectedCount = size(selection);
-  const statusText =
-    counts === null
-      ? null
-      : `${fmt(counts.rows)} of ${fmt(counts.total)} rows · ${fmt(selectedCount)} selected · ${fmt(shownColumns)} of ${fmt(totalColumns)} columns · ${fmt(totalColumns - shownColumns)} hidden · ${fmt(counts.failed_values)} ${plural(counts.failed_values, "value", "values")} failed to convert`;
+  const statusNode = useMemo(
+    () =>
+      counts === null ? null : (
+        <>
+          {`${fmt(counts.rows)} of ${fmt(counts.total)} rows · ${fmt(selectedCount)} selected · ${fmt(shownColumns)} of ${fmt(totalColumns)} columns · `}
+          <button type="button" className="status-link" aria-haspopup="dialog" onClick={() => setManagerOpen((o) => !o)}>
+            {`${fmt(totalColumns - shownColumns)} hidden ▾`}
+          </button>
+          {` · ${fmt(counts.failed_values)} ${plural(counts.failed_values, "value", "values")} failed to convert`}
+        </>
+      ),
+    [counts, selectedCount, shownColumns, totalColumns],
+  );
   useEffect(() => {
     if (!active) return;
-    setGridStatus(statusText);
+    setGridStatus(statusNode);
     return () => setGridStatus(null);
-  }, [active, statusText, setGridStatus]);
+  }, [active, statusNode, setGridStatus]);
 
   // ---- selection and focus ----------------------------------------------------------------------------------------
   const onCellClick = (e: MouseEvent, index: number, col: number) => {
@@ -186,7 +261,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const copyCell = () => {
     if (!focus) return;
     const row = rowAt(focus.row);
-    const cell = row?.cells[focus.col];
+    const cell = row?.cells[cellIdx[focus.col]];
     if (!row || !cell) return;
     const session = beginCopy();
     void guarded(
@@ -287,6 +362,47 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const onSort = (column: string, additive: boolean) =>
     changeState((s) => ({ ...s, sort: nextSort(s.sort, column, additive) }));
 
+  // ---- column actions ---------------------------------------------------------------------------------------------
+  const [restore, setRestore] = useState<{ column: string; token: number } | null>(null);
+  const onHeaderMenu = (column: string, x: number, y: number) => {
+    setMenu(null);
+    setHeaderMenu({ x, y, column });
+  };
+  const headerMenuColumn = headerMenu?.column;
+  const closeHeaderMenu = useCallback(() => {
+    setHeaderMenu(null);
+    if (headerMenuColumn !== undefined) setRestore((r) => ({ column: headerMenuColumn, token: (r?.token ?? 0) + 1 }));
+  }, [headerMenuColumn]);
+  const hideColumns = (hideNames: readonly string[]) => {
+    if (!resolved) return;
+    const left = resolved.shown.filter((c) => !hideNames.includes(c.name));
+    // The grid never shows nothing: if everything would go, the first shown column stays.
+    const keep = left.length === 0 && resolved.shown.length > 0 ? [resolved.shown[0].name] : [];
+    edit((l) => hide(l, hideNames.filter((n) => !keep.includes(n))));
+    setFocus(null);
+  };
+  const toggleColumn = (name: string) => {
+    if (!resolved) return;
+    if (resolved.hidden.has(name)) edit((l) => show(l, [name]));
+    else hideColumns([name]);
+  };
+  const fit = (fitNames: readonly string[]) => {
+    const fitted: Record<string, number> = {};
+    for (const n of fitNames) {
+      const texts = [...new Set(loadedTexts(n).map((t) => displaySafe(t)))];
+      fitted[n] = bestFitWidth(texts, displaySafe(n), (t, f) => measureText(t, f, settings.font_size));
+    }
+    edit((l) => setWidths(l, fitted));
+  };
+  const hideEmpty = () => {
+    setEmptyBusy(true);
+    void guarded(
+      gridEmptyColumns({ ...state, columns: null }, `tab:${tab.id}:empty`).then((empty) => {
+        hideColumns(empty);
+      }),
+    ).finally(() => setEmptyBusy(false));
+  };
+
   return (
     <div ref={rootRef} className="grid" style={{ "--cell-size": `${settings.font_size}px` } as CSSProperties}>
       <div
@@ -311,11 +427,24 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           style={{ width }}
           onKeyDown={onKeyDown}
         >
-          <GridHeader table={table} meta={meta} width={width} onSort={onSort} />
+          <GridHeader
+            table={table}
+            meta={meta}
+            width={width}
+            pinLeft={pinLeft}
+            onSort={onSort}
+            onMenu={onHeaderMenu}
+            restore={restore}
+            onResize={(c, w) => edit((l) => setWidth(l, c, w))}
+            onBestFit={(c) => fit([c])}
+            onMove={(c, t) => edit((l) => moveColumn(l, c, t))}
+          />
           <GridBody
             virtualizer={virtualizer}
             rowAt={rowAt}
             widths={widths}
+            cellIdx={cellIdx}
+            pinLeft={pinLeft}
             width={width}
             rowHeight={rowHeight}
             isSelected={(i) => contains(selection, i)}
@@ -327,6 +456,35 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       </div>
       {menu && (
         <CellMenu x={menu.x} y={menu.y} onCopyCell={copyCell} onCopyRows={copyRows} onShowValue={showValue} onClose={closeMenu} />
+      )}
+      {headerMenu && (
+        <HeaderMenu
+          x={headerMenu.x}
+          y={headerMenu.y}
+          pinned={resolved?.pinned.has(headerMenu.column) ?? false}
+          canHide={(resolved?.shown.length ?? 0) > 1}
+          onSort={(descending) => changeState((s) => ({ ...s, sort: [{ column: headerMenu.column, descending }] }))}
+          onPin={() => edit((l) => togglePin(l, headerMenu.column))}
+          onBestFit={() => fit([headerMenu.column])}
+          onHide={() => hideColumns([headerMenu.column])}
+          onClose={closeHeaderMenu}
+        />
+      )}
+      {managerOpen && resolved && (
+        <ColumnManager
+          all={resolved.all}
+          hidden={resolved.hidden}
+          pinned={resolved.pinned}
+          busy={emptyBusy}
+          onToggle={toggleColumn}
+          onPin={(c) => edit((l) => togglePin(l, c))}
+          onMove={(c, t) => edit((l) => moveColumn(l, c, t))}
+          onShowAll={() => edit(showAll)}
+          onHideEmpty={hideEmpty}
+          onBestFit={() => fit(resolved.shown.map((c) => c.name))}
+          onReset={resetLayout}
+          onClose={() => setManagerOpen(false)}
+        />
       )}
       {viewer && (
         <ValueViewer tabId={tab.id} rowId={viewer.rowId} column={viewer.column} onClose={closeViewer} onError={reportError} />

@@ -12,6 +12,10 @@ export interface GridBodyProps {
   virtualizer: Virtualizer<HTMLDivElement, Element>;
   rowAt(index: number): GridRow | null;
   widths: number[];
+  /** Per visible column: its index in the page's cells (columns are drawn in layout order, pages hold catalog order). */
+  cellIdx: number[];
+  /** Per visible column: the `left` offset of a pinned column, else null. */
+  pinLeft: (number | null)[];
   width: number;
   rowHeight: number;
   isSelected(index: number): boolean;
@@ -72,16 +76,18 @@ export default function GridBody(p: GridBodyProps): ReactNode {
               )}
             </div>
             {p.widths.map((w, c) => {
-              const cell = row?.cells[c];
+              const cell = p.cellIdx[c] >= 0 ? row?.cells[p.cellIdx[c]] : undefined;
+              const left = p.pinLeft[c];
               const focused = p.focus !== null && p.focus.row === v.index && p.focus.col === c;
               return (
                 <div
                   key={c}
                   role="gridcell"
                   aria-colindex={c + 2}
-                  className="cell"
+                  className={left === null ? "cell" : "cell cell-pinned"}
+                  data-pinned={left === null ? undefined : "true"}
                   data-focused={focused ? "true" : undefined}
-                  style={{ width: w }}
+                  style={{ width: w, left: left ?? undefined }}
                   onClick={(e) => row && p.onCellClick(e, v.index, c)}
                   onContextMenu={(e) => row && p.onCellContextMenu(e, v.index, c)}
                 >

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { caseOpen, caseSummary, settingsGet } from "../api";
@@ -45,7 +46,7 @@ async function mount(tab: Tab = events, scrollOffset = 0) {
   const status = vi.fn();
   const ctx: ShellContext = {
     summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, setGridStatus: status,
-    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(),
+    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(),
   };
   const onScroll = vi.fn();
   const utils = render(
@@ -57,6 +58,16 @@ async function mount(tab: Tab = events, scrollOffset = 0) {
   await waitFor(() => expect(dataRows().length).toBeGreaterThan(0));
   return { ...utils, status, onScroll, ctx, user: userEvent.setup() };
 }
+
+/** The status line as text: the grid hands the shell a node (its "N hidden" is a button). */
+const statusText = (status: ReturnType<typeof vi.fn>): string => {
+  const node = status.mock.calls.at(-1)?.[0] as ReactNode;
+  if (node === null || node === undefined) return "";
+  const { container, unmount } = render(<>{node}</>);
+  const text = container.textContent ?? "";
+  unmount();
+  return text;
+};
 
 const scroller = () => screen.getByTestId("grid-scroll");
 const dataRows = () => screen.queryAllByRole("row").filter((r) => r.getAttribute("data-row-index") !== null);
@@ -141,7 +152,7 @@ describe("grid", () => {
   it("mark_column_is_first_and_fixed", async () => {
     await mount();
     const heads = screen.getAllByRole("columnheader");
-    expect(heads).toHaveLength(41); // the mark column and the 40 catalogued columns
+    expect(heads).toHaveLength(38); // the mark column and the 37 shown columns (three metadata columns are hidden by default)
     expect(heads[0]).toHaveAttribute("data-fixed", "true");
     expect(heads[0]).toHaveAccessibleName("Mark");
     expect(within(rowOf(4)).getByLabelText("suspicious")).toBeInTheDocument(); // row id 5 is marked
@@ -188,8 +199,8 @@ describe("grid", () => {
     const lines = text.split("\n");
     expect(lines).toHaveLength(2);
     const names = lines[0].split("\t");
-    expect(names[0]).toBe("_triage_run_id");
-    expect(names).toHaveLength(40);
+    expect(names[0]).toBe("_triage_host");
+    expect(names).toHaveLength(37);
     const values = lines[1].split("\t");
     expect(values[names.indexOf("TimeCreated")]).toBe("2026-01-05T02:13:58.2040000Z");
     expect(text).not.toContain("2026-01-05 02:13:58");
@@ -322,7 +333,7 @@ describe("grid", () => {
     await user.keyboard("{Shift>}");
     await user.click(cellOf(rowOf(1500), "Channel"));
     await user.keyboard("{/Shift}");
-    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.stringContaining(" · 1,491 selected · ")));
+    await waitFor(() => expect(statusText(status)).toContain(" · 1,491 selected · "));
     const before = callsOf("grid_page").length;
     await user.keyboard("{Control>}{Shift>}c{/Shift}{/Control}");
     await waitFor(() => expect(copy.writeClipboard).toHaveBeenCalledTimes(1), { timeout: 15_000 });
@@ -347,9 +358,13 @@ describe("grid", () => {
     await user.keyboard("{/Control}");
     expect(rowOf(3)).toHaveAttribute("aria-selected", "false");
     expect(rowOf(4)).toHaveAttribute("aria-selected", "true");
-    await waitFor(() =>
-      expect(status).toHaveBeenLastCalledWith("5,000 of 5,000 rows · 3 selected · 40 of 40 columns · 0 hidden · 0 values failed to convert"),
-    );
+    // The status is a node (its "N hidden" is a button that opens the column manager); the metadata columns but the host's are hidden.
+    await waitFor(() => {
+      const node = status.mock.calls.at(-1)?.[0] as ReactNode;
+      expect(node).not.toBeNull();
+      const { container } = render(<>{node}</>);
+      expect(container.textContent).toBe("5,000 of 5,000 rows · 3 selected · 37 of 40 columns · 3 hidden ▾ · 0 values failed to convert");
+    });
   });
 
   it("arrows_move_the_cell_focus_and_the_cell_menu_copies", async () => {

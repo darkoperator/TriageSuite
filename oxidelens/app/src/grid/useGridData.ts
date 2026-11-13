@@ -278,6 +278,21 @@ export class GridStore {
     };
   }
 
+  /** The text of every loaded cell of `column` (for best fit); nothing while the column is not among the fetched ones. */
+  loadedTexts(column: string): string[] {
+    const out: string[] = [];
+    for (const b of this.cache.keys()) {
+      const page = this.cache.peek(b)!;
+      const at = page.columns.findIndex((c) => c.name === column);
+      if (at < 0) continue;
+      for (const row of page.cells) {
+        const cell = row[at];
+        if (cell) out.push(cell.display ?? cell.text ?? "");
+      }
+    }
+    return out;
+  }
+
   /** How many rows the scrollbar spans: the count when it is here, else what the loaded blocks show. */
   totalRows(): number {
     if (this.counts) return this.counts.rows;
@@ -308,6 +323,8 @@ export interface GridData {
   rowAt(index: number): GridRow | null;
   want(first: number, last: number): void;
   refresh(): void;
+  /** See `GridStore.loadedTexts`. */
+  loadedTexts(column: string): string[];
   /** See `GridStore.beginCopy`. */
   beginCopy(): CopySession;
   /** Rises whenever something drawn may have changed. */
@@ -342,9 +359,10 @@ export function useGridData({ tabId, state, zone, rules = NO_RULES, enabled, onE
   const want = useCallback((first: number, last: number) => store.want(first, last), [store]);
   const refresh = useCallback(() => store.refresh(), [store]);
   const beginCopy = useCallback(() => store.beginCopy(), [store]);
+  const loadedTexts = useCallback((column: string) => (store.cacheKey === key ? store.loadedTexts(column) : []), [store, key]);
   const rowAt = useCallback((i: number) => (store.cacheKey === key ? store.rowAt(i) : null), [store, key]);
   return {
     columns: store.columns, counts: fresh ? store.counts : null, total: store.totalRows(), zone: store.zone, rowAt, want,
-    refresh, beginCopy, revision,
+    refresh, beginCopy, loadedTexts, revision,
   };
 }

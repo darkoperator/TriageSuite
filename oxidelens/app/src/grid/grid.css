@@ -39,3 +39,27 @@
 .viewer-line { padding: 1px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .viewer-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .viewer-buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+
+/* Columns: the resize grip, pinned columns, the column manager. */
+.hcell { position: relative; }
+.grid-row { background: var(--bg); }
+.hcell-pinned, .cell-pinned { position: sticky; z-index: 1; background: inherit; }
+.hcell-pinned { z-index: 3; background: var(--raised); box-shadow: 1px 0 0 var(--line-strong); }
+.cell-pinned { box-shadow: 1px 0 0 var(--line); }
+.col-grip { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
+.col-grip:hover { background: var(--accent-soft); }
+.status-link { background: none; border: 0; padding: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
+.status-link:hover { text-decoration: underline; }
+.column-manager { position: absolute; right: 8px; bottom: 8px; z-index: 15; display: flex; flex-direction: column; width: 300px; max-height: min(480px, 80%); background: var(--card); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow-pop); font: var(--ui-font); }
+.cm-head { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--line); }
+.cm-head input[type="search"] { flex: 1; min-width: 0; }
+.cm-list { flex: 1; min-height: 0; margin: 0; padding: 4px; overflow: auto; list-style: none; }
+.cm-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; }
+.cm-item:hover { background: var(--accent-soft); }
+.cm-handle { flex: none; color: var(--muted); cursor: grab; user-select: none; }
+.cm-name { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
+.cm-name span { overflow: hidden; text-overflow: ellipsis; }
+.cm-pin { flex: none; background: none; border: 0; color: var(--muted); cursor: pointer; }
+.cm-pin[aria-pressed="true"] { color: var(--accent-text); }
+.cm-none { padding: 6px 8px; color: var(--muted); }
+.cm-foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-top: 1px solid var(--line); }

@@ -266,6 +266,34 @@ describe("the open case", () => {
     expect(screen.getByTestId("right-rail")).toBeInTheDocument();
   });
 
+  it("a layout save while a pane toggle is in flight: both changes persist through the real queue", async () => {
+    const user = await openRecent();
+    await user.click(within(screen.getByRole("complementary", { name: "Case" })).getByRole("button", { name: /mock_events/ }));
+    await screen.findByRole("tab", { name: /mock_events/, selected: true });
+    const grip = await screen.findByRole("separator", { name: "Resize Channel" });
+    let first = true;
+    overrideCommand("settings_update", async (a) => {
+      if (first) {
+        first = false;
+        await new Promise((r) => setTimeout(r, 500)); // the pane write is still running when the layout is ready to save
+      }
+      return mockCall("settings_update", a as Record<string, unknown>);
+    });
+    fireEvent.keyDown(document.body, { key: "]", ctrlKey: true });
+    fireEvent.mouseDown(grip, { clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 70 });
+    fireEvent.mouseUp(document, { clientX: 70 });
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(2), { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 100));
+    const reply = await mockCall<{ settings: { right_pane: string; layouts: Record<string, { widths: Record<string, number> }> } }>("settings_get");
+    expect(reply.settings.right_pane).toBe("rail");
+    expect(reply.settings.layouts.mock_events.widths.Channel).toBe(230);
+    // The second write was built from the first one's reply plus the queued layout, so it carries both.
+    const second = (callsOf("settings_update")[1].args as { settings: { right_pane: string; layouts: Record<string, unknown> } }).settings;
+    expect(second.right_pane).toBe("rail");
+    expect(Object.keys(second.layouts)).toEqual(["mock_events"]);
+  });
+
   it("ignores a saved tab list that is garbage or names a dataset the case lacks", async () => {
     localStorage.setItem(storageKey(caseSummaryId()), '{"v":1,"tabs":[{"relation":"gone"},7,null],"active":"dataset:gone","scroll":{"a":"x"}}');
     await openRecent();
