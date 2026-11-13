@@ -7,7 +7,8 @@ license.workspace = true
 description = "The OxideLens case engine: a DuckDB case file over TriageSuite output"
 
 [dependencies]
-triage-core.workspace = true
+# `zones`: every display-zone conversion goes through triage_core::timestamp::zone.
+triage-core = { workspace = true, features = ["zones"] }
 duckdb.workspace = true
 serde.workspace = true
 serde_json.workspace = true

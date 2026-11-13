@@ -19,10 +19,20 @@ sha2.workspace = true
 sha1.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+chrono-tz = { workspace = true, optional = true }
+
+[features]
+# Time zone conversion (`timestamp::zone`) for OxideLens's display zone. Off by
+# default: the suite's tools write UTC and never link the zone database.
+zones = ["dep:chrono-tz"]
 
 [dev-dependencies]
 triage-testkit = { path = "../triage-testkit" }
 tempfile.workspace = true
+
+[[test]]
+name = "zone"
+required-features = ["zones"]
 
 [lints]
 workspace = true

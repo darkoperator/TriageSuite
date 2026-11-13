@@ -49,6 +49,11 @@ jobs:
       - run: cargo test -p triage-orchestrator --test zip_e2e
       - run: cargo test -p triage-orchestrator --test duckdb_e2e
       - run: cargo test -p triage-core
+      # timestamp::zone is behind triage-core's `zones` feature, which no suite
+      # crate enables and the oxidelens job does not test, so lint and test it
+      # here or nothing does.
+      - run: cargo clippy -p triage-core --all-targets --features zones -- -D warnings
+      - run: cargo test -p triage-core --features zones --test zone --lib
 
   # OxideLens is a cargo workspace of its own, excluded from the root one
   # because it bundles DuckDB; it gets its own job and its own cache so the

@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use std::fmt;
 
+#[cfg(feature = "zones")]
+pub mod zone;
+
 /// Seconds between 1601-01-01 (FILETIME epoch) and 1970-01-01 (Unix epoch).
 const FILETIME_UNIX_OFFSET_SECS: i64 = 11_644_473_600;
 

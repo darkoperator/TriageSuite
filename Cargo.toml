@@ -49,6 +49,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 csv = "1.3"
 chrono = "0.4"
+# The IANA zone database for chrono. Only triage-core's optional `zones`
+# feature uses it (OxideLens's display zone); no suite tool enables it.
+chrono-tz = "0.10.4"
 walkdir = "2"
 globset = "0.4"
 percent-encoding = "2"
