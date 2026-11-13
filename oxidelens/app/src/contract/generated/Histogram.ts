@@ -23,6 +23,14 @@ bucket_seconds: number,
  */
 buckets: Array<Bucket>, 
 /**
+ * How many bucket positions the span covers: the last bucket's `index`
+ * plus one, or 0 when there is no bucket. It can exceed `max_buckets`
+ * when no width of the ladder fits the span (the widest, a month, is
+ * used anyway), so a span of many years has more positions than the
+ * strip has room for; the caller scales them to what it can draw.
+ */
+slots: number, 
+/**
  * Filtered rows whose time is empty or did not convert.
  */
 untimed: number, };

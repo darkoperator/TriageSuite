@@ -28,6 +28,8 @@ export interface ShellContext {
    * queue, built on the latest layouts, so a change made while another write is in flight is never lost.
    */
   saveLayout(relation: string, layout: ColumnLayout | null): void;
+  /** Switches the histogram strip on or off; shown at once, written through the settings queue. */
+  setHistogram(on: boolean): void;
   /** Shows a command error (code and message) in the status bar. */
   reportError(e: unknown): void;
 }

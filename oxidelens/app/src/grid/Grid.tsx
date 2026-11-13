@@ -37,6 +37,7 @@ import { MAX_GROUP_BY, useGroupTree, type Key } from "./groupTree";
 import GridHeader, { MARK_WIDTH } from "./GridHeader";
 import { initialGridState, nextSort } from "./gridState";
 import HeaderMenu from "./HeaderMenu";
+import Histogram from "./Histogram";
 import HostScope from "./HostScope";
 import {
   bestFitWidth, fetchedColumns, hide, materialise, moveColumn, resolve, setWidth, setWidths, show, showAll, togglePin,
@@ -63,7 +64,7 @@ interface Focus {
 }
 
 export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyProps): ReactNode {
-  const { summary, settings, change, setGridStatus, reportError, saveLayout, openScoped } = useShell();
+  const { summary, settings, change, setGridStatus, reportError, saveLayout, openScoped, setHistogram } = useShell();
   const relation = tab.relation ?? "";
 
   const [state, setState] = useState<GridState>(() => tab.seed?.state ?? initialGridState(relation));
@@ -286,10 +287,13 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   // A write to the case (a mark, a load, a zone) re-reads the rows; filters, selection and scroll stay.
   const treeRefresh = tree.refresh;
   const seenGeneration = useRef(change.generation);
+  // Rises with every re-read of the rows; the histogram strip re-reads with it.
+  const [dataVersion, setDataVersion] = useState(0);
   useEffect(() => {
     if (change.generation === seenGeneration.current) return;
     seenGeneration.current = change.generation;
     if (change.kinds.some((k) => k !== "views")) {
+      setDataVersion((v) => v + 1);
       refresh();
       treeRefresh();
     }
@@ -609,6 +613,14 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         />
         <HostScope hosts={summary.hosts} chosen={state.hosts} onChange={(hosts) => changeState((s) => ({ ...s, hosts }))} />
         <ZonePicker zone={summary.display_zone} tabId={tab.id} onError={reportError} />
+        <button
+          type="button"
+          className="scope-button"
+          aria-pressed={settings.histogram}
+          onClick={() => setHistogram(!settings.histogram)}
+        >
+          Histogram
+        </button>
       </div>
       <ChipBar
         search={state.search}
@@ -625,6 +637,20 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         onAdvanced={() => setAdvancedOpen(true)}
         onSavePreset={savePreset}
       />
+      {settings.histogram && allMetas !== null && (
+        <Histogram
+          tabId={tab.id}
+          relation={relation}
+          columns={allMetas}
+          primaryTime={summary.relations.find((r) => r.name === relation)?.primary_time ?? null}
+          state={state}
+          zone={summary.display_zone}
+          version={dataVersion}
+          enabled={active}
+          applyChips={applyChips}
+          onError={reportError}
+        />
+      )}
       <GroupBar
         by={by}
         onAdd={addGroup}

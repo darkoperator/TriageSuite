@@ -116,6 +116,8 @@ export default function Shell() {
     [updateSettings],
   );
 
+  const setHistogram = useCallback((on: boolean) => updateSettings({ histogram: on }), [updateSettings]);
+
   /** Settings read from the backend: the new confirmed state, shown unless a change is still on its way. */
   const adoptSettings = useCallback(
     (s: Settings) => {
@@ -250,10 +252,10 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, setHistogram,
           }
         : null,
-    [summary, settings, change, openTab, openScopedTab, rightPane, scroll, reportError, saveLayout],
+    [summary, settings, change, openTab, openScopedTab, rightPane, scroll, reportError, saveLayout, setHistogram],
   );
 
   const dismissNote = damaged && (

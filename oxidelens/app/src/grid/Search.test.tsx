@@ -62,7 +62,7 @@ async function mount() {
   const reportError = vi.fn();
   const ctx: ShellContext = {
     summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped: () => {}, setGridStatus: () => {},
-    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError, saveLayout: vi.fn(),
+    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError, saveLayout: vi.fn(), setHistogram: vi.fn(),
   };
   const utils = render(<Host ctx={ctx} />);
   await waitFor(() => expect(screen.getAllByRole("columnheader").length).toBeGreaterThan(1));

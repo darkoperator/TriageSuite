@@ -52,7 +52,7 @@ async function mount(tab: Tab = events, path = "/cases/x.duckdb") {
   const settings = (await settingsGet()).settings;
   const ctx: ShellContext = {
     summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped: () => {}, setGridStatus: () => {},
-    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout,
+    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout, setHistogram: vi.fn(),
   };
   const utils = render(<Host ctx={ctx} tab={tab} />);
   await waitFor(() => expect(screen.getAllByRole("columnheader").length).toBeGreaterThan(1));

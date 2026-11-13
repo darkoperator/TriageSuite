@@ -44,6 +44,12 @@ pub struct Bucket {
     /// The bucket's last whole second, in the same form: a date-range chip
     /// from `label` to `end_label` selects exactly the bucket.
     pub end_label: String,
+    /// Where the bucket sits, counted in bucket widths from the first
+    /// bucket (which is 0). Only non-empty buckets are returned, so a gap of
+    /// empty buckets shows as a jump in the indexes. A day, week or month is
+    /// counted in days, weeks or months of the local calendar, so a DST day
+    /// is one position like any other.
+    pub index: u64,
     pub count: u64,
     pub suspicious: u64,
 }
@@ -64,6 +70,12 @@ pub struct Histogram {
     pub bucket_seconds: u64,
     /// Non-empty buckets only, oldest first.
     pub buckets: Vec<Bucket>,
+    /// How many bucket positions the span covers: the last bucket's `index`
+    /// plus one, or 0 when there is no bucket. It can exceed `max_buckets`
+    /// when no width of the ladder fits the span (the widest, a month, is
+    /// used anyway), so a span of many years has more positions than the
+    /// strip has room for; the caller scales them to what it can draw.
+    pub slots: u64,
     /// Filtered rows whose time is empty or did not convert.
     pub untimed: u64,
 }
@@ -158,6 +170,7 @@ pub fn histogram(
         zone: zone.to_string(),
         bucket_seconds: BUCKET_LADDER[0],
         buckets: Vec::new(),
+        slots: 0,
         untimed: as_count(untimed),
     };
     let (Some(lo), Some(hi)) = (lo, hi) else {
@@ -233,7 +246,9 @@ pub fn histogram(
         }
     }
 
+    let first_key = keyed.first().map_or(0, |k| k.0);
     for (key, count, suspicious) in keyed {
+        let index = bucket_index(first_key, key, step, step_us);
         let (start, next) = if epoch {
             (key, key.saturating_add(step_us))
         } else if step < DAY {
@@ -248,11 +263,37 @@ pub fn histogram(
             start: r1(start),
             label: label(start, &offsets, clock),
             end_label: label(next.saturating_sub(MICROS).max(start), &offsets, clock),
+            index,
             count,
             suspicious,
         });
     }
+    out.slots = out.buckets.last().map_or(0, |b| b.index + 1);
     Ok(out)
+}
+
+/// The position of the bucket keyed `key` counted in widths from the bucket
+/// keyed `first`. Keys are the epoch or wall-clock microseconds of a bucket's
+/// start, so under a day, for days and for weeks it is an exact division; a
+/// month is counted in calendar months.
+fn bucket_index(first: i64, key: i64, step: u64, step_us: i64) -> u64 {
+    // The difference of two i64 keys can exceed i64, so it is taken in i128.
+    let whole = |unit: i64| {
+        u64::try_from((i128::from(key) - i128::from(first)) / i128::from(unit.max(1))).unwrap_or(0)
+    };
+    match step {
+        s if s < DAY => whole(step_us),
+        DAY => whole(DAY_US),
+        WEEK => whole(DAY_US * 7),
+        _ => {
+            let month =
+                |us: i64| wall_date(us).map(|d| i64::from(d.year()) * 12 + i64::from(d.month0()));
+            match (month(first), month(key)) {
+                (Some(a), Some(b)) => u64::try_from(b - a).unwrap_or(0),
+                _ => 0,
+            }
+        }
+    }
 }
 
 fn step_us(step: u64) -> i64 {
@@ -507,6 +548,20 @@ mod tests {
 
     fn us(text: &str) -> i64 {
         parse_r1(text).unwrap()
+    }
+
+    #[test]
+    fn bucket_index_survives_keys_far_apart() {
+        // 5e18 us either side of the epoch: the difference (1e19) is past i64::MAX.
+        let (lo, hi) = (
+            -5_000_000_000_000_000_000_i64,
+            5_000_000_000_000_000_000_i64,
+        );
+        assert_eq!(bucket_index(lo, hi, 1, MICROS), 10_000_000_000_000);
+        assert_eq!(bucket_index(lo, lo, 1, MICROS), 0);
+        assert_eq!(bucket_index(lo, hi, DAY, MICROS), 115_740_740);
+        // a key before the first (never produced: keys are in order) is 0, not a wrap
+        assert_eq!(bucket_index(hi, lo, 1, MICROS), 0);
     }
 
     #[test]

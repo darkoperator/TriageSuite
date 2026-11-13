@@ -46,7 +46,7 @@ async function mount(tab: Tab = events, scrollOffset = 0) {
   const status = vi.fn();
   const ctx: ShellContext = {
     summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped: () => {}, setGridStatus: status,
-    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(),
+    setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(), setHistogram: vi.fn(),
   };
   const onScroll = vi.fn();
   const utils = render(

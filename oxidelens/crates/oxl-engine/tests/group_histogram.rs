@@ -257,6 +257,16 @@ fn histogram_buckets_the_filtered_rows_in_utc() {
     let starts: Vec<_> = h.buckets.iter().map(|b| b.start.as_str()).collect();
     assert!(!starts.contains(&"2026-01-05T02:19:00.000000Z"));
     assert!(starts.windows(2).all(|w| w[0] < w[1]));
+    // Each bucket's index is its distance in minutes from the first, so the
+    // empty minutes show as jumps, and `slots` is the last index plus one.
+    let first = h.buckets[0].start.as_str();
+    assert_eq!(first, "2026-01-05T02:13:00.000000Z");
+    for b in &h.buckets {
+        let minute: u64 = b.start[14..16].parse().unwrap();
+        assert_eq!(b.index, minute - 13);
+    }
+    assert!(h.buckets.windows(2).any(|w| w[1].index > w[0].index + 1));
+    assert_eq!(h.slots, h.buckets.last().unwrap().index + 1);
     // The span fits in 21 minute-buckets, so 21 would fit and 20 would not.
     assert_eq!(
         histogram(&case, &q(EVENTS), None, 21, "UTC")
@@ -288,6 +298,10 @@ fn histogram_follows_the_filter_and_picks_wider_steps() {
     assert_eq!(h.bucket_seconds, 21_600);
     assert_eq!(h.buckets.iter().map(|b| b.count).sum::<u64>(), 4);
     assert_eq!(h.buckets[0].start, "2026-01-04T06:00:00.000000Z");
+    assert_eq!(
+        (h.buckets[0].index, h.slots),
+        (0, h.buckets.last().unwrap().index + 1)
+    );
     // One bucket takes the first step that covers the span. Weeks start on
     // a Monday, so Jan 3 to Jan 5 touches two (Dec 29 and Jan 5), and the
     // one bucket is a month, which starts on the 1st.

@@ -164,6 +164,24 @@ describe("the open case", () => {
     input.remove();
   });
 
+  it("toggle_persists", async () => {
+    const user = await openRecent();
+    await user.click(within(screen.getByRole("tabpanel", { name: "Overview" })).getByRole("button", { name: "mock_events" }));
+    const toggle = await screen.findByRole("button", { name: "Histogram" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("region", { name: "Histogram" })).toBeInTheDocument();
+    await user.click(toggle);
+    // shown at once, written through the settings queue
+    expect(screen.queryByRole("region", { name: "Histogram" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Histogram" })).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(1));
+    expect((callsOf("settings_update")[0].args as { settings: { histogram: boolean } }).settings.histogram).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Histogram" }));
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(2));
+    expect((callsOf("settings_update")[1].args as { settings: { histogram: boolean } }).settings.histogram).toBe(true);
+    expect(await screen.findByRole("region", { name: "Histogram" })).toBeInTheDocument();
+  });
+
   it("opens dataset tabs that close and move with the keyboard", async () => {
     const user = await openRecent();
     await user.click(within(screen.getByRole("tabpanel", { name: "Overview" })).getByRole("button", { name: "mock_events" }));

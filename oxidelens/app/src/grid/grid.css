@@ -169,3 +169,21 @@
 .group-count, .group-span { color: var(--text-2); }
 .group-suspicious { color: var(--suspicious); }
 .group-status { color: var(--muted); font-style: italic; }
+
+/* The histogram strip: bars and the brush on theme tokens; nothing from the data is a class or a style value. */
+.hist { flex: none; position: relative; padding: 4px 8px 2px; background: var(--surface); border-bottom: 1px solid var(--line); font: var(--ui-font); }
+.hist-head { display: flex; align-items: center; gap: 12px; min-height: 24px; }
+.hist-picker { background: var(--raised); color: var(--text-2); border: 1px solid var(--line-strong); border-radius: 4px; padding: 1px 6px; font: inherit; }
+.hist-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; padding: 0; list-style: none; color: var(--muted); }
+.hist-amber { margin-right: 4px; color: var(--suspicious); }
+.hist-plot { position: relative; width: 100%; overflow: hidden; }
+.hist-plot svg { display: block; cursor: crosshair; user-select: none; }
+.hist-bar { fill: var(--bar-idle); }
+.hist-bar.hist-sel { fill: var(--accent); }
+.hist-mark { fill: var(--suspicious); pointer-events: none; }
+.hist-hit { fill: transparent; }
+.hist-hit:hover { fill: var(--accent-soft); }
+.hist-axis { position: relative; height: 16px; color: var(--faint); font: var(--cell-font); font-size: 10px; white-space: nowrap; }
+.hist-tick { position: absolute; top: 2px; }
+.hist-error { padding: 2px 0; }
+.hist-gap-sel { fill: var(--accent); }

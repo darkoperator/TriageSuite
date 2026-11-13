@@ -14,4 +14,12 @@ label: string,
  * The bucket's last whole second, in the same form: a date-range chip
  * from `label` to `end_label` selects exactly the bucket.
  */
-end_label: string, count: number, suspicious: number, };
+end_label: string, 
+/**
+ * Where the bucket sits, counted in bucket widths from the first
+ * bucket (which is 0). Only non-empty buckets are returned, so a gap of
+ * empty buckets shows as a jump in the indexes. A day, week or month is
+ * counted in days, weeks or months of the local calendar, so a DST day
+ * is one position like any other.
+ */
+index: number, count: number, suspicious: number, };

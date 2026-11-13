@@ -556,11 +556,11 @@ const handlers: Handlers = {
         const first = chunk[0][0];
         const last = chunk[chunk.length - 1][0];
         buckets.push({
-          start: `${first.replace(" ", "T")}:00:00.000000Z`, label: `${first}:00:00`, end_label: `${last}:59:59`,
+          start: `${first.replace(" ", "T")}:00:00.000000Z`, label: `${first}:00:00`, end_label: `${last}:59:59`, index: buckets.length,
           count: chunk.reduce((n, [, v]) => n + v.count, 0), suspicious: chunk.reduce((n, [, v]) => n + v.suspicious, 0),
         });
       }
-      return { column: col.name, time_semantics: col.time_semantics, zone: "UTC", bucket_seconds: 3600 * width, buckets, untimed };
+      return { column: col.name, time_semantics: col.time_semantics, zone: "UTC", bucket_seconds: 3600 * width, buckets, slots: buckets.length, untimed };
     }),
   grid_values: (a) =>
     read(a.slot, a.queryId, () => {

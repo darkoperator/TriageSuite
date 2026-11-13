@@ -41,6 +41,10 @@ fn labels(b: &[Bucket]) -> Vec<(&str, &str)> {
         .collect()
 }
 
+fn indexes(b: &[Bucket]) -> Vec<u64> {
+    b.iter().map(|b| b.index).collect()
+}
+
 fn counts(b: &[Bucket]) -> Vec<u64> {
     b.iter().map(|b| b.count).collect()
 }
@@ -165,6 +169,9 @@ fn six_hour_buckets_follow_the_local_clock() {
         ]
     );
     assert_eq!(counts(&h.buckets), [1, 3]);
+    // 00:00 and 18:00 are positions 0 and 3 of six-hour buckets.
+    assert_eq!(indexes(&h.buckets), [0, 3]);
+    assert_eq!(h.slots, 4);
     // In UTC they keep the epoch's alignment, as before.
     let h = histogram(&case, &ws01, None, 4, "UTC").unwrap();
     assert_eq!(h.buckets[0].start, "2026-01-04T06:00:00.000000Z");
@@ -223,6 +230,9 @@ fn weeks_start_on_monday_and_months_on_the_first() {
     );
     // 2026-04-01T03:30Z is still March 31 in New York.
     assert_eq!(counts(&h.buckets), [1, 2, 1]);
+    // April and May hold nothing: the jump shows in the indexes.
+    assert_eq!(indexes(&h.buckets), [0, 1, 4]);
+    assert_eq!(h.slots, 5);
     assert_eq!(h.buckets[1].end_label, "2026-03-31 23:59:59");
 }
 
@@ -247,6 +257,9 @@ fn day_buckets_across_spring_forward() {
         ]
     );
     assert_eq!(counts(&h.buckets), [1, 1, 1]);
+    // The 23-hour day is one position like any other.
+    assert_eq!(indexes(&h.buckets), [0, 1, 2]);
+    assert_eq!(h.slots, 3);
     // Mar 8 is 23 hours long, and each day ends a second before the next.
     assert_eq!(
         labels(&h.buckets),
