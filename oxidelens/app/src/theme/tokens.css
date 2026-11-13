@@ -1,0 +1,123 @@
+/* The theme: every colour of the app is a custom property defined here and nowhere else; component CSS uses the
+   variables. Dark is the palette of the design's Look section; the light set is a placeholder with the same names,
+   finished in the theme task. The accent is #5b8def and never orange or amber. */
+
+/* Not colours: the same in both themes. The font-size setting (10 to 16 px) sets --cell-size; rows follow it. */
+:root {
+  --font-ui: "Inter Variable", Inter, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ui-size: 13px;
+  --cell-size: 12px;
+  --ui-font: var(--ui-size) var(--font-ui);
+  --cell-font: var(--cell-size) var(--font-mono);
+  /* 22 px at the default 12 px cell font. */
+  --row-h: calc(var(--cell-size) + 10px);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0b0e12;
+  --surface: #0e1116;
+  --card: #151a21;
+  --raised: #1b212a;
+  --raised-2: #232b36;
+  --line: #1f2630;
+  --line-strong: #2a3340;
+  --line-faint: #3a4452;
+
+  --text: #e6eaf0;
+  --text-2: #c9d1dc;
+  --muted: #9aa5b4;
+  --faint: #6b7685;
+
+  --accent: #5b8def;
+  --accent-soft: rgba(91, 141, 239, 0.16);
+  --accent-text: #93b4f5;
+  --on-accent: #0b0e12;
+  --bar-idle: #2b3a55;
+
+  /* Reserved meanings: a mark, the agent, success, work in progress. Nothing else uses them. */
+  --suspicious: #f5a524;
+  --suspicious-bg: rgba(245, 165, 36, 0.1);
+  --malicious: #f0565b;
+  --malicious-bg: rgba(240, 86, 91, 0.1);
+  --agent: #a78bfa;
+  --agent-bg: #2a2240;
+  --ok: #7dd3a8;
+  --ok-bg: #14332a;
+  --in-progress: #38bdf8;
+  --in-progress-bg: #0f2f3d;
+
+  /* The grid. */
+  --row-stripe: rgba(255, 255, 255, 0.025);
+  --row-hover: rgba(255, 255, 255, 0.05);
+  --row-selected: var(--accent-soft);
+  --cell-focus: var(--accent);
+  --search-hit: rgba(91, 141, 239, 0.28);
+
+  /* Colour rules: a fixed set, mapped to fixed classes; nothing from the data ever becomes a colour. */
+  --rule-red: rgba(240, 86, 91, 0.16);
+  --rule-orange: rgba(247, 140, 108, 0.16);
+  --rule-amber: rgba(245, 165, 36, 0.14);
+  --rule-green: rgba(125, 211, 168, 0.14);
+  --rule-blue: rgba(91, 141, 239, 0.16);
+  --rule-teal: rgba(86, 200, 190, 0.14);
+  --rule-grey: rgba(154, 165, 180, 0.14);
+
+  --scrim: rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Placeholder: same names, light values. Finished (and contrast-checked) in the theme task. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --raised: #eef0f4;
+  --raised-2: #e4e7ed;
+  --line: #e1e5eb;
+  --line-strong: #cbd2dc;
+  --line-faint: #b6bfcc;
+
+  --text: #161b22;
+  --text-2: #2f3a48;
+  --muted: #5a6677;
+  --faint: #7f8a9a;
+
+  --accent: #5b8def;
+  --accent-soft: rgba(91, 141, 239, 0.16);
+  --accent-text: #2f5fc4;
+  --on-accent: #ffffff;
+  --bar-idle: #c5d3ee;
+
+  --suspicious: #b97400;
+  --suspicious-bg: rgba(245, 165, 36, 0.14);
+  --malicious: #c8343a;
+  --malicious-bg: rgba(240, 86, 91, 0.12);
+  --agent: #6d4fd6;
+  --agent-bg: #ece6fb;
+  --ok: #1d7a53;
+  --ok-bg: #dff3e9;
+  --in-progress: #0b7db0;
+  --in-progress-bg: #dcf0fa;
+
+  --row-stripe: rgba(0, 0, 0, 0.025);
+  --row-hover: rgba(0, 0, 0, 0.05);
+  --row-selected: var(--accent-soft);
+  --cell-focus: var(--accent);
+  --search-hit: rgba(91, 141, 239, 0.3);
+
+  --rule-red: rgba(240, 86, 91, 0.18);
+  --rule-orange: rgba(247, 140, 108, 0.2);
+  --rule-amber: rgba(245, 165, 36, 0.2);
+  --rule-green: rgba(40, 160, 110, 0.16);
+  --rule-blue: rgba(91, 141, 239, 0.18);
+  --rule-teal: rgba(30, 160, 150, 0.16);
+  --rule-grey: rgba(90, 102, 119, 0.14);
+
+  --scrim: rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.18);
+}

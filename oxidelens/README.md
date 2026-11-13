@@ -26,6 +26,45 @@ cargo build --release
 The binary is `target/release/oxidelens`. Run the tests with
 `cargo test` and the lints with `cargo clippy --all-targets -- -D warnings`.
 
+## The app
+
+The desktop app is a Tauri v2 shell (`crates/oxl-app`) around a React and
+TypeScript front end in `app/`. The front end displays and keeps what it is
+showing; every rule lives in the engine. Its one backend caller is
+`app/src/api.ts`, and the TypeScript contract it calls through
+(`app/src/contract/generated/`) is generated from the Rust types: never edit
+it by hand, and regenerate it with
+`OXL_WRITE_CONTRACT=1 cargo test -p oxl-app --test contract`.
+
+The front end needs Node 22. The app makes no network request; `npm ci` needs
+the registry for the development tools only.
+
+```
+npm --prefix app ci
+npm --prefix app run dev:mock     # the front end in a browser, on the mock backend
+cargo tauri dev                   # the real app (from crates/oxl-app, with the Tauri CLI)
+```
+
+**Mock mode.** `npm run dev:mock` serves the front end on http://localhost:5173
+with a fake backend (`app/src/mock/`) in place of the desktop app: a seeded
+5,000-row, 40-column `mock_events` relation (with hostile cell text: markup, a
+bidi override, a zero-width joiner, BEL, a formula, a 5,000-character value) and
+a Hayabusa-like `mock_hayabusa`, answering every command of the contract, with
+the app's supersede, cancel, `busy` and `case-changed` behaviour. It is a
+compile-time switch (`__OXL_MOCK__`, true only for that dev server): a build
+holds none of it, and no environment variable is read. A banner marks it. The
+mock holds no rules and shows every time in UTC; do not test the engine there.
+
+**Checks.** From `app/`: `npm run lint`, `npm test` and `npm run build`
+(`scripts/check.sh` runs all three, or skips them with `--no-app`, or with a
+note when Node is absent). Tests mock Tauri once, in `app/src/test/setup.ts`:
+`invoke` goes to the mock backend and is logged in `callLog`, a test answers
+or rejects a command with `overrideCommand`, and `emitEvent` sends an event.
+ESLint forbids HTML injection (`dangerouslySetInnerHTML`, `innerHTML`,
+`document.write`) and date arithmetic (`new Date(x)`, `Date.parse`,
+`Date.UTC`, `Intl.DateTimeFormat`) in the front end. Text from a case is shown
+through `displaySafe` (`app/src/text.ts`).
+
 ## A worked session
 
 All names below are synthetic. The run output root is the folder a

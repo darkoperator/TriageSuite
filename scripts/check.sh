@@ -14,6 +14,7 @@
 #   scripts/check.sh --no-captures   # skip those (a checkout without evidence)
 #   scripts/check.sh --no-duckdb     # skip the DuckDB view assertions
 #   scripts/check.sh --no-oxidelens  # skip the oxidelens/ workspace
+#   scripts/check.sh --no-app        # skip the OxideLens front end (lint, test, build)
 #   scripts/check.sh --fast     # fmt + clippy + allow check, no tests
 set -uo pipefail
 
@@ -23,13 +24,15 @@ captures=1
 tests=1
 duckdb=1
 oxidelens=1
+app=1
 for arg in "$@"; do
   case "$arg" in
     --no-captures) captures=0 ;;
     --no-duckdb) duckdb=0 ;;
     --no-oxidelens) oxidelens=0 ;;
+    --no-app) app=0 ;;
     --fast) tests=0 ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -100,10 +103,33 @@ if [ "$oxidelens" -eq 1 ]; then
   fi
 fi
 
+# OxideLens's front end (oxidelens/app) is a Node project of its own: lint,
+# test, build. Like the DuckDB assertions it is skipped, with a note, where
+# its tool is missing; where node is present but the packages are not, that is
+# a failure to act on (`npm --prefix oxidelens/app ci`), not a quiet skip.
+in_app() { (cd oxidelens/app && "$@"); }
+if [ "$app" -eq 1 ] && ! command -v node >/dev/null 2>&1; then
+  echo "note: node is not on PATH -- running as --no-app."
+  echo "      The OxideLens front end will NOT be linted, tested or built."
+  app=0
+fi
+if [ "$app" -eq 1 ]; then
+  if [ ! -d oxidelens/app/node_modules ]; then
+    echo "note: oxidelens/app/node_modules is missing: run npm --prefix oxidelens/app ci"
+    failed+=("app packages (npm --prefix oxidelens/app ci)")
+  else
+    step "app lint" in_app npm run lint
+    if [ "$tests" -eq 1 ]; then
+      step "app test" in_app npm test
+    fi
+    step "app build" in_app npm run build
+  fi
+fi
+
 echo
 if [ ${#failed[@]} -eq 0 ]; then
   if [ "$tests" -eq 1 ] && [ "$captures" -eq 1 ] && [ "$duckdb" -eq 1 ] \
-     && [ "$oxidelens" -eq 1 ]; then
+     && [ "$oxidelens" -eq 1 ] && [ "$app" -eq 1 ]; then
     echo "All checks passed, capture-gated and DuckDB view assertions included."
   elif [ "$tests" -eq 0 ]; then
     echo "All checks passed (reduced run: no tests)."
@@ -112,6 +138,7 @@ if [ ${#failed[@]} -eq 0 ]; then
     [ "$captures" -eq 0 ] && reasons+=("captures skipped")
     [ "$duckdb" -eq 0 ] && reasons+=("DuckDB skipped")
     [ "$oxidelens" -eq 0 ] && reasons+=("OxideLens skipped")
+    [ "$app" -eq 0 ] && reasons+=("OxideLens app skipped")
     reasons_joined="$(printf '%s, ' "${reasons[@]}")"
     reasons_joined="${reasons_joined%, }"
     echo "All checks passed (reduced run: ${reasons_joined})."

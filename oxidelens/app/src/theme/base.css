@@ -1,0 +1,23 @@
+/* Base element styles on the tokens. No colour literals here: see tokens.css. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--ui-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+code,
+.mono {
+  font: var(--cell-font);
+}
