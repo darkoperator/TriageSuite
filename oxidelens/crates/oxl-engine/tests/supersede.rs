@@ -1554,3 +1554,262 @@ fn rebind_cost_does_not_grow_with_annotations() {
     };
     assert_eq!(cost(1), cost(200));
 }
+
+/// A run that types a column and a run that leaves it as text cannot feed
+/// one relation, whichever came first (ruling R10): the later one is
+/// refused naming the relation and the column, and the case is as it was.
+#[test]
+fn typing_conflict_is_refused_both_ways() {
+    let untype_event_id = |json: &mut serde_json::Value| {
+        let datasets = json["datasets"].as_array_mut().unwrap();
+        let evtx = datasets
+            .iter_mut()
+            .find(|ds| ds["view"] == "evtxtriage_events")
+            .unwrap();
+        evtx["effective_types"]
+            .as_object_mut()
+            .unwrap()
+            .remove("EventId")
+            .unwrap();
+    };
+    for typed_first in [true, false] {
+        let (d, mut case) = setup();
+        let typed = oxl_fixtures::two_hosts(&d.path().join("a"));
+        let untyped = copy_run(&typed, &d.path().join("b"), "20260104000000-dddd", |j| {
+            untype_event_id(j)
+        });
+        let (first, second) = if typed_first {
+            (&typed, &untyped)
+        } else {
+            (&untyped, &typed)
+        };
+        load_run(&mut case, first, &analyst()).unwrap();
+        let (c, message) = code(load_run(&mut case, second, &analyst()));
+        assert_eq!(c, "invalid", "typed_first={typed_first}: {message}");
+        assert!(
+            message.contains("evtxtriage_events") && message.contains("EventId"),
+            "{message}"
+        );
+        assert_eq!(
+            sources(&case).unwrap().len(),
+            1,
+            "typed_first={typed_first}"
+        );
+        assert_eq!(
+            n(
+                &case,
+                "select count(*) from duckdb_schemas() where schema_name = 'src_2'"
+            ),
+            0
+        );
+        assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 11);
+        // The column is still typed (or still text) exactly as the first
+        // run left it.
+        let typed_now = n(
+            &case,
+            "select count(*) from ox.column_catalog where relation = 'evtxtriage_events' \
+             and name = 'EventId' and sql_type is not null",
+        );
+        assert_eq!(typed_now, i64::from(typed_first));
+    }
+}
+
+/// A load that fails partway, after it has staged datasets of its own (it
+/// fails before `supersede` runs; the failure after it is the unit test
+/// `a_load_that_fails_after_supersede_rolls_back` in `load/run.rs`), leaves
+/// no trace: the earlier run is still the one in view with every annotation
+/// on its rows, and the same run loads once its file is back.
+#[test]
+fn a_load_that_fails_partway_rolls_back_whole() {
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    let svch0st = mark(&mut case, SVCH0ST_WS01);
+    assert!(add_tag(&mut case, &[svch0st], "lateral", &analyst()).unwrap()[0].done);
+    let note = add_note(&mut case, svch0st, "look here", &analyst()).unwrap();
+    let history_before = n(&case, "select count(*) from ox.history");
+    let base = oxl_fixtures::two_hosts(&d.path().join("base"));
+    let again = copy_run(&base, &d.path().join("b"), "20260104000000-dddd", |_| {});
+    // One host's Windows event log is missing, so the load fails once it
+    // is under way.
+    let evtx = again
+        .join("Processed-SRV01-20260101000000")
+        .join("EventLogs")
+        .join("evtx.csv");
+    let kept = std::fs::read(&evtx).unwrap();
+    std::fs::remove_file(&evtx).unwrap();
+    let (c, message) = code(load_run(&mut case, &again, &analyst()));
+    assert_ne!(c, "ok");
+    assert!(message.contains("evtx.csv"), "{message}");
+
+    assert_eq!(sources(&case).unwrap().len(), 1);
+    assert_eq!(n(&case, "select count(*) from ox.history"), history_before);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from duckdb_schemas() \
+             where schema_name like 'src_%' and schema_name <> 'src_1'"
+        ),
+        0
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from duckdb_schemas() where schema_name = 'ox_stage'"
+        ),
+        0
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.source_dataset where NOT active"
+        ),
+        0
+    );
+    assert_eq!(n(&case, SVCH0ST_WS01), svch0st);
+    assert_eq!(n(&case, "select count(*) from petriage_timeline"), 5);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from petriage_timeline where _triage_run_id = '20260104000000-dddd'"
+        ),
+        0
+    );
+    for table in ["row_mark", "row_tag", "note"] {
+        assert_eq!(
+            n(
+                &case,
+                &format!("select count(*) from ox.{table} where row_id = {svch0st}")
+            ),
+            1,
+            "{table}"
+        );
+    }
+    assert_eq!(
+        n(
+            &case,
+            &format!("select id from ox.note where row_id = {svch0st}")
+        ),
+        note.id
+    );
+
+    // With the file back the same run loads and the annotations follow.
+    std::fs::write(&evtx, kept).unwrap();
+    let report = load_run(&mut case, &again, &analyst()).unwrap();
+    assert_eq!(report.source_id, 2);
+    assert_ne!(n(&case, SVCH0ST_WS01), svch0st);
+    assert_eq!(n(&case, "select count(*) from ox.row_mark"), 1);
+}
+
+/// Taking back a rerun puts the tags and notes its rows took over on the
+/// earlier run's identical rows, as it does a mark; those on a row only the
+/// rerun had are orphaned, counted in the report, and still listed.
+#[test]
+fn tags_and_notes_return_on_reinstatement() {
+    let (d, mut case) = setup();
+    load_run(
+        &mut case,
+        &oxl_fixtures::two_hosts(&d.path().join("a")),
+        &analyst(),
+    )
+    .unwrap();
+    let original = n(&case, SVCH0ST_WS01);
+    assert!(add_tag(&mut case, &[original], "lateral", &analyst()).unwrap()[0].done);
+    let note = add_note(&mut case, original, "look here", &analyst()).unwrap();
+    let rerun = load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap();
+    let taken = n(&case, SVCH0ST_WS01);
+    assert_ne!(taken, original);
+    assert_eq!(n(&case, "select row_id from ox.row_tag"), taken);
+    // And one pair on a row the earlier run never had.
+    let only_rerun = n(
+        &case,
+        "select _ox_row from petriage_timeline where ExecutableName = 'PSEXESVC.EXE'",
+    );
+    assert!(add_tag(&mut case, &[only_rerun], "psexec", &analyst()).unwrap()[0].done);
+    let stranded = add_note(&mut case, only_rerun, "only here", &analyst()).unwrap();
+
+    let report = remove_source(&mut case, rerun.source_id, true, &analyst()).unwrap();
+    assert_eq!(
+        (
+            report.orphaned_marks,
+            report.orphaned_tags,
+            report.orphaned_notes
+        ),
+        (0, 1, 1)
+    );
+    assert_eq!(n(&case, SVCH0ST_WS01), original);
+    assert_eq!(
+        n(&case, "select row_id from ox.row_tag where tag = 'lateral'"),
+        original
+    );
+    assert_eq!(
+        n(
+            &case,
+            &format!("select row_id from ox.note where id = {}", note.id)
+        ),
+        original
+    );
+    // The tag and the note are on the row in view, where the listings find them.
+    assert_eq!(
+        oxl_engine::notes(&case, original, 50, 0)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(
+        oxl_engine::row_detail(&case, original).unwrap().tags,
+        ["lateral"]
+    );
+    // The stranded pair stayed on the rerun's row, flagged and not in view.
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.note where id = {} and row_id = {only_rerun}",
+                stranded.id
+            )
+        ),
+        1
+    );
+    let detail = oxl_engine::row_detail(&case, only_rerun).unwrap();
+    assert!(!detail.active);
+
+    let removal = oxl_engine::history(&case, Some("source"), 1000, 0)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|e| e.action == "source_remove")
+        .unwrap();
+    let entry = &removal.after.unwrap()["reinstated"][0];
+    let mut moved = entry["moved"].as_array().unwrap().clone();
+    moved.sort_by_key(|m| m["kind"].as_str().unwrap().to_string());
+    assert_eq!(
+        moved,
+        vec![
+            serde_json::json!({"kind": "note", "from_row": taken, "to_row": original,
+                               "note_id": note.id, "deleted": false}),
+            serde_json::json!({"kind": "row_tag", "from_row": taken, "to_row": original,
+                               "tag": "lateral"}),
+        ]
+    );
+    let mut left = entry["left_behind"].as_array().unwrap().clone();
+    left.sort_by_key(|m| m["kind"].as_str().unwrap().to_string());
+    assert_eq!(
+        left,
+        vec![
+            serde_json::json!({"kind": "note", "from_row": only_rerun, "note_id": stranded.id,
+                               "deleted": false}),
+            serde_json::json!({"kind": "row_tag", "from_row": only_rerun, "tag": "psexec"}),
+        ]
+    );
+}

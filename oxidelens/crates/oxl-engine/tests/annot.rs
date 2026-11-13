@@ -766,11 +766,11 @@ fn an_orphaned_mark_is_listed_as_superseded() {
 }
 
 #[test]
-fn hostile_tags_notes_and_row_ids_return_rather_than_panic() {
+fn hostile_annotation_inputs_are_invalid() {
     let (_d, mut case) = loaded();
     let r = logon(&case);
     let long = "x".repeat(100_000);
-    for text in [
+    let hostile = [
         "\0",
         "ai:",
         "İ",
@@ -779,12 +779,38 @@ fn hostile_tags_notes_and_row_ids_return_rather_than_panic() {
         "'; drop table ox.tag; --",
         "\u{feff}a",
         &long,
-    ] {
-        let _ = add_tag(&mut case, &[r], text, &analyst());
-        let _ = add_tag(&mut case, &[r], text, &agent());
-        let _ = remove_tag(&mut case, &[r], text, &agent());
-        let _ = add_note(&mut case, r, text, &agent());
+    ];
+    for text in hostile {
+        // A malformed tag is `invalid` to add as either actor. Removing
+        // never judges the prefix, so a bare `ai:` is well formed there.
+        for who in [analyst(), agent()] {
+            let e = add_tag(&mut case, &[r], text, &who).unwrap_err();
+            assert_eq!(e.code(), "invalid", "add {text:.12?} as {who:?}: {e}");
+        }
+        let removed = remove_tag(&mut case, &[r], text, &agent());
+        if text == "ai:" {
+            assert!(!removed.unwrap()[0].done);
+        } else {
+            assert_eq!(removed.unwrap_err().code(), "invalid", "remove {text:.12?}");
+        }
     }
+    // A note is any 1 to MAX_NOTE characters, whatever they are: only the
+    // overlong one is invalid, and the rest are kept exactly as written.
+    for text in hostile {
+        if text == long {
+            let e = add_note(&mut case, r, text, &agent()).unwrap_err();
+            assert_eq!(e.code(), "invalid", "{e}");
+        } else {
+            let note = add_note(&mut case, r, text, &agent()).unwrap();
+            assert_eq!(note.text, text);
+        }
+    }
+    let kept = notes(&case, r, 50, 0).unwrap().items;
+    assert_eq!(kept.len(), hostile.len() - 1);
+    assert_eq!(kept[0].text, "\0");
+    assert_eq!(kept[3].text, "ß");
+    assert_eq!(n(&case, "select count(*) from ox.row_tag"), 0);
+
     let extremes = [i64::MIN, i64::MIN + 1, -1, 0, i64::MAX - 1, i64::MAX];
     let out = mark_suspicious(&mut case, &extremes, &analyst()).unwrap();
     assert!(out.iter().all(|o| !o.done));
@@ -794,8 +820,15 @@ fn hostile_tags_notes_and_row_ids_return_rather_than_panic() {
         .all(|o| !o.done));
     for id in extremes {
         assert_eq!(row_detail(&case, id).unwrap_err().code(), "not_found");
+        assert_eq!(
+            add_note(&mut case, id, "x", &analyst()).unwrap_err().code(),
+            "not_found"
+        );
         assert!(notes(&case, id, 50, 0).unwrap().items.is_empty());
-        let _ = delete_note(&mut case, id, &analyst());
+        assert_eq!(
+            delete_note(&mut case, id, &analyst()).unwrap_err().code(),
+            "not_found"
+        );
     }
     assert_eq!(
         n(
@@ -803,6 +836,60 @@ fn hostile_tags_notes_and_row_ids_return_rather_than_panic() {
             "select count(*) from ox.tag where name like '%drop%'"
         ),
         0
+    );
+}
+
+/// A row id that is not a row says so, whatever the verb.
+#[test]
+fn reason_for_row_minus_one() {
+    let (_d, mut case) = loaded();
+    for (verb, out) in [
+        ("mark", mark_suspicious(&mut case, &[-1], &analyst())),
+        ("clear", clear_suspicious(&mut case, &[-1], &analyst())),
+        ("tag", add_tag(&mut case, &[-1], "x", &analyst())),
+        ("untag", remove_tag(&mut case, &[-1], "x", &analyst())),
+    ] {
+        let out = out.unwrap();
+        assert_eq!(out.len(), 1, "{verb}");
+        assert_eq!(out[0].row_id, -1, "{verb}");
+        assert!(!out[0].done, "{verb}");
+        assert_eq!(
+            out[0].reason.as_deref(),
+            Some("no row -1 in the case"),
+            "{verb}"
+        );
+    }
+}
+
+/// An analyst may delete what an agent wrote; the history says who did it,
+/// and the note cannot be deleted twice.
+#[test]
+fn analyst_deletes_an_agents_note() {
+    let (_d, mut case) = loaded();
+    let r = logon(&case);
+    let theirs = add_note(&mut case, r, "agent's finding", &agent()).unwrap();
+    delete_note(&mut case, theirs.id, &analyst()).unwrap();
+    assert!(notes(&case, r, 50, 0).unwrap().items.is_empty());
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.note where id = {} and deleted \
+                 and written_by = 'agent:claude'",
+                theirs.id
+            )
+        ),
+        1
+    );
+    let latest = history(&case, Some("note"), 1, 0).unwrap().items;
+    assert_eq!(latest[0].action, "note_delete");
+    assert_eq!(latest[0].by, "analyst:tester");
+    assert_eq!(latest[0].target_id, theirs.id.to_string());
+    assert_eq!(
+        delete_note(&mut case, theirs.id, &analyst())
+            .unwrap_err()
+            .code(),
+        "refused"
     );
 }
 

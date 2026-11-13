@@ -3,11 +3,12 @@
 
 mod common;
 
-use common::loaded;
+use common::{analyst, loaded};
 use oxl_engine::search::{
     compile_search, parse_search, Search, SearchExpr, SearchOptions, Term, MAX_SEARCH, MAX_TERMS,
 };
-use oxl_engine::{columns, Case, ColumnInfo};
+use oxl_engine::{columns, count, load_file, page, Case, ColumnInfo, FileOptions, GridQuery};
+use oxl_fixtures::{loose_fw_csv, new_case};
 
 const RELATION: &str = "evtxtriage_events";
 
@@ -234,4 +235,143 @@ fn hostile_terms_are_values_not_sql() {
             .code(),
         "invalid"
     );
+}
+
+/// A loose file's host is metadata in `_triage_host`, a host-role column,
+/// and no cell of the file says it: a search for the host still finds its
+/// rows, which is how an analyst finds "everything from WS01".
+#[test]
+fn host_metadata_column_is_searched() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let path = loose_fw_csv(d.path());
+    let opts = FileOptions {
+        host: Some("WS01".into()),
+        ..Default::default()
+    };
+    load_file(&mut case, &path, opts, &analyst()).unwrap();
+    assert_eq!(
+        common::n(
+            &case,
+            "select count(*) from fw_csv where \"time\" like '%WS01%' or src_ip like '%WS01%' \
+             or dst_ip like '%WS01%' or action like '%WS01%' or bytes::varchar like '%WS01%'"
+        ),
+        0,
+        "the file's own cells must not say WS01"
+    );
+    let cols = columns(&case, "fw_csv").unwrap();
+    let hits = |q: &str| {
+        let q = GridQuery {
+            relation: "fw_csv".into(),
+            search: Some(q.into()),
+            ..Default::default()
+        };
+        count(&case, &q).unwrap()
+    };
+    assert!(cols.iter().any(|c| c.name == "_triage_host"));
+    assert_eq!(hits("WS01"), 3);
+    assert_eq!(hits("ws01"), 3);
+    assert_eq!(hits("-WS01"), 0);
+    assert_eq!(hits("SRV01"), 0);
+}
+
+/// `Name:text` scopes a term only to a column whose name is one unquoted
+/// word with no colon in it. A column named `Remote Host` or `a:b` is still
+/// searched by bare terms, but cannot be scoped in the search box (the
+/// README says so); the engine reads the attempt as plain text.
+#[test]
+fn a_column_with_whitespace_or_a_colon_cannot_be_scoped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let p = d.path().join("scopes.csv");
+    std::fs::write(&p, "Remote Host,a:b,plain\nsrv,vvv,p1\nother,www,p2\n").unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let cols = columns(&case, "scopes_csv").unwrap();
+    let parsed = |q: &str| match parse_search(q, SearchOptions::default(), &cols)
+        .unwrap()
+        .unwrap()
+    {
+        Search::Terms(e) => e.any,
+        other => panic!("{other:?}"),
+    };
+    let hits = |q: &str| {
+        let q = GridQuery {
+            relation: "scopes_csv".into(),
+            search: Some(q.into()),
+            ..Default::default()
+        };
+        count(&case, &q).unwrap()
+    };
+    // A plain name scopes.
+    assert_eq!(
+        parsed("plain:p1"),
+        vec![Term {
+            text: "p1".into(),
+            column: Some("plain".into())
+        }]
+    );
+    assert_eq!(hits("plain:p1"), 1);
+    // Quoting the name does not make it one: the whole token is text, which
+    // no cell holds.
+    assert_eq!(parsed(r#""Remote Host":srv"#), vec![t("Remote Host:srv")]);
+    assert_eq!(hits(r#""Remote Host":srv"#), 0);
+    assert_eq!(parsed("a:b:vvv"), vec![t("a:b:vvv")]);
+    assert_eq!(hits("a:b:vvv"), 0);
+    // Without the scope the same words find the rows.
+    assert_eq!(hits("srv"), 1);
+    assert_eq!(hits("vvv"), 1);
+}
+
+/// Every input the totality test feeds the parser also runs end to end, as
+/// the grid runs it, in both modes: the answer is a page or `invalid`,
+/// never an engine fault or a panic.
+#[test]
+fn hostile_searches_compile_and_run() {
+    let (_d, case, _cols) = setup();
+    let long_quotes = "\"".repeat(1999);
+    let too_many = "x ".repeat(2000);
+    for regex in [false, true] {
+        for s in [
+            "+",
+            "-",
+            ":",
+            "\"",
+            "+\"",
+            "a:",
+            ":b",
+            "++--",
+            long_quotes.as_str(),
+            "\u{0}\u{1f}",
+            "+\u{202e}evil",
+            too_many.as_str(),
+            "(",
+            "[a-",
+            "*",
+            "(?<n>a)",
+            "a{1001}",
+        ] {
+            let q = GridQuery {
+                relation: RELATION.into(),
+                search: Some(s.into()),
+                search_regex: regex,
+                ..Default::default()
+            };
+            match page(&case, &q, 50, 0) {
+                Ok(p) => assert!(p.row_ids.len() <= 11),
+                Err(e) => assert_eq!(e.code(), "invalid", "regex={regex} {s:.20?}: {e}"),
+            }
+            match count(&case, &q) {
+                Ok(n) => assert!(n <= 11),
+                Err(e) => assert_eq!(e.code(), "invalid", "regex={regex} {s:.20?}: {e}"),
+            }
+        }
+    }
+    // The inputs that are plain text in term mode really ran: a lone `:` is
+    // a term, which every event's `C:\...` source file contains.
+    let q = GridQuery {
+        relation: RELATION.into(),
+        search: Some(":".into()),
+        ..Default::default()
+    };
+    assert_eq!(count(&case, &q).unwrap(), 11);
 }

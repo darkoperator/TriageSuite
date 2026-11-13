@@ -22,8 +22,7 @@
 //!      R17). Each allowed function computes rows from its arguments alone:
 //!      - `range` and `generate_series`: a sequence of numbers or timestamps
 //!        between two bounds;
-//!      - `unnest`: the elements of a list or struct value it is given;
-//!      - `generate_subscripts`: the indexes of a list it is given.
+//!      - `unnest`: the elements of a list or struct value it is given.
 //!
 //!      Everything else is refused, which includes the file readers, the
 //!      statement-in-a-value indirections (`query`, `query_table`,
@@ -35,10 +34,10 @@
 //!      `arrow_scan`, or one of `getenv`, `glob`, `sniff_csv`, `query`,
 //!      `query_table`, `json_execute_serialized_sql`, `enable_logging`,
 //!      `disable_logging`, `truncate_duckdb_logs`, `enable_profiling`,
-//!      `disable_profiling`, `checkpoint`, `force_checkpoint`. They read
-//!      files or the environment, hide a statement in a value, or change the
-//!      instance's state. A scalar of one of these names is refused like the
-//!      table function.
+//!      `disable_profiling`, `checkpoint`, `force_checkpoint`, `nextval`. They
+//!      read files or the environment, hide a statement in a value, advance a
+//!      sequence, or change the instance's state. A scalar of one of these
+//!      names is refused like the table function.
 //!    - It names a table that is not the case's own. DuckDB answers a name
 //!      it cannot find with a replacement scan of the file that the whole
 //!      qualified name spells (`one.duckdb`, `"C:\dir\one"."duckdb"`), so:
@@ -155,8 +154,7 @@ const LOCKED_SETTINGS: [(&str, &str); 5] = [
 /// The only table functions a query may use in a FROM position (ruling
 /// R17): each computes rows from its arguments alone. The module doc says
 /// why each is safe.
-const ALLOWED_TABLE_FUNCTIONS: [&str; 4] =
-    ["range", "generate_series", "unnest", "generate_subscripts"];
+const ALLOWED_TABLE_FUNCTIONS: [&str; 3] = ["range", "generate_series", "unnest"];
 
 /// The catalogs a table reference may name. The module doc says why.
 const ALLOWED_CATALOGS: [&str; 3] = [CASE_ALIAS, "system", "temp"];
@@ -174,7 +172,8 @@ const REFUSED_PREFIXES: [&str; 3] = ["read_", "parquet_", "arrow_scan"];
 /// or change the instance's state. A table function is already refused by
 /// the allowlist; these are refused by name as well so that a scalar of the
 /// same name, now or after an upgrade, is refused too.
-const REFUSED_FUNCTIONS: [&str; 13] = [
+const REFUSED_FUNCTIONS: [&str; 14] = [
+    "nextval",
     "getenv",
     "glob",
     "sniff_csv",
@@ -538,6 +537,15 @@ fn reaches_outside(node: &Value) -> Option<String> {
                         name.to_ascii_lowercase()
                     ));
                 }
+            }
+            // A parameter (`?`, `$1`) has no value to take here, and
+            // DuckDB would answer with a wrong-parameter-count fault
+            // instead of the caller's mistake.
+            if fields.get("class").and_then(Value::as_str) == Some("PARAMETER") {
+                return Some(
+                    "a query takes no parameters (? or $1): write the value into the SQL"
+                        .to_string(),
+                );
             }
             if fields.get("type").and_then(Value::as_str) == Some("TABLE_FUNCTION") {
                 // Fail closed on a table function whose name the parse does
@@ -1283,6 +1291,30 @@ mod tests {
                 assert_eq!(outcome.map_err(|e| e.code()), Err("invalid"), "{sql}");
             }
         }
+    }
+
+    /// The allowlist gates FROM positions, so every name on it must be a
+    /// table function (or table macro) of the pinned DuckDB. A name that is
+    /// not one, `generate_subscripts` was, allows nothing and misleads.
+    #[test]
+    fn allowlist_names_are_table_functions() {
+        let conn = Connection::open_in_memory().unwrap();
+        for name in ALLOWED_TABLE_FUNCTIONS {
+            let kinds: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM duckdb_functions() \
+                     WHERE function_name = ? AND function_type IN ('table', 'table_macro')",
+                    [name],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(
+                kinds > 0,
+                "{name} is on the allowlist but is not a table function"
+            );
+        }
+        assert!(!ALLOWED_TABLE_FUNCTIONS.contains(&"generate_subscripts"));
+        assert!(the_select("select * from generate_subscripts([1], 1)").is_err());
     }
 
     #[test]

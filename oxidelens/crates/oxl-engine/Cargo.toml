@@ -18,8 +18,9 @@ regex.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
-# Integration tests only (files under tests/): oxl-fixtures depends on this
-# crate, and a unit test inside src/ that used it would link a second copy.
+# Integration tests (files under tests/). oxl-fixtures depends on this crate,
+# so a unit test inside src/ links a second copy: it may take a directory
+# tree from it (`two_hosts`) but never a `Case` or any other engine type.
 oxl-fixtures.workspace = true
 csv.workspace = true
 tempfile.workspace = true

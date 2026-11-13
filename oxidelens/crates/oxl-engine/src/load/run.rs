@@ -27,6 +27,14 @@ use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 /// The schema the suite's views are rendered into during a load.
 const STAGE: &str = "ox_stage";
 
+#[cfg(test)]
+thread_local! {
+    /// Set by a unit test to make `load_in` fail right after `supersede`
+    /// has moved annotations, the one place a failure cannot be had from
+    /// outside. Compiled only under `cfg(test)`.
+    static FAIL_AFTER_SUPERSEDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Load the run whose output root is `out_root` into `case`.
 ///
 /// Refused when the run's output, by its generation, is already in the case
@@ -441,6 +449,12 @@ fn load_in(
     )?;
 
     let superseded = supersede(conn, id, &loaded_at, actor)?;
+    #[cfg(test)]
+    if FAIL_AFTER_SUPERSEDE.with(std::cell::Cell::get) {
+        return Err(EngineError::Internal(
+            "failpoint: the load failed after supersede".to_string(),
+        ));
+    }
     rebuild_relations(conn)?;
     conn.execute_batch(&format!("DROP SCHEMA {} CASCADE;", quote_ident(STAGE)))?;
 
@@ -823,5 +837,101 @@ mod tests {
         let path = format!(r"C:\{}\a.csv", "é".repeat(200));
         assert!(path.len() > WINDOWS_PATH_LIMIT);
         assert_eq!(verbatim_when_long(&path), path);
+    }
+
+    fn count(case: &Case, sql: &str) -> i64 {
+        case.scalar_i64(sql)
+            .unwrap_or_else(|e| panic!("{sql}: {e}"))
+    }
+
+    /// A load that fails after `supersede` has run, with the earlier run's
+    /// annotations already moved onto the new rows, rolls all of it back:
+    /// the earlier rows are still the ones in view, the annotations are on
+    /// them, and no source, history row or schema of the failed load is left.
+    /// (Only the tree comes from `oxl_fixtures`; the case is this crate's.)
+    #[test]
+    fn a_load_that_fails_after_supersede_rolls_back() {
+        use crate::annot::{add_note, add_tag, mark_suspicious};
+        let d = tempfile::tempdir().unwrap();
+        let analyst = Actor::Analyst("tester".into());
+        let mut case = Case::create(&d.path().join("t.case.duckdb"), "T", &analyst).unwrap();
+        load_run(
+            &mut case,
+            &oxl_fixtures::two_hosts(&d.path().join("a")),
+            &analyst,
+        )
+        .unwrap();
+        let svch0st = "SELECT _ox_row FROM petriage_timeline \
+                       WHERE ExecutableName = 'SVCH0ST.EXE' AND _triage_host = 'WS01'";
+        let row = count(&case, svch0st);
+        assert!(mark_suspicious(&mut case, &[row], &analyst).unwrap()[0].done);
+        assert!(add_tag(&mut case, &[row], "lateral", &analyst).unwrap()[0].done);
+        let note = add_note(&mut case, row, "look here", &analyst).unwrap();
+        let history = count(&case, "SELECT count(*) FROM ox.history");
+        let active = count(&case, "SELECT count(*) FROM ox.source_dataset WHERE active");
+
+        let rerun = oxl_fixtures::rerun_ws01_prefetch(&d.path().join("b"));
+        FAIL_AFTER_SUPERSEDE.with(|f| f.set(true));
+        let failed = load_run(&mut case, &rerun, &analyst);
+        FAIL_AFTER_SUPERSEDE.with(|f| f.set(false));
+        let e = failed.unwrap_err();
+        assert!(e.to_string().contains("after supersede"), "{e}");
+
+        // Still the earlier run's row, with its annotations on it.
+        assert_eq!(count(&case, svch0st), row);
+        for table in ["row_mark", "row_tag", "note"] {
+            assert_eq!(
+                count(
+                    &case,
+                    &format!("SELECT count(*) FROM ox.{table} WHERE row_id = {row}")
+                ),
+                1,
+                "{table}"
+            );
+        }
+        assert_eq!(
+            count(
+                &case,
+                &format!("SELECT id FROM ox.note WHERE row_id = {row}")
+            ),
+            note.id
+        );
+        // No new source, history row, schema or superseded dataset.
+        assert_eq!(count(&case, "SELECT count(*) FROM ox.source"), 1);
+        assert_eq!(count(&case, "SELECT count(*) FROM ox.history"), history);
+        assert_eq!(
+            count(&case, "SELECT count(*) FROM ox.source_dataset WHERE active"),
+            active
+        );
+        assert_eq!(
+            count(
+                &case,
+                "SELECT count(*) FROM duckdb_schemas() \
+                 WHERE schema_name IN ('src_2', 'ox_stage')"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &case,
+                "SELECT count(*) FROM petriage_timeline WHERE _triage_run_id <> '20260101000000-aaaa'"
+            ),
+            0
+        );
+
+        // The failpoint was the only thing wrong: without it the same load
+        // supersedes and moves the annotations off the earlier row.
+        let report = load_run(&mut case, &rerun, &analyst).unwrap();
+        // The id sequence is not transactional, so the id is not 2.
+        assert!(report.source_id > 1);
+        assert_eq!(count(&case, "SELECT count(*) FROM ox.source"), 2);
+        assert_ne!(count(&case, svch0st), row);
+        assert_eq!(
+            count(
+                &case,
+                &format!("SELECT count(*) FROM ox.row_mark WHERE row_id = {row}")
+            ),
+            0
+        );
     }
 }

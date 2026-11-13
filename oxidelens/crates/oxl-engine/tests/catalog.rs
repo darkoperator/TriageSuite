@@ -760,3 +760,127 @@ fn the_raw_view_comes_from_the_catalog() {
         1
     );
 }
+
+/// The roles as the catalog stores them, which is what a query over
+/// `ox.column_catalog` sees: five spellings, and the engine's enum has no
+/// others.
+#[test]
+fn role_spellings_in_sql() {
+    let (_d, case) = loaded();
+    let path = case.path().to_path_buf();
+    drop(case);
+    let r = oxl_engine::query_sql(
+        &path,
+        "SELECT DISTINCT role FROM ox.column_catalog ORDER BY 1",
+        50,
+        0,
+    )
+    .unwrap();
+    let roles: Vec<&str> = r
+        .rows
+        .iter()
+        .map(|row| row[0].as_deref().unwrap())
+        .collect();
+    assert_eq!(roles, ["data", "host", "identity", "output_file", "run_id"]);
+}
+
+/// The analyst may retype a column the app typed (not one the suite did):
+/// the declaration replaces the app's companion in place, is attributed to
+/// the analyst and says the time's zone is not known.
+#[test]
+fn analyst_retypes_an_app_map_companion() {
+    let (_d, mut case) = loaded();
+    let find = |case: &oxl_engine::Case| {
+        columns(case, "ext_hayabusa_csv_timeline")
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "Timestamp")
+            .unwrap()
+    };
+    let before = find(&case);
+    assert_eq!(
+        (before.origin, before.time_semantics),
+        (Some(TypeOrigin::AppMap), Some(TimeSemantics::Utc))
+    );
+    declare_type(
+        &mut case,
+        "ext_hayabusa_csv_timeline",
+        "Timestamp",
+        SqlType::Timestamp,
+        Some(TimeSemantics::Unknown),
+        &analyst(),
+    )
+    .unwrap();
+    let after = find(&case);
+    assert_eq!(
+        (
+            after.origin,
+            after.time_semantics,
+            after.sql_type,
+            after.typed_column.as_deref()
+        ),
+        (
+            Some(TypeOrigin::Analyst),
+            Some(TimeSemantics::Unknown),
+            Some(SqlType::Timestamp),
+            before.typed_column.as_deref()
+        )
+    );
+    // One companion, still the relation's time, and the original untouched.
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from (describe ext_hayabusa_csv_timeline) \
+             where lower(column_name) like 'timestamp%'"
+        ),
+        n(
+            &case,
+            "select count(*) from (describe raw_ext_hayabusa_csv_timeline) \
+             where lower(column_name) like 'timestamp%'"
+        ) + 1
+    );
+    assert_eq!(
+        relation(&case, "ext_hayabusa_csv_timeline")
+            .unwrap()
+            .primary_time
+            .as_deref(),
+        Some("Timestamp")
+    );
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'declare_type'"
+        ),
+        1
+    );
+}
+
+/// A relation the app lists no timeline column for takes the first
+/// timestamp column in the file's own column order, not the first by name.
+#[test]
+fn first_timestamp_is_the_default_primary_time() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = oxl_fixtures::new_case(d.path());
+    let p = d.path().join("two_times.csv");
+    std::fs::write(
+        &p,
+        "note,zeta,alpha\nfirst,2026-01-05 02:14:00,2026-01-04 01:00:00\n\
+         second,2026-01-05 03:00:00,2026-01-04 02:00:00\n",
+    )
+    .unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let cols = columns(&case, "two_times_csv").unwrap();
+    let timestamps: Vec<&str> = cols
+        .iter()
+        .filter(|c| c.sql_type == Some(SqlType::Timestamp))
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(timestamps, ["zeta", "alpha"]);
+    assert_eq!(
+        relation(&case, "two_times_csv")
+            .unwrap()
+            .primary_time
+            .as_deref(),
+        Some("zeta")
+    );
+}

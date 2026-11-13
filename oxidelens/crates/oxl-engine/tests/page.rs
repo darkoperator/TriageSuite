@@ -675,3 +675,175 @@ fn the_grid_query_round_trips_through_json() {
     let again: GridQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
     assert_eq!(count(&case, &again).unwrap(), 5);
 }
+
+/// The text of the first column of every cell row, in page order.
+fn first_column(p: &oxl_engine::Page) -> Vec<Option<String>> {
+    p.cells.iter().map(|r| r[0].text.clone()).collect()
+}
+
+#[test]
+fn descending_typed_sort_puts_nulls_last() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let p = d.path().join("nums.csv");
+    std::fs::write(&p, "n,label\n3,c\n,e\n10,a\n1,b\n,f\n").unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    // The column is typed, so it sorts as numbers (10 after 3 as text would
+    // be wrong) and the empty cells are NULL.
+    let typed = oxl_engine::columns(&case, "nums_csv").unwrap();
+    assert_eq!(
+        typed.iter().find(|c| c.name == "n").unwrap().sql_type,
+        Some(oxl_engine::SqlType::BigInt)
+    );
+    let sorted = |descending| {
+        let q = GridQuery {
+            relation: "nums_csv".into(),
+            sort: vec![SortKey {
+                column: "n".into(),
+                descending,
+            }],
+            ..Default::default()
+        };
+        first_column(&page(&case, &q, 50, 0).unwrap())
+    };
+    let some = |t: &str| Some(t.to_string());
+    assert_eq!(sorted(true), [some("10"), some("3"), some("1"), None, None]);
+    assert_eq!(
+        sorted(false),
+        [some("1"), some("3"), some("10"), None, None]
+    );
+}
+
+#[test]
+fn exact_page_boundary_is_not_truncated() {
+    let (_d, case) = loaded();
+    // 11 rows: a page of exactly 11 is the last, and one short of it is not.
+    let exact = page(&case, &events(), 11, 0).unwrap();
+    assert_eq!((exact.row_ids.len(), exact.truncated), (11, false));
+    let short = page(&case, &events(), 10, 0).unwrap();
+    assert_eq!((short.row_ids.len(), short.truncated), (10, true));
+    let tail = page(&case, &events(), 10, 1).unwrap();
+    assert_eq!((tail.row_ids.len(), tail.truncated), (10, false));
+    let at_end = page(&case, &events(), 1, 10).unwrap();
+    assert_eq!((at_end.row_ids.len(), at_end.truncated), (1, false));
+
+    // The same at the largest page a caller may ask for.
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    for (name, rows) in [("full.csv", MAX_LIMIT), ("over.csv", MAX_LIMIT + 1)] {
+        let p = d.path().join(name);
+        let body: String = (0..rows).map(|i| format!("{i}\n")).collect();
+        std::fs::write(&p, format!("v\n{body}")).unwrap();
+        load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    }
+    let big = |relation: &str| {
+        let q = GridQuery {
+            relation: relation.into(),
+            ..Default::default()
+        };
+        let p = page(&case, &q, MAX_LIMIT, 0).unwrap();
+        (p.row_ids.len(), p.truncated)
+    };
+    assert_eq!(big("full_csv"), (MAX_LIMIT as usize, false));
+    assert_eq!(big("over_csv"), (MAX_LIMIT as usize, true));
+}
+
+#[test]
+fn hostile_header_relation_sorts_and_scopes_by_host() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let p = d.path().join("hostile.csv");
+    let long = "x".repeat(600);
+    let mut w = csv::Writer::from_path(&p).unwrap();
+    let header = [
+        "a\"b",
+        "line\nbreak",
+        long.as_str(),
+        "dup",
+        "dup",
+        "_ox_row",
+        "",
+    ];
+    w.write_record(header).unwrap();
+    // Seven rows; column c holds a permutation of 1..=7 of its own (7 is
+    // prime, so each multiplier gives a different one), so sorting by any
+    // other column gives a different row order.
+    let multipliers = [1usize, 2, 3, 4, 5, 6, 3];
+    let value = |row: usize, col: usize| (row * multipliers[col] + col) % 7 + 1;
+    for row in 0..7 {
+        let cells: Vec<String> = (0..7).map(|col| value(row, col).to_string()).collect();
+        w.write_record(&cells).unwrap();
+    }
+    w.flush().unwrap();
+    let opts = FileOptions {
+        host: Some("WS01".into()),
+        ..Default::default()
+    };
+    let report = load_file(&mut case, &p, opts, &analyst()).unwrap();
+    let relation = report.relations[0].name.clone();
+    let names: Vec<String> = oxl_engine::columns(&case, &relation)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.name)
+        .filter(|name| name != "_triage_host")
+        .collect();
+    assert_eq!(names.len(), 7, "{names:?}");
+    let base = GridQuery {
+        relation: relation.clone(),
+        ..Default::default()
+    };
+    // The rows in file order, by id.
+    let mut ids = page(&case, &base, 50, 0).unwrap().row_ids;
+    ids.sort_unstable();
+    assert_eq!(ids.len(), 7);
+    let mut seen_orders = std::collections::HashSet::new();
+    for (col, name) in names.iter().enumerate() {
+        for descending in [false, true] {
+            let q = GridQuery {
+                sort: vec![SortKey {
+                    column: name.clone(),
+                    descending,
+                }],
+                columns: Some(vec![name.clone()]),
+                hosts: vec!["WS01".into()],
+                ..base.clone()
+            };
+            let p = page(&case, &q, 50, 0).unwrap();
+            // The order the column's own values call for, as row ids.
+            let mut want: Vec<(usize, i64)> = ids.iter().copied().enumerate().collect();
+            want.sort_by_key(|(row, _)| value(*row, col));
+            if descending {
+                want.reverse();
+            }
+            let want_ids: Vec<i64> = want.iter().map(|(_, id)| *id).collect();
+            assert_eq!(
+                p.row_ids, want_ids,
+                "sorting by {name:?} descending={descending}"
+            );
+            let want_cells: Vec<String> = want
+                .iter()
+                .map(|(row, _)| value(*row, col).to_string())
+                .collect();
+            let got_cells: Vec<String> = first_column(&p).into_iter().map(Option::unwrap).collect();
+            assert_eq!(got_cells, want_cells, "{name:?} descending={descending}");
+            // No two sorts agree, so a sort on the wrong column fails.
+            assert!(
+                seen_orders.insert(p.row_ids.clone()),
+                "{name:?} descending={descending} orders the rows as another sort does"
+            );
+        }
+    }
+    assert_eq!(seen_orders.len(), 14);
+    // Scoped to its host the file's rows are all there; another host is a
+    // mistake, not an empty page.
+    let scoped = |host: &str| GridQuery {
+        hosts: vec![host.into()],
+        ..base.clone()
+    };
+    assert_eq!(count(&case, &scoped("WS01")).unwrap(), 7);
+    assert_eq!(count(&case, &scoped("ws01")).unwrap(), 7);
+    assert_eq!(
+        count(&case, &scoped("SRV01")).unwrap_err().code(),
+        "not_found"
+    );
+}

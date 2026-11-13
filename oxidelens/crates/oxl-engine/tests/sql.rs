@@ -511,3 +511,99 @@ fn describe_lists_relations_and_case_tables_with_comments() {
         "not_found"
     );
 }
+
+/// Every refusal is `invalid` and says why, in words that name what the
+/// caller wrote or what the rule is, so a caller can act on the message.
+#[test]
+fn sql_refusals_name_their_reason() {
+    let (_d, path) = closed();
+    for (sql, fragment) in [
+        ("drop table ox.meta", "a query is one SELECT statement"),
+        ("select 1; select 2", "not 2"),
+        ("insert into ox.tag values ('a','b',now())", "one SELECT"),
+        ("copy (select 1) to 'x.csv'", "one SELECT"),
+        ("attach 'x.duckdb' as y", "one SELECT"),
+        ("install httpfs", "one SELECT"),
+        ("pragma database_list", "one SELECT"),
+        ("set enable_external_access = true", "one SELECT"),
+        ("create view v as select 1", "one SELECT"),
+        ("", "not 0"),
+        ("select getenv('PATH')", "may not call getenv"),
+        ("select read_text('x')", "may not call read_text"),
+        ("select * from read_csv('x')", "the table function read_csv"),
+        ("select * from glob('*')", "the table function glob"),
+        (
+            "select * from query('select 1')",
+            "the table function query",
+        ),
+        (
+            "select * from duckdb_tables()",
+            "may not read from the table function duckdb_tables",
+        ),
+        (
+            "select * from generate_subscripts([1], 1)",
+            "may not read from the table function generate_subscripts",
+        ),
+        (
+            "select * from main.\"a/b\"",
+            "a name with a path character reads a file",
+        ),
+        (
+            "select * from one.duckdb",
+            "only the case's own schemas may be named",
+        ),
+        (
+            "select * from memory.main.t",
+            "only the case's own catalog may be named",
+        ),
+        (
+            "select * from secrets.source",
+            "only the case's own schemas may be named",
+        ),
+        // A parameter has no value to take: DuckDB says so and the query is
+        // the caller's mistake.
+        ("select ?", "parameter"),
+        ("select $1", "parameter"),
+        // The sequence the notes draw their ids from is the case's, not the
+        // query's: reading it would advance it, so it is refused by name.
+        ("select nextval('ox.note_seq')", "nextval"),
+        ("select nextval('ox.note_seq') from range(3)", "nextval"),
+    ] {
+        let e = query_sql(&path, sql, 10, 0).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{sql}: {e}");
+        assert!(
+            e.to_string()
+                .to_lowercase()
+                .contains(&fragment.to_lowercase()),
+            "{sql}: expected {fragment:?} in: {e}"
+        );
+    }
+}
+
+/// A page of an ordered result is a slice of one order: pages drawn at
+/// different times from the same query stay descending and contiguous.
+#[test]
+fn ordered_results_stay_ordered_across_pages() {
+    let (_d, path) = closed();
+    let sql = "SELECT * FROM range(100000) t(i) ORDER BY i DESC";
+    let page = |number: u64| {
+        let r = query_sql(&path, sql, 1000, number * 1000).unwrap();
+        let values: Vec<i64> = r
+            .rows
+            .iter()
+            .map(|row| row[0].as_deref().unwrap().parse().unwrap())
+            .collect();
+        (values, r.truncated)
+    };
+    for (number, first) in [(0u64, 99_999i64), (1, 98_999), (99, 999)] {
+        let (values, truncated) = page(number);
+        assert_eq!(values.len(), 1000, "page {number}");
+        assert_eq!(values[0], first, "page {number}");
+        assert!(
+            values.windows(2).all(|w| w[0] == w[1] + 1),
+            "page {number} is not descending and contiguous"
+        );
+        assert_eq!(truncated, number != 99, "page {number}");
+    }
+    assert!(page(100).0.is_empty());
+}

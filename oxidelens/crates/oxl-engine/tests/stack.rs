@@ -349,3 +349,41 @@ fn stack_counts_an_empty_host_as_no_host() {
         assert_eq!((row.count, row.hosts), (2, 1), "{row:?}");
     }
 }
+
+/// An empty cell in one column of a pair is that column's absent value and
+/// nothing else: ("x", empty) and (empty, "x") are two combinations, not one,
+/// and neither merges with a pair that is empty in both.
+#[test]
+fn multi_column_stack_keeps_empty_cells_apart() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let p = d.path().join("gaps.csv");
+    std::fs::write(&p, "a,b\nx,\nx,\n,x\n,\n,\nx,x\ny,\n").unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let st = stack(
+        &case,
+        &q("gaps_csv"),
+        &s(&["a", "b"]),
+        StackOrder::Commonest,
+        50,
+        0,
+    )
+    .unwrap();
+    let got: Vec<(Vec<Option<&str>>, u64)> = st
+        .rows
+        .iter()
+        .map(|r| (r.values.iter().map(|v| v.as_deref()).collect(), r.count))
+        .collect();
+    // Count descending, ties by the first column then the second, absent last.
+    assert_eq!(
+        got,
+        vec![
+            (vec![Some("x"), None], 2),
+            (vec![None, None], 2),
+            (vec![Some("x"), Some("x")], 1),
+            (vec![Some("y"), None], 1),
+            (vec![None, Some("x")], 1),
+        ]
+    );
+    assert_eq!((st.distinct, st.rows_counted), (5, 7));
+}

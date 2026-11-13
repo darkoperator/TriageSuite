@@ -216,10 +216,12 @@ of `between`) accept depends on the column:
 searchable column contains it (the run id, identity and output-file metadata
 columns are not searched). A `+` prefix makes a term required, a `-` prefix
 excludes it, and `Column:text` restricts a term to that column when the
-relation has one. A row matches when at least one bare term matches (or there
-are none), every `+` term matches and no `-` term does. `--regex` reads the
-whole text as one regular expression, tested against each searchable cell.
-Search ignores case unless `--case-sensitive`.
+relation has one (a column whose name has whitespace or a colon cannot be
+scoped this way: `Remote Host:srv` or `a:b:x` is read as plain text, so
+search such a column with a bare term or a filter). A row matches when at
+least one bare term matches (or there are none), every `+` term matches and no
+`-` term does. `--regex` reads the whole text as one regular expression, tested
+against each searchable cell. Search ignores case unless `--case-sensitive`.
 
 ## The result envelope and untrusted text
 
@@ -304,7 +306,7 @@ CLI. Narrow the rows with a filter on that column instead.
 `query` runs one SELECT on a separate, read-only, locked DuckDB instance with
 no file, network or environment access and no temporary files (2 GiB of
 memory). Anything but a single SELECT is refused; so are table functions other
-than `range`, `generate_series`, `unnest` and `generate_subscripts`, functions
+than `range`, `generate_series` and `unnest`, functions
 that read files or the environment (`read_*`, `parquet_*`, `getenv`, `glob`
 and the like), and any table outside the case (a name that spells a file path,
 or a catalog other than `ox_case`, `system` and `temp`, or a schema other

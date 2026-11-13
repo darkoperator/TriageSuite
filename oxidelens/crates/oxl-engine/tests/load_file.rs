@@ -232,6 +232,51 @@ fn hostile_headers_load_page_and_filter() {
     );
 }
 
+/// What each hostile header becomes, exactly: names are kept whole and as
+/// written, an empty one is named for its position, a reserved or repeated
+/// one is renamed and said so.
+#[test]
+fn hostile_header_names_survive() {
+    let (d, mut case) = fresh();
+    let p = d.path().join("hostile.csv");
+    let long = "x".repeat(600);
+    write_csv(
+        &p,
+        &[
+            vec![
+                b"a\"b".as_slice(),
+                b"line\nbreak",
+                long.as_bytes(),
+                b"dup",
+                b"dup",
+                b"_ox_row",
+                b"",
+            ],
+            vec![b"1", b"2", b"3", b"4", b"5", b"6", b"7"],
+        ],
+    );
+    let r = load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let names: Vec<String> = columns(&case, &r.relations[0].name)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(names[2], long, "the 600-character name is kept whole");
+    assert_eq!(names.iter().map(|n| n.chars().count()).max(), Some(600));
+    assert_eq!(
+        names,
+        vec![
+            "a\"b".to_string(),
+            "line\nbreak".to_string(),
+            long.clone(),
+            "dup".to_string(),
+            "dup_1".to_string(),
+            "x_ox_row".to_string(),
+            "column6".to_string(),
+        ]
+    );
+}
+
 #[test]
 fn names_are_sanitised_and_unique() {
     assert_eq!(
@@ -280,25 +325,79 @@ fn a_second_file_with_the_same_name_gets_a_suffix() {
 }
 
 #[test]
-fn non_utf8_bytes_and_a_one_megabyte_cell_do_not_panic() {
+fn a_one_megabyte_cell_loads_whole() {
+    // (Non-UTF-8 bytes: `non_utf8_csv_is_invalid`.)
     let (d, mut case) = fresh();
-    let bad = d.path().join("bad.csv");
-    std::fs::write(&bad, b"a,b\n\xff\xfe,2\n").unwrap();
-    let outcome = load_file(&mut case, &bad, FileOptions::default(), &analyst());
-    assert!(matches!(
-        outcome.as_ref().map_err(|e| e.code()),
-        Ok(_) | Err(_)
-    ));
-    if outcome.is_err() {
-        // A failed load leaves nothing behind.
-        assert_eq!(n(&case, "select count(*) from ox.source"), 0);
-    }
-
     let big = d.path().join("big.csv");
     let cell = "y".repeat(1024 * 1024);
     write_csv(&big, &[vec![b"a".as_slice()], vec![cell.as_bytes()]]);
     let r = load_file(&mut case, &big, FileOptions::default(), &analyst()).unwrap();
     assert_eq!(r.relations[0].rows, 1);
+    assert_eq!(n(&case, "select length(a) from big_csv"), 1024 * 1024);
+}
+
+/// Bytes that are not UTF-8 are the file's fault: `invalid`, naming the file
+/// and what it must be, and nothing of the load is left in the case.
+#[test]
+fn non_utf8_csv_is_invalid() {
+    let (d, mut case) = fresh();
+    let bad = d.path().join("bad.csv");
+    std::fs::write(&bad, b"a,b\n\xff\xfe,2\n").unwrap();
+    let (c, m) = code(load_file(
+        &mut case,
+        &bad,
+        FileOptions::default(),
+        &analyst(),
+    ));
+    assert_eq!(c, "invalid", "{m}");
+    assert!(m.contains("bad.csv") && m.contains("UTF-8"), "{m}");
+    assert_eq!(n(&case, "select count(*) from ox.source"), 0);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from duckdb_schemas() where schema_name like 'src_%'"
+        ),
+        0
+    );
+}
+
+/// A file whose bad row (30,000, an extra field) is far past the start is
+/// `invalid`, naming the file and the line, and leaves no source, no schema
+/// and no history behind.
+#[test]
+fn failed_file_load_leaves_nothing() {
+    let (d, mut case) = fresh();
+    let p = d.path().join("late.csv");
+    let mut body = String::from("a,b\n");
+    for i in 1..=29_999 {
+        body.push_str(&format!("{i},x\n"));
+    }
+    body.push_str("30000,x,extra\n");
+    std::fs::write(&p, body).unwrap();
+    let (c, m) = code(load_file(&mut case, &p, FileOptions::default(), &analyst()));
+    assert_eq!(c, "invalid", "{m}");
+    assert!(m.contains("late.csv") && m.contains("Line: 30001"), "{m}");
+    assert_eq!(n(&case, "select count(*) from ox.source"), 0);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from duckdb_schemas() where schema_name like 'src_%'"
+        ),
+        0
+    );
+    assert_eq!(n(&case, "select count(*) from ox.history"), 0);
+    assert_eq!(n(&case, "select count(*) from ox.relation"), 0);
+    assert_eq!(n(&case, "select count(*) from ox.column_catalog"), 0);
+    assert!(relation(&case, "late_csv").is_err());
+    // The case still takes a file afterwards.
+    let r = load_file(
+        &mut case,
+        &loose_fw_csv(d.path()),
+        FileOptions::default(),
+        &analyst(),
+    )
+    .unwrap();
+    assert_eq!(r.relations[0].rows, 3);
 }
 
 #[test]
