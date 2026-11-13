@@ -11,6 +11,7 @@ use crate::query::MAX_LIMIT;
 
 /// Up to a page of `T`, and whether more follow it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Listing<T> {
     pub items: Vec<T>,
     /// More items exist past this page.

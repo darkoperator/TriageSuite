@@ -34,7 +34,7 @@ const MAX_PATH_CHARS: usize = 4096;
 /// Characters in a dataset name keying a layout or a rule list.
 const MAX_KEY_CHARS: usize = 256;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
     #[default]
@@ -43,7 +43,7 @@ pub enum Theme {
 }
 
 /// A side pane, open or folded to its rail.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PaneState {
     #[default]
@@ -54,7 +54,7 @@ pub enum PaneState {
 /// Everything the settings file holds. Every field may be missing from the
 /// file and is then its default; fields the file has and this build does not
 /// know are ignored, so a newer build's file still opens.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(default)]
 pub struct Settings {
     pub version: u32,
@@ -94,7 +94,7 @@ impl Default for Settings {
 }
 
 /// A settings file that could not be read when the app started.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 pub struct DamagedSettings {
     /// The name it was moved aside to in the config directory; `None` when
     /// it could not be moved (the next save replaces it).
@@ -105,7 +105,7 @@ pub struct DamagedSettings {
 
 /// What `settings_get` and `settings_update` answer: the settings, and the
 /// damaged file the defaults replaced, until a settings update succeeds.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 pub struct SettingsReply {
     pub settings: Settings,
     pub damaged: Option<DamagedSettings>,

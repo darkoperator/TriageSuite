@@ -17,6 +17,8 @@ pub mod load;
 pub mod query;
 pub mod search;
 pub mod time;
+#[cfg(feature = "ts")]
+pub mod ts;
 pub mod view;
 
 pub use actor::Actor;
@@ -53,14 +55,15 @@ pub use query::{
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};
 pub use view::{
-    apply_view, around_totals, cell_value, count_view, date_range_chip, default_colour_rules,
-    delete_view, empty_columns, export_csv, export_view, groups_view, histogram_view, import_view,
-    match_count, matches, merged_view, page_view, row_view, save_view, split_value, values, views,
-    AppliedView, CellValue, Chip, ChipOrigin, ColourRule, ColumnLayout, ColumnMeta, ExportReport,
-    FieldView, GridCell, GridCounts, GridPage, GridState, GroupView, MatchPos, MergedView,
-    PageOptions, Provenance, RowView, RuleColour, RuleScope, SavedView, SearchMode, SearchState,
-    ValueCount, ValueOrder, ValuePart, ViewDoc, ViewKind, ViewWarning, WindowTotal, MAX_CHIPS,
-    MAX_CHIP_ID, MAX_CHIP_LABEL, MAX_COLUMN_WIDTH, MAX_PARTS, MAX_PIVOT_WINDOWS, MAX_RULES,
-    MAX_RULE_NAME, MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN,
-    MAX_WINDOW_SECONDS, MIN_COLUMN_WIDTH,
+    apply_view, around_totals, cell_value, check_export_target, count_view, create_export_partial,
+    date_range_chip, default_colour_rules, delete_view, empty_columns, export_csv,
+    export_csv_guarded, export_view, groups_view, histogram_view, import_view, match_count,
+    matches, merged_view, page_view, row_view, save_view, split_value, values, views, AppliedView,
+    CellValue, Chip, ChipOrigin, ColourRule, ColumnLayout, ColumnMeta, ExportReport, FieldView,
+    GridCell, GridCounts, GridPage, GridState, GroupView, MatchPos, MergedView, PageOptions,
+    Provenance, RowView, RuleColour, RuleScope, SavedView, SearchMode, SearchState, ValueCount,
+    ValueOrder, ValuePart, ViewDoc, ViewKind, ViewWarning, WindowTotal, MAX_CHIPS, MAX_CHIP_ID,
+    MAX_CHIP_LABEL, MAX_COLUMN_WIDTH, MAX_PARTS, MAX_PIVOT_WINDOWS, MAX_RULES, MAX_RULE_NAME,
+    MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN, MAX_WINDOW_SECONDS,
+    MIN_COLUMN_WIDTH,
 };

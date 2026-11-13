@@ -1,0 +1,12 @@
+[
+  {
+    "host": "SRV01",
+    "windows_name": "UTC",
+    "iana": "Etc/UTC"
+  },
+  {
+    "host": "WS01",
+    "windows_name": "Eastern Standard Time",
+    "iana": "America/New_York"
+  }
+]

@@ -1,17 +1,23 @@
-//! Making, opening and closing the case the window works on. One case is
-//! open at a time; opening another closes the first. Opening a step 1
-//! (format 1) case upgrades it in place (`Case::open`). Opening or making a
-//! case puts it first in the recent list.
+//! Making, opening and closing the case the window works on, and what the
+//! window reads about the case as a whole: its summary, a relation's
+//! columns, the run sessions, the hosts' own zones, and the display zone.
+//! One case is open at a time; opening another closes the first. Opening a
+//! step 1 (format 1) case upgrades it in place (`Case::open`). Opening or
+//! making a case puts it first in the recent list.
 
+use super::At;
 use crate::error::CmdError;
 use crate::state::AppState;
-use oxl_engine::{Case, MarkCounts, RelationInfo, SourceInfo};
+use oxl_engine::{Case, ColumnMeta, HostZone, MarkCounts, RelationInfo, Session, SourceInfo};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+/// What `display_zone_set` changes.
+const DISPLAY_ZONE: &[&str] = &["display_zone"];
+
 /// What the window shows about the open case.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct CaseSummary {
     pub path: String,
     /// The name the case was made with.
@@ -73,12 +79,103 @@ fn remember(state: &AppState, path: &str) {
     let _ = state.settings.update(|s| s.add_recent(path));
 }
 
+/// The open case's summary, read as a query.
+pub fn case_summary(state: &AppState, at: At<'_>) -> Result<CaseSummary, CmdError> {
+    at.read(state, summary)
+}
+
+/// Every catalogued column of `relation`, in display order.
+pub fn columns(state: &AppState, at: At<'_>, relation: &str) -> Result<Vec<ColumnMeta>, CmdError> {
+    at.read(state, |c| {
+        Ok(oxl_engine::columns(c, relation)?
+            .iter()
+            .map(ColumnMeta::from)
+            .collect())
+    })
+}
+
+/// The run sessions the case offers.
+pub fn sessions(state: &AppState, at: At<'_>) -> Result<Vec<Session>, CmdError> {
+    at.read(state, oxl_engine::sessions)
+}
+
+/// Each host's own time zone, as its registry recorded it.
+pub fn host_zones(state: &AppState, at: At<'_>) -> Result<Vec<HostZone>, CmdError> {
+    at.read(state, oxl_engine::host_zones)
+}
+
+/// Every display zone this build knows, `UTC` first, then the IANA names
+/// sorted. A list compiled into the app: no case and no query.
+pub fn zone_names() -> Vec<String> {
+    triage_core::timestamp::zone::names()
+        .iter()
+        .map(|n| n.to_string())
+        .collect()
+}
+
+/// Set the case's display zone; `case-changed` with `display_zone`.
+pub fn display_zone_set(state: &AppState, zone: &str) -> Result<(), CmdError> {
+    let actor = state.actor();
+    state.write(DISPLAY_ZONE, |c| {
+        oxl_engine::set_display_zone(c, zone, &actor)
+    })
+}
+
 pub mod commands {
     use super::CaseSummary;
+    use crate::cmd::At;
     use crate::error::CmdError;
     use crate::state::AppState;
+    use oxl_engine::{ColumnMeta, HostZone, Session};
     use std::path::PathBuf;
     use tauri::State;
+
+    #[tauri::command(async)]
+    pub fn case_summary(
+        state: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+    ) -> Result<CaseSummary, CmdError> {
+        super::case_summary(&state, At::new(&query_id, &slot))
+    }
+
+    #[tauri::command(async)]
+    pub fn columns(
+        state: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+        relation: String,
+    ) -> Result<Vec<ColumnMeta>, CmdError> {
+        super::columns(&state, At::new(&query_id, &slot), &relation)
+    }
+
+    #[tauri::command(async)]
+    pub fn sessions(
+        state: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+    ) -> Result<Vec<Session>, CmdError> {
+        super::sessions(&state, At::new(&query_id, &slot))
+    }
+
+    #[tauri::command(async)]
+    pub fn host_zones(
+        state: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+    ) -> Result<Vec<HostZone>, CmdError> {
+        super::host_zones(&state, At::new(&query_id, &slot))
+    }
+
+    #[tauri::command(async)]
+    pub fn zone_names() -> Vec<String> {
+        super::zone_names()
+    }
+
+    #[tauri::command(async)]
+    pub fn display_zone_set(state: State<'_, AppState>, zone: String) -> Result<(), CmdError> {
+        super::display_zone_set(&state, &zone)
+    }
 
     #[tauri::command(async)]
     pub fn case_new(

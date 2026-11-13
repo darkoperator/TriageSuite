@@ -71,6 +71,7 @@ pub(super) fn fold_name(name: &str) -> String {
 
 /// One relation a load fed, and how much.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LoadedRelation {
     pub name: String,
     /// The hosts the load added rows for, sorted.
@@ -80,6 +81,7 @@ pub struct LoadedRelation {
 
 /// Rows of an earlier source that a load superseded for one relation and host.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Superseded {
     pub relation: String,
     pub host: String,
@@ -94,6 +96,7 @@ pub struct Superseded {
 
 /// What a load did.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LoadReport {
     pub source_id: i64,
     pub relations: Vec<LoadedRelation>,
@@ -107,6 +110,7 @@ pub struct LoadReport {
 
 /// A dataset of a run a load left out, for some or all of its hosts.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SkippedDataset {
     /// The relation it would have fed.
     pub relation: String,
@@ -129,6 +133,7 @@ pub struct RunOptions {
 
 /// One loaded source, as `ox.source` records it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SourceInfo {
     pub id: i64,
     /// `run` or `file`.

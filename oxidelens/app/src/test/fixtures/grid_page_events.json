@@ -1,0 +1,1037 @@
+{
+  "columns": [
+    {
+      "name": "_triage_run_id",
+      "role": "run_id",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "_triage_host",
+      "role": "host",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "_triage_identity",
+      "role": "identity",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "_triage_output_file",
+      "role": "output_file",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "TimeCreated",
+      "role": "data",
+      "sql_type": "TIMESTAMP",
+      "time_semantics": "utc",
+      "origin": "suite"
+    },
+    {
+      "name": "EventId",
+      "role": "data",
+      "sql_type": "BIGINT",
+      "time_semantics": null,
+      "origin": "suite"
+    },
+    {
+      "name": "Channel",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "Computer",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "UserName",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "RemoteHost",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "MapDescription",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "PayloadData1",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    },
+    {
+      "name": "SourceFile",
+      "role": "data",
+      "sql_type": null,
+      "time_semantics": null,
+      "origin": null
+    }
+  ],
+  "row_ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    9,
+    10,
+    6,
+    7,
+    8,
+    11
+  ],
+  "marks": [
+    null,
+    null,
+    null,
+    null,
+    "suspicious",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "cells": [
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:13:58.2040000Z",
+        "display": "2026-01-05 02:13:58.2040000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "4625",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Administrator",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "203.0.113.7",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Failed logon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "LogonType 10",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:14:07.9110000Z",
+        "display": "2026-01-05 02:14:07.9110000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "4624",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "203.0.113.7",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Successful logon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "LogonType 10",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:15:44.3800000Z",
+        "display": "2026-01-05 02:15:44.3800000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "1",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Sysmon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Process creation",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svch0st.exe",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Sysmon.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:15:46.0180000Z",
+        "display": "2026-01-05 02:15:46.0180000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "3",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Sysmon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "203.0.113.7",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Network connection",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svch0st.exe:443",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Sysmon.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:17:02.6450000Z",
+        "display": "2026-01-05 02:17:02.6450000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "1",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Sysmon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Process creation",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "rclone.exe",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Sysmon.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SRV01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-SRV01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:22:03.1180000Z",
+        "display": "2026-01-05 02:22:03.1180000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "4624",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SRV01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Successful logon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "LogonType 3",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SRV01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-SRV01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:22:04.5510000Z",
+        "display": "2026-01-05 02:22:04.5510000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "5140",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SRV01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "10.0.0.5",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Network share accessed",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "\\\\*\\finance$",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:33:20.4610000Z",
+        "display": "2026-01-05 02:33:20.4610000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "1102",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Audit log cleared",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "wevtutil.exe",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "2026-01-05T02:33:20.4610000Z",
+        "display": "2026-01-05 02:33:20.4610000",
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "1102",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Audit log cleared",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "wevtutil.exe",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "not-a-time",
+        "display": null,
+        "failed": true,
+        "clipped": false
+      },
+      {
+        "text": "4688",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SYSTEM",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Process creation",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "cmd.exe",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ],
+    [
+      {
+        "text": "20260101000000-aaaa",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SRV01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "/fixture/run-20260101000000-aaaa/Processed-SRV01-20260101000000/EventLogs/evtx.csv",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": null,
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "4624",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Security",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "SRV01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "svc_backup",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "WS01",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "Successful logon",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "LogonType 3",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      },
+      {
+        "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+        "display": null,
+        "failed": false,
+        "clipped": false
+      }
+    ]
+  ],
+  "row_rule": [
+    null,
+    null,
+    0,
+    0,
+    0,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "rule_columns": [
+    [
+      "Channel"
+    ]
+  ],
+  "rule_errors": [],
+  "search_hits": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "truncated": false,
+  "zone": "UTC"
+}

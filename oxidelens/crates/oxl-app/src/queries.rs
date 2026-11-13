@@ -26,11 +26,20 @@
 //! While a case closes (`begin_close` to `end_close`) nothing new registers
 //! (`no_case`) and everything registered is stopped, so no work starts on a
 //! connection the close is waiting for.
+//!
+//! Work that does more than run statements (a CSV export writing a file)
+//! registers a cancel flag with its query (`enter_case_with_flag`): stopping
+//! the query, for any reason, sets the flag as well as interrupting DuckDB,
+//! so the work also stops between statements. Such work runs through
+//! `Ticket::run_to_completion`, which answers the work's result when the
+//! work completed even though the query was stopped after it: the file is
+//! there, and the window must hear so.
 
 use crate::error::CmdError;
 use duckdb::InterruptHandle;
 use oxl_engine::Case;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -96,15 +105,22 @@ struct Entry {
     handle: Option<Arc<InterruptHandle>>,
     stop: Option<Stop>,
     interrupter: Option<Interrupter>,
+    /// Set when the query is stopped, for work that looks at it between
+    /// statements.
+    flag: Option<Arc<AtomicBool>>,
 }
 
 impl Entry {
     /// Stop this query for `why`, unless it was already stopped (the first
     /// reason is the one it answers with). A running query is interrupted
-    /// until it returns; a waiting one simply never starts.
+    /// until it returns; a waiting one simply never starts. Its cancel flag,
+    /// if it has one, is set either way.
     fn stop(&mut self, why: Stop) {
         if self.stop.is_none() {
             self.stop = Some(why);
+            if let Some(flag) = &self.flag {
+                flag.store(true, Ordering::SeqCst);
+            }
             if let Some(handle) = &self.handle {
                 self.interrupter = Some(Interrupter::start(Arc::clone(handle)));
             }
@@ -176,6 +192,29 @@ impl Ticket<'_> {
         conn: &Case,
         work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
     ) -> Result<T, CmdError> {
+        self.run_as(conn, work, false)
+    }
+
+    /// `run`, except that when `work` completes (`Ok`) its result is the
+    /// answer even if the query was stopped meanwhile: for work whose result
+    /// is something it did (a file it wrote), not only something it read.
+    /// Work that fails answers the stop code when the query was stopped, as
+    /// `run` does, so an interrupt the registry caused is never reported as
+    /// the engine's error.
+    pub fn run_to_completion<T>(
+        self,
+        conn: &Case,
+        work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
+    ) -> Result<T, CmdError> {
+        self.run_as(conn, work, true)
+    }
+
+    fn run_as<T>(
+        self,
+        conn: &Case,
+        work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
+        completed_wins: bool,
+    ) -> Result<T, CmdError> {
         {
             let mut inner = self.registry.lock();
             let closing = inner.closing;
@@ -191,9 +230,10 @@ impl Ticket<'_> {
             entry.handle = Some(conn.interrupt_handle());
         }
         let result = work(conn);
-        match self.finish() {
-            Some(why) => Err(why.error()),
-            None => result.map_err(CmdError::from),
+        match (self.finish(), result) {
+            (Some(_), Ok(value)) if completed_wins => Ok(value),
+            (Some(why), _) => Err(why.error()),
+            (None, result) => result.map_err(CmdError::from),
         }
     }
 
@@ -230,7 +270,7 @@ impl QueryRegistry {
     /// superseded. `interrupted` for an id cancelled before it arrived;
     /// `no_case` while a case closes.
     pub fn enter(&self, slot: &str, query_id: &str) -> Result<Ticket<'_>, CmdError> {
-        self.register(None, slot, query_id)
+        self.register(None, slot, query_id, None)
     }
 
     /// `enter` for a read of the case opened at generation `case`: `no_case`
@@ -244,7 +284,24 @@ impl QueryRegistry {
         slot: &str,
         query_id: &str,
     ) -> Result<Ticket<'_>, CmdError> {
-        self.register(Some(case), slot, query_id)
+        self.register(Some(case), slot, query_id, None)
+    }
+
+    /// `enter_case`, with `flag` set whenever the query is stopped
+    /// (superseded, cancelled, or its case closing), and at once when its id
+    /// was cancelled before it arrived.
+    pub fn enter_case_with_flag(
+        &self,
+        case: u64,
+        slot: &str,
+        query_id: &str,
+        flag: Arc<AtomicBool>,
+    ) -> Result<Ticket<'_>, CmdError> {
+        let entered = self.register(Some(case), slot, query_id, Some(flag.clone()));
+        if entered.is_err() {
+            flag.store(true, Ordering::SeqCst);
+        }
+        entered
     }
 
     fn register(
@@ -252,6 +309,7 @@ impl QueryRegistry {
         case: Option<u64>,
         slot: &str,
         query_id: &str,
+        flag: Option<Arc<AtomicBool>>,
     ) -> Result<Ticket<'_>, CmdError> {
         check_name("slot", slot)?;
         check_name("query id", query_id)?;
@@ -278,6 +336,7 @@ impl QueryRegistry {
             handle: None,
             stop: None,
             interrupter: None,
+            flag,
         });
         Ok(Ticket {
             registry: self,
@@ -416,6 +475,44 @@ mod tests {
         );
         registry.end_close();
         assert!(registry.enter("t1:hist", "c").is_ok());
+    }
+
+    #[test]
+    fn stopping_a_flagged_query_sets_its_flag() {
+        let registry = QueryRegistry::default();
+        registry.open_case(1);
+        let flag = || Arc::new(AtomicBool::new(false));
+        let is_set = |f: &Arc<AtomicBool>| f.load(Ordering::SeqCst);
+
+        let superseded = flag();
+        let _a = registry
+            .enter_case_with_flag(1, "export", "a", superseded.clone())
+            .unwrap();
+        assert!(!is_set(&superseded));
+        let _b = registry.enter_case(1, "export", "b").unwrap();
+        assert!(is_set(&superseded), "a newer query on the slot");
+
+        let cancelled = flag();
+        let _c = registry
+            .enter_case_with_flag(1, "export-2", "c", cancelled.clone())
+            .unwrap();
+        registry.cancel(&["c".to_string()]);
+        assert!(is_set(&cancelled), "query_cancel by id");
+
+        let closing = flag();
+        let _d = registry
+            .enter_case_with_flag(1, "export-3", "d", closing.clone())
+            .unwrap();
+        registry.begin_close();
+        assert!(is_set(&closing), "the case closing");
+        registry.end_close();
+
+        registry.open_case(2);
+        registry.cancel(&["e".to_string()]);
+        let early = flag();
+        let refused = registry.enter_case_with_flag(2, "export-4", "e", early.clone());
+        assert_eq!(refused.err().unwrap().code, "interrupted");
+        assert!(is_set(&early), "cancelled before it arrived");
     }
 
     #[test]

@@ -20,6 +20,7 @@ use triage_core::output::duckdb::sql::quote_ident;
 
 /// Where a loaded row stands in the case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RowStanding {
     /// In its relation's view.
@@ -103,6 +104,7 @@ fn replacement(conn: &Connection, row: &LocatedRow) -> Result<Option<i64>> {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RowDetail {
     pub row_id: i64,
     /// Where the row stands; `None` only for an annotated row id no source

@@ -87,6 +87,22 @@ pub fn loaded() -> Loaded {
     }
 }
 
+/// `loaded`, with `host_zones_run` loaded too: four relations, the two
+/// hosts' own time zones among them.
+pub fn loaded_with_zones() -> Loaded {
+    let l = loaded();
+    let zones = oxl_fixtures::host_zones_run(l.dir.path());
+    oxl_app::cmd::load::load_run(&l.state, &zones).unwrap();
+    l.events.clear();
+    l
+}
+
+/// The grid state that shows every row of `relation`, as the window sends
+/// it.
+pub fn grid(relation: &str) -> oxl_engine::GridState {
+    serde_json::from_value(serde_json::json!({ "relation": relation })).unwrap()
+}
+
 /// The lock every timing test holds, so that no two of them compete for
 /// the machine within this test binary.
 pub fn serial() -> MutexGuard<'static, ()> {

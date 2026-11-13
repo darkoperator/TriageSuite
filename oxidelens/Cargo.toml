@@ -74,6 +74,13 @@ tauri-plugin-dialog = "2.7"
 # Lets an agent drive the window through the Tauri MCP server; registered in
 # debug builds only, bound to 127.0.0.1 (oxl-app's main.rs).
 tauri-plugin-mcp-bridge = "0.13"
+# The app's TypeScript contract (app/src/contract/generated/) is generated
+# from the Rust types its commands take and answer. serde-json-impl types a
+# filter leaf's free-form `value` as JsonValue. no-serde-warnings: the one
+# serde attribute ts-rs does not parse is `deny_unknown_fields` on the
+# `MergedSource` enum, which governs only how strictly JSON is read, not its
+# shape; without the feature every build prints a note about it.
+ts-rs = { version = "12.0.1", features = ["serde-json-impl", "no-serde-warnings"] }
 
 # Dependencies (above all the bundled DuckDB C++, built by libduckdb-sys'
 # build script through the `cc` crate, which reads the profile's OPT_LEVEL) are

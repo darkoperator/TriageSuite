@@ -1,0 +1,17 @@
+[
+  {
+    "source_id": 1,
+    "name": "Execution_Analysis",
+    "relations": [
+      {
+        "relation": "evtxtriage_events",
+        "host": "WS01"
+      },
+      {
+        "relation": "petriage_timeline",
+        "host": "WS01"
+      }
+    ],
+    "unmatched": 1
+  }
+]

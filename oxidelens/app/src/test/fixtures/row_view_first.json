@@ -1,0 +1,292 @@
+{
+  "detail": {
+    "row_id": 1,
+    "standing": "active",
+    "current_row": null,
+    "relation": "evtxtriage_events",
+    "source_id": 1,
+    "host": "WS01",
+    "hash": "b9cceffeb2ed30795c0dcba551add768b9f0bf06b3ab9b5e24ab3c3fb1eb689c",
+    "active": true,
+    "fields": [
+      [
+        "_triage_run_id",
+        {
+          "text": "20260101000000-aaaa",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "_triage_host",
+        {
+          "text": "WS01",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "_triage_identity",
+        {
+          "text": null,
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "_triage_output_file",
+        {
+          "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "TimeCreated",
+        {
+          "text": "2026-01-05T02:13:58.2040000Z",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "EventId",
+        {
+          "text": "4625",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "Channel",
+        {
+          "text": "Security",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "Computer",
+        {
+          "text": "WS01",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "UserName",
+        {
+          "text": "Administrator",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "RemoteHost",
+        {
+          "text": "203.0.113.7",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "MapDescription",
+        {
+          "text": "Failed logon",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "PayloadData1",
+        {
+          "text": "LogonType 10",
+          "failed": false,
+          "clipped": false
+        }
+      ],
+      [
+        "SourceFile",
+        {
+          "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+          "failed": false,
+          "clipped": false
+        }
+      ]
+    ],
+    "mark": null,
+    "marked_by": null,
+    "tags": [],
+    "notes": [],
+    "evidence_path": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+    "output_file": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv"
+  },
+  "fields": [
+    {
+      "meta": {
+        "name": "_triage_run_id",
+        "role": "run_id",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "20260101000000-aaaa",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "_triage_host",
+        "role": "host",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "WS01",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "_triage_identity",
+        "role": "identity",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": null,
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "_triage_output_file",
+        "role": "output_file",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "TimeCreated",
+        "role": "data",
+        "sql_type": "TIMESTAMP",
+        "time_semantics": "utc",
+        "origin": "suite"
+      },
+      "text": "2026-01-05T02:13:58.2040000Z",
+      "display": "2026-01-05 02:13:58.2040000 Z",
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "EventId",
+        "role": "data",
+        "sql_type": "BIGINT",
+        "time_semantics": null,
+        "origin": "suite"
+      },
+      "text": "4625",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "Channel",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "Security",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "Computer",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "WS01",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "UserName",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "Administrator",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "RemoteHost",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "203.0.113.7",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "MapDescription",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "Failed logon",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "PayloadData1",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "LogonType 10",
+      "display": null,
+      "failed": false
+    },
+    {
+      "meta": {
+        "name": "SourceFile",
+        "role": "data",
+        "sql_type": null,
+        "time_semantics": null,
+        "origin": null
+      },
+      "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+      "display": null,
+      "failed": false
+    }
+  ],
+  "provenance": {
+    "host": "WS01",
+    "source_id": 1,
+    "run_id": "20260101000000-aaaa",
+    "evidence_path": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+    "locator": null,
+    "output_file": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
+    "output_file_listed": null
+  },
+  "zone": "UTC"
+}

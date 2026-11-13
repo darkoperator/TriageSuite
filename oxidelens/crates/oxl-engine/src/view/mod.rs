@@ -23,7 +23,9 @@ mod split;
 mod time;
 mod values;
 
-pub use export::{export_csv, ExportReport};
+pub use export::{
+    check_export_target, create_export_partial, export_csv, export_csv_guarded, ExportReport,
+};
 pub use page::{page_view, ColumnMeta, GridCell, GridPage, PageOptions};
 pub use row::{
     around_totals, cell_value, merged_view, row_view, CellValue, FieldView, MergedView, Provenance,

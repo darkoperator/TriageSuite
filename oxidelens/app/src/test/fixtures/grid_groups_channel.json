@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "key": "Security",
+      "key_clipped": false,
+      "full_key": null,
+      "count": 8,
+      "first": "2026-01-05 02:13:58.2040000",
+      "last": "2026-01-05 02:33:20.4610000",
+      "suspicious": 0
+    },
+    {
+      "key": "Sysmon",
+      "key_clipped": false,
+      "full_key": null,
+      "count": 3,
+      "first": "2026-01-05 02:15:44.3800000",
+      "last": "2026-01-05 02:17:02.6450000",
+      "suspicious": 1
+    }
+  ],
+  "truncated": false
+}

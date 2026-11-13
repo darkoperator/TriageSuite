@@ -1,0 +1,86 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "Logons",
+      "kind": "view",
+      "pattern": "evtxtriage_*",
+      "doc": {
+        "chips": [
+          {
+            "id": "c1",
+            "label": "EventId = 4624",
+            "enabled": true,
+            "origin": "cell",
+            "filter": {
+              "column": "EventId",
+              "op": "eq",
+              "value": "4624",
+              "case_sensitive": false
+            }
+          }
+        ],
+        "search": {
+          "text": "",
+          "regex": false,
+          "case_sensitive": false,
+          "mode": "filter"
+        },
+        "hosts": [],
+        "group_by": [
+          "Channel"
+        ],
+        "sort": [
+          {
+            "column": "TimeCreated",
+            "descending": true
+          }
+        ],
+        "layout": null,
+        "colour_rules": []
+      },
+      "created_by": "analyst:analyst01",
+      "created_at": "2026-01-10T12:00:00.000000Z",
+      "updated_by": "analyst:analyst01",
+      "updated_at": "2026-01-10T12:00:00.000000Z"
+    },
+    {
+      "id": 2,
+      "name": "Sysmon only",
+      "kind": "preset",
+      "pattern": "*",
+      "doc": {
+        "chips": [
+          {
+            "id": "c1",
+            "label": "Channel = Sysmon",
+            "enabled": true,
+            "origin": "values",
+            "filter": {
+              "column": "Channel",
+              "op": "eq",
+              "value": "Sysmon",
+              "case_sensitive": false
+            }
+          }
+        ],
+        "search": {
+          "text": "",
+          "regex": false,
+          "case_sensitive": false,
+          "mode": "filter"
+        },
+        "hosts": [],
+        "group_by": [],
+        "sort": [],
+        "layout": null,
+        "colour_rules": []
+      },
+      "created_by": "analyst:analyst01",
+      "created_at": "2026-01-10T12:00:00.000000Z",
+      "updated_by": "analyst:analyst01",
+      "updated_at": "2026-01-10T12:00:00.000000Z"
+    }
+  ],
+  "truncated": false
+}

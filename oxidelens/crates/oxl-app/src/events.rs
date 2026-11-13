@@ -19,7 +19,7 @@ pub const JOB_FINISHED: &str = "job-finished";
 pub const SETTINGS_DAMAGED: &str = "settings-damaged";
 
 /// What changed in the case, and the app's change counter after it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 pub struct CaseChanged {
     /// What the write touched (`sources`, `marks`, `views`, `settings`...),
     /// so a screen re-reads only what it shows.
@@ -30,14 +30,14 @@ pub struct CaseChanged {
 }
 
 /// A job's kind: `load_run`, `load_file` or `export`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 pub struct JobStarted {
     pub kind: String,
     /// What the status bar says: the file or folder name being loaded.
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 pub struct JobFinished {
     pub kind: String,
     pub ok: bool,

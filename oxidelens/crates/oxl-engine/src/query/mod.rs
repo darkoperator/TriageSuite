@@ -74,6 +74,7 @@ pub struct GridQuery {
 /// One sort key. It arrives untrusted inside a grid state or a saved view,
 /// so unknown fields are refused.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct SortKey {
     pub column: String,

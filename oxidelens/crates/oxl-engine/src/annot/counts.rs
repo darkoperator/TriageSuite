@@ -9,6 +9,7 @@ use duckdb::params;
 
 /// Marked rows that are in their relation's view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MarkCounts {
     pub suspicious: u64,
 }

@@ -27,7 +27,7 @@ use crate::queries::{QueryRegistry, Ticket};
 use crate::settings::{app_actor, os_user, SettingsStore};
 use oxl_engine::{Actor, Case};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, TryLockError};
 use std::time::Duration;
 
@@ -189,12 +189,20 @@ type Hook = Box<dyn FnOnce() + Send>;
 
 /// Where a test may pause a read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Point {
+pub(crate) enum Point {
     /// The case is found; the query is not registered yet.
     BeforeEnter,
     /// The query has a reader and has not started its work.
     AfterCheckout,
+    /// An export has written its partial file and checked its target once,
+    /// and has not yet taken the write gate for the second check and the
+    /// rename.
+    BeforeRename,
 }
+
+/// How often an export waiting for the write gate looks whether it was
+/// stopped meanwhile.
+const GATE_POLL: Duration = Duration::from_millis(10);
 
 impl AppState {
     pub fn new(settings: SettingsStore, events: Arc<dyn EventSink>) -> AppState {
@@ -211,7 +219,7 @@ impl AppState {
     }
 
     /// Run the test hook set for `at`, once. Nothing outside tests.
-    fn hook(&self, at: Point) {
+    pub(crate) fn hook(&self, at: Point) {
         #[cfg(test)]
         {
             let hook = {
@@ -228,7 +236,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn on(&self, at: Point, hook: impl FnOnce() + Send + 'static) {
+    pub(crate) fn on(&self, at: Point, hook: impl FnOnce() + Send + 'static) {
         lock(&self.hooks).push((at, Box::new(hook)));
     }
 
@@ -296,6 +304,55 @@ impl AppState {
         ticket.run(&reader, work)
     }
 
+    /// `read`, for work whose result is something it did outside the case
+    /// (an export's file): `flag` is set as soon as the query is stopped
+    /// (superseded, cancelled, or its case closing), for the work to look
+    /// at between statements, and when the work completes its result is the
+    /// answer even if the query was stopped after it
+    /// (`Ticket::run_to_completion`). Work that fails once the query was
+    /// stopped answers the stop code.
+    pub fn read_to_completion<T>(
+        &self,
+        slot: &str,
+        query_id: &str,
+        flag: Arc<AtomicBool>,
+        work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
+    ) -> Result<T, CmdError> {
+        let open = self.current()?;
+        let ticket = self
+            .queries
+            .enter_case_with_flag(open.generation, slot, query_id, flag)?;
+        let reader = open.readers.checkout(&ticket)?;
+        ticket.run_to_completion(&reader, work)
+    }
+
+    /// Run `run` announced as a job of `kind`: `job-started` before it,
+    /// `job-finished` after it, with its error's message when it failed.
+    pub fn announced<T>(
+        &self,
+        kind: &str,
+        label: &str,
+        run: impl FnOnce() -> Result<T, CmdError>,
+    ) -> Result<T, CmdError> {
+        self.emit(
+            JOB_STARTED,
+            &JobStarted {
+                kind: kind.to_string(),
+                label: label.to_string(),
+            },
+        );
+        let result = run();
+        self.emit(
+            JOB_FINISHED,
+            &JobFinished {
+                kind: kind.to_string(),
+                ok: result.is_ok(),
+                message: result.as_ref().err().map(|e| e.message.clone()),
+            },
+        );
+        result
+    }
+
     /// Run `work` on the writer: `busy` while another write runs, `no_case`
     /// when no case is open. On success the window hears `case-changed`
     /// with `kinds`.
@@ -322,25 +379,46 @@ impl AppState {
     ) -> Result<T, CmdError> {
         let _gate = self.gate()?;
         self.current()?;
-        self.emit(
-            JOB_STARTED,
-            &JobStarted {
-                kind: kind.to_string(),
-                label: label.to_string(),
-            },
-        );
-        let result = self.on_writer(work);
-        self.emit(
-            JOB_FINISHED,
-            &JobFinished {
-                kind: kind.to_string(),
-                ok: result.is_ok(),
-                message: result.as_ref().err().map(|e| e.message.clone()),
-            },
-        );
-        let (value, generation) = result?;
+        let (value, generation) = self.announced(kind, label, || self.on_writer(work))?;
         self.changed(kinds, generation);
         Ok(value)
+    }
+
+    /// The write gate, waited for while a write runs, for an export that
+    /// holds a reader: `stop` is looked at every `GATE_POLL`, and once it is
+    /// set (the export's query was cancelled or superseded, or its case is
+    /// closing) the wait gives up with `invalid: cancelled`, which the
+    /// registry answers as the stop code. A close holds the gate while it
+    /// waits for every reader, so a blocking wait here would never end.
+    pub fn wait_for_gate(&self, stop: &AtomicBool) -> oxl_engine::Result<MutexGuard<'_, ()>> {
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                return Err(oxl_engine::EngineError::Invalid("cancelled".to_string()));
+            }
+            match self.write_gate.try_lock() {
+                Ok(guard) => return Ok(guard),
+                Err(TryLockError::Poisoned(p)) => return Ok(p.into_inner()),
+                Err(TryLockError::WouldBlock) => std::thread::sleep(GATE_POLL),
+            }
+        }
+    }
+
+    /// Run `work` on the writer with the write gate held, waiting for a
+    /// write that is running to end rather than answering `busy`, and
+    /// without announcing a change: for work that must not interleave with a
+    /// write but changes nothing in the case (an exported view's last check
+    /// of its target, and its rename). The caller must hold no reader, or a
+    /// close (which holds the gate while it waits for readers) could not
+    /// end. `no_case` when no case is open.
+    pub fn serialized<T>(
+        &self,
+        work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
+    ) -> Result<T, CmdError> {
+        let _gate = lock(&self.write_gate);
+        let open = self.current()?;
+        let writer = lock(&open.writer);
+        let case = writer.as_ref().ok_or_else(CmdError::no_case)?;
+        Ok(work(case)?)
     }
 
     /// Run `work` on the writer; the caller holds the gate. The new
@@ -607,6 +685,80 @@ mod tests {
             finish.send(()).unwrap();
             assert_eq!(fresh.join().unwrap(), Ok(5));
             let _keep = d;
+        });
+    }
+
+    /// Run `work` as query `id` on a thread, wait until it has started, cancel
+    /// it, and answer what it answered. `work` runs through
+    /// `read_to_completion` when `to_completion`, with the query's flag,
+    /// which the cancel sets; through `read` otherwise, with a flag the test
+    /// sets once the cancel is in.
+    fn cancelled_while_running(
+        state: &Arc<AppState>,
+        id: &'static str,
+        to_completion: bool,
+        work: impl FnOnce(&AtomicBool) -> oxl_engine::Result<u32> + Send + 'static,
+    ) -> Result<u32, CmdError> {
+        let (started_tx, started) = mpsc::channel();
+        let flag = Arc::new(AtomicBool::new(false));
+        let run = {
+            let (state, flag) = (state.clone(), flag.clone());
+            std::thread::spawn(move || {
+                let job = |_c: &Case| {
+                    started_tx.send(()).unwrap();
+                    work(&flag)
+                };
+                if to_completion {
+                    state.read_to_completion("export", id, flag.clone(), job)
+                } else {
+                    state.read("export", id, job)
+                }
+            })
+        };
+        started.recv().unwrap();
+        state.queries.cancel(&[id.to_string()]);
+        if to_completion {
+            assert!(flag.load(Ordering::SeqCst), "the cancel set the flag");
+        } else {
+            flag.store(true, Ordering::SeqCst);
+        }
+        run.join().unwrap()
+    }
+
+    /// Wait for the flag, as an export looks at it between chunks.
+    fn until_set(flag: &AtomicBool) {
+        let start = Instant::now();
+        while !flag.load(Ordering::SeqCst) {
+            assert!(start.elapsed() < Duration::from_secs(10), "never cancelled");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn work_that_completes_after_a_cancel_answers_its_result() {
+        let (_d, state) = opened();
+        within(Duration::from_secs(30), move || {
+            // The file is renamed into place after the cancel arrived: the
+            // answer is the report, because the file is there.
+            let done = cancelled_while_running(&state, "e1", true, |flag| {
+                until_set(flag);
+                Ok(7)
+            });
+            assert_eq!(done, Ok(7));
+            // Work that stops for the cancel answers `interrupted`, never
+            // its own error (an export's `invalid: cancelled`, or DuckDB's
+            // interrupt).
+            let stopped = cancelled_while_running(&state, "e2", true, |flag| {
+                until_set(flag);
+                Err(oxl_engine::EngineError::Invalid("cancelled".into()))
+            });
+            assert_eq!(stopped.unwrap_err().code, "interrupted");
+            // A plain read stopped the same way never answers what it read.
+            let read = cancelled_while_running(&state, "e3", false, |flag| {
+                until_set(flag);
+                Ok(7)
+            });
+            assert_eq!(read.unwrap_err().code, "interrupted");
         });
     }
 

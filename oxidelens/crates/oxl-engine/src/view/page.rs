@@ -32,9 +32,11 @@ use triage_core::timestamp::zone;
 pub struct ColumnMeta {
     pub name: String,
     pub role: ColumnRole,
+    #[cfg_attr(feature = "ts", ts(as = "Option<crate::ts::SqlTypeTs>"))]
     pub sql_type: Option<SqlType>,
     /// How a timestamp is zoned: only `utc` cells are rendered in the zone;
     /// the app badges the others `?tz`.
+    #[cfg_attr(feature = "ts", ts(as = "Option<crate::ts::TimeSemanticsTs>"))]
     pub time_semantics: Option<TimeSemantics>,
     pub origin: Option<TypeOrigin>,
 }

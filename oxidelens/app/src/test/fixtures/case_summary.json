@@ -1,0 +1,95 @@
+{
+  "path": "/fixture/case.duckdb",
+  "name": "WS01 triage",
+  "case_id": "0123456789abcdef0123456789abcdef",
+  "format": 2,
+  "display_zone": "UTC",
+  "hosts": [
+    "SRV01",
+    "WS01"
+  ],
+  "relations": [
+    {
+      "name": "evtxtriage_events",
+      "kind": "dataset",
+      "tool": "EvtxTriage",
+      "rows": 11,
+      "hosts": [
+        "SRV01",
+        "WS01"
+      ],
+      "primary_time": "TimeCreated",
+      "evidence_path_column": "SourceFile",
+      "host_column": "_triage_host"
+    },
+    {
+      "name": "ext_hayabusa_csv_timeline",
+      "kind": "dataset",
+      "tool": "Hayabusa",
+      "rows": 5,
+      "hosts": [
+        "WS01"
+      ],
+      "primary_time": "Timestamp",
+      "evidence_path_column": null,
+      "host_column": "_triage_host"
+    },
+    {
+      "name": "petriage_timeline",
+      "kind": "dataset",
+      "tool": "PETriage",
+      "rows": 5,
+      "hosts": [
+        "SRV01",
+        "WS01"
+      ],
+      "primary_time": "RunTime",
+      "evidence_path_column": null,
+      "host_column": "_triage_host"
+    },
+    {
+      "name": "retriage_timezoneinfo_system",
+      "kind": "dataset",
+      "tool": "RETriage",
+      "rows": 3,
+      "hosts": [
+        "SRV01",
+        "WS01"
+      ],
+      "primary_time": null,
+      "evidence_path_column": null,
+      "host_column": "_triage_host"
+    }
+  ],
+  "sources": [
+    {
+      "id": 1,
+      "kind": "run",
+      "path": "/fixture/run-20260101000000-aaaa",
+      "run_id": "20260101000000-aaaa",
+      "hosts": [
+        "SRV01",
+        "WS01"
+      ],
+      "loaded_at": "2026-01-10T12:00:00.000000Z",
+      "loaded_by": "analyst:analyst01",
+      "removed": false
+    },
+    {
+      "id": 2,
+      "kind": "run",
+      "path": "/fixture/run-20260104000000-dddd",
+      "run_id": "20260104000000-dddd",
+      "hosts": [
+        "SRV01",
+        "WS01"
+      ],
+      "loaded_at": "2026-01-10T12:00:00.000000Z",
+      "loaded_by": "analyst:analyst01",
+      "removed": false
+    }
+  ],
+  "mark_counts": {
+    "suspicious": 1
+  }
+}

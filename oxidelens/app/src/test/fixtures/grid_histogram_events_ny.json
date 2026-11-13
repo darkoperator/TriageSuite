@@ -1,0 +1,51 @@
+{
+  "column": "TimeCreated",
+  "time_semantics": "utc",
+  "zone": "America/New_York",
+  "bucket_seconds": 60,
+  "buckets": [
+    {
+      "start": "2026-01-05T02:13:00.000000Z",
+      "label": "2026-01-04 21:13:00",
+      "end_label": "2026-01-04 21:13:59",
+      "count": 1,
+      "suspicious": 0
+    },
+    {
+      "start": "2026-01-05T02:14:00.000000Z",
+      "label": "2026-01-04 21:14:00",
+      "end_label": "2026-01-04 21:14:59",
+      "count": 1,
+      "suspicious": 0
+    },
+    {
+      "start": "2026-01-05T02:15:00.000000Z",
+      "label": "2026-01-04 21:15:00",
+      "end_label": "2026-01-04 21:15:59",
+      "count": 2,
+      "suspicious": 0
+    },
+    {
+      "start": "2026-01-05T02:17:00.000000Z",
+      "label": "2026-01-04 21:17:00",
+      "end_label": "2026-01-04 21:17:59",
+      "count": 1,
+      "suspicious": 1
+    },
+    {
+      "start": "2026-01-05T02:22:00.000000Z",
+      "label": "2026-01-04 21:22:00",
+      "end_label": "2026-01-04 21:22:59",
+      "count": 2,
+      "suspicious": 0
+    },
+    {
+      "start": "2026-01-05T02:33:00.000000Z",
+      "label": "2026-01-04 21:33:00",
+      "end_label": "2026-01-04 21:33:59",
+      "count": 2,
+      "suspicious": 0
+    }
+  ],
+  "untimed": 2
+}

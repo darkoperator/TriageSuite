@@ -15,6 +15,7 @@ use duckdb::{params, Connection};
 pub const MAX_NOTE: usize = 10_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Note {
     pub id: i64,
     pub row_id: i64,

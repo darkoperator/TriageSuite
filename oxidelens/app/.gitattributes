@@ -1,0 +1,5 @@
+# Written by oxl-app's tests and compared with what they write byte for byte
+# (tests/contract.rs, tests/record_fixtures.rs): LF in every checkout, so a
+# Windows checkout with core.autocrlf compares equal too.
+src/contract/generated/** text eol=lf
+src/test/fixtures/** text eol=lf

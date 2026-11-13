@@ -17,7 +17,8 @@ pub const SUPERSEDED: &str = "superseded";
 /// `query_cancel` named this query.
 pub const INTERRUPTED: &str = "interrupted";
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// What a command that fails rejects with.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 pub struct CmdError {
     pub code: String,
     pub message: String,

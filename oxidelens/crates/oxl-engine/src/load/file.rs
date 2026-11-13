@@ -29,6 +29,7 @@ const HOST_COLUMN: &str = "_triage_host";
 /// What an analyst may say about a file at load time. The app sends it as
 /// JSON; a field it does not know is refused.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(default, deny_unknown_fields)]
 pub struct FileOptions {
     /// The relation's name; derived from the file name when absent.

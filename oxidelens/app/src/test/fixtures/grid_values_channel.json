@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "value": "Security",
+      "clipped": false,
+      "count": 8
+    },
+    {
+      "value": "Sysmon",
+      "clipped": false,
+      "count": 3
+    }
+  ],
+  "truncated": false
+}

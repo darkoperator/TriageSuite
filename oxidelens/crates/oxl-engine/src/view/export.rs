@@ -70,20 +70,40 @@ pub fn export_csv(
     zone_times: Option<&str>,
     cancel: &AtomicBool,
 ) -> Result<ExportReport> {
+    export_csv_guarded(case, state, path, zone_times, cancel, |_| Ok(()))
+}
+
+/// `export_csv`, with `guard` taken once every row is written and held
+/// across a second `check_export_target` and the rename. A caller in which
+/// the case's sources can change while the rows are written (the app, whose
+/// loads run beside its reads) passes a guard that keeps them from
+/// changing, so that a load which made the target part of a source after
+/// the first check is seen, and the export is `Refused` with its partial
+/// file removed, instead of landing inside the source. `guard`'s error ends
+/// the export the same way.
+pub fn export_csv_guarded<G>(
+    case: &Case,
+    state: &GridState,
+    path: &Path,
+    zone_times: Option<&str>,
+    cancel: &AtomicBool,
+    guard: impl FnOnce(&Case) -> Result<G>,
+) -> Result<ExportReport> {
     if let Some(zone) = zone_times {
         check_zone(zone)?;
     }
     let q = state.query()?;
     let scope = scope(case, &q)?;
     let order = order_sql(&scope, &q)?;
-    check_target(case, path)?;
+    check_export_target(case, path)?;
 
-    let partial = partial_path(path);
-    let file = create_partial(&partial)?;
+    let (partial, file) = create_export_partial(path)?;
     let written = write_rows(case, &scope, &order, zone_times, file, cancel).and_then(|rows| {
-        std::fs::rename(&partial, path)
-            .map(|()| rows)
-            .map_err(Into::into)
+        let held = guard(case)?;
+        check_export_target(case, path)?;
+        let renamed = std::fs::rename(&partial, path);
+        drop(held);
+        renamed.map(|()| rows).map_err(Into::into)
     });
     match written {
         Ok(rows) => Ok(ExportReport {
@@ -105,6 +125,15 @@ fn partial_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(".partial");
     PathBuf::from(name)
+}
+
+/// Create `<path>.partial` new, beside `path`, for a file that is renamed
+/// over `path` once complete (as `create_partial`); the partial's path and
+/// the open file. The app writes an exported view file through it.
+pub fn create_export_partial(path: &Path) -> Result<(PathBuf, File)> {
+    let partial = partial_path(path);
+    let file = create_partial(&partial)?;
+    Ok((partial, file))
 }
 
 /// Create the partial file, new. Anything already at that name, a file, a
@@ -247,8 +276,9 @@ fn csv_error(e: csv::Error) -> EngineError {
 /// `Refused` when the file or its partial file would be inside a source the
 /// case has not removed, or would be the case file or its log. Paths are
 /// compared canonical: the folder's, and the file's own when it exists, so a
-/// link or a `..` cannot lead into a source.
-fn check_target(case: &Case, path: &Path) -> Result<()> {
+/// link or a `..` cannot lead into a source. Every file the app writes for
+/// the analyst (a CSV export, an exported view) is checked by it.
+pub fn check_export_target(case: &Case, path: &Path) -> Result<()> {
     if std::fs::metadata(path).is_ok_and(|m| m.is_dir()) {
         return Err(EngineError::Invalid(format!(
             "{} is a folder; an export is written to a file",

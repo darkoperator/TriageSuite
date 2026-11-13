@@ -11,7 +11,13 @@ publish = false
 tauri-build.workspace = true
 
 [dependencies]
-oxl-engine.workspace = true
+# With `ts`: the app owns the TypeScript contract, generated from the
+# engine's types and its own (`contract`), and checked by `tests/contract.rs`
+# in every `cargo test`.
+oxl-engine = { workspace = true, features = ["ts"] }
+ts-rs.workspace = true
+# The display zones the app offers (`zone_names`).
+triage-core = { workspace = true, features = ["zones"] }
 # The interrupt handle a running query is stopped through.
 duckdb.workspace = true
 tauri.workspace = true
@@ -25,6 +31,9 @@ chrono.workspace = true
 [dev-dependencies]
 oxl-fixtures.workspace = true
 tempfile.workspace = true
+# The mock runtime, so a test can call every command through Tauri's own IPC
+# with the argument names the TypeScript contract gives.
+tauri = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true

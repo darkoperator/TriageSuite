@@ -34,6 +34,7 @@ use triage_core::output::duckdb::sql::quote_ident;
 use triage_core::timestamp::zone;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Bucket {
     /// UTC start of the bucket (R1).
     pub start: String,
@@ -48,10 +49,12 @@ pub struct Bucket {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Histogram {
     pub column: String,
     /// How `column` is zoned. Only a `utc` column is bucketed in `zone`; an
     /// `unknown` one is bucketed as written, as if it were UTC.
+    #[cfg_attr(feature = "ts", ts(as = "Option<crate::ts::TimeSemanticsTs>"))]
     pub time_semantics: Option<TimeSemantics>,
     /// The display zone asked for.
     pub zone: String,

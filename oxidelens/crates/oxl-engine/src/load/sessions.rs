@@ -33,6 +33,7 @@ const SUFFIX: &str = ".tle_sess";
 /// One session the case offers: a session file of a run in the case, and
 /// the relations its files feed.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Session {
     /// The run (`ox.source`) the session file came with.
     pub source_id: i64,
@@ -46,6 +47,7 @@ pub struct Session {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SessionRelation {
     pub relation: String,
     pub host: String,

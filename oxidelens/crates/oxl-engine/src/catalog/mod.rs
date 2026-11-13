@@ -34,6 +34,7 @@ use triage_core::output::duckdb::sql::{quote_ident, NameAllocator};
 /// Who typed a column. Serialised as `ox.column_catalog.origin` spells it
 /// (`as_str`), which a test pins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum TypeOrigin {
     Suite,
@@ -75,6 +76,7 @@ impl TypeOrigin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     Dataset,
@@ -96,6 +98,7 @@ impl RelationKind {
 /// loose file loaded with a host). Metadata names can carry a collision
 /// suffix (`_triage_host_1`), so the role, not the name, says which is which.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ColumnRole {
     Data,
@@ -135,6 +138,7 @@ impl ColumnRole {
 
 /// One logical column of a relation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ColumnInfo {
     pub name: String,
     pub role: ColumnRole,
@@ -142,7 +146,9 @@ pub struct ColumnInfo {
     pub text_column: String,
     /// The physical column holding the typed value; `None` when untyped.
     pub typed_column: Option<String>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<crate::ts::SqlTypeTs>"))]
     pub sql_type: Option<SqlType>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<crate::ts::TimeSemanticsTs>"))]
     pub time_semantics: Option<TimeSemantics>,
     /// `None` when untyped.
     pub origin: Option<TypeOrigin>,
@@ -150,6 +156,7 @@ pub struct ColumnInfo {
 
 /// One queryable relation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RelationInfo {
     pub name: String,
     pub kind: RelationKind,

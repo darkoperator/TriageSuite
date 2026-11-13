@@ -140,6 +140,7 @@ pub fn anchor_of(case: &Case, row_id: i64) -> Result<(String, String)> {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MergedRow {
     pub row_id: i64,
     pub relation: String,
@@ -148,13 +149,20 @@ pub struct MergedRow {
     pub time: Option<String>,
     /// How the relation's primary time is zoned; `None` without one. Rows
     /// with an `unknown` time sort by their written value.
+    #[cfg_attr(feature = "ts", ts(as = "Option<crate::ts::TimeSemanticsTs>"))]
     pub time_semantics: Option<TimeSemantics>,
     pub host: Option<String>,
     pub summary: String,
     pub mark: Option<MarkState>,
 }
 
-#[derive(Debug, Clone)]
+/// The rows a merged list shows. The app sends one as JSON,
+/// `{"find": FindRequest}` or `{"around": {host, at, window_seconds}}`;
+/// unknown fields are refused.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum MergedSource {
     /// The rows a find counts.
     Find(FindRequest),

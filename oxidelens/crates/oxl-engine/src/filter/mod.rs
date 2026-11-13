@@ -24,6 +24,7 @@ use serde_json::Value;
 
 /// One node of a filter document.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FilterNode {
     And(Vec<FilterNode>),
@@ -35,6 +36,7 @@ pub enum FilterNode {
 
 /// One condition on one column.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct Leaf {
     pub column: String,
@@ -46,6 +48,7 @@ pub struct Leaf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Op {
     Eq,

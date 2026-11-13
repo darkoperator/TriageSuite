@@ -35,6 +35,7 @@ use triage_core::output::duckdb::sql::quote_ident;
 pub const MAX_VALUE: usize = 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FindMode {
     /// The cell's whole text is the value, without regard to case.
@@ -43,12 +44,17 @@ pub enum FindMode {
     Contains,
 }
 
-#[derive(Debug, Clone)]
+/// A find across every relation. The app sends one inside a
+/// `MergedSource`; unknown fields are refused.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
 pub struct FindRequest {
     pub value: String,
     pub mode: FindMode,
     /// Empty means every host; otherwise relations without a host column
     /// are not searched.
+    #[serde(default)]
     pub hosts: Vec<String>,
     /// UTC text bounding the rows' primary time, inclusive. Either bound
     /// leaves out the relations that have no primary time.
