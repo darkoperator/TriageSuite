@@ -10,7 +10,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
-import { columns as readColumns, gridEmptyColumns, isCmdError } from "../api";
+import { columns as readColumns, gridEmptyColumns, gridPage, isCmdError, viewSave } from "../api";
+import type { Chip } from "../contract/generated/Chip";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { GridPage } from "../contract/generated/GridPage";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
@@ -18,9 +19,16 @@ import type { GridState } from "../contract/generated/GridState";
 import { useShell } from "../shell/context";
 import { displaySafe } from "../text";
 import type { TabBodyProps } from "../shell/slots";
+import AdvancedEditor from "./AdvancedEditor";
 import CellMenu from "./CellMenu";
+import ChipBar from "./ChipBar";
+import {
+  MARK_COLUMN, MAX_CHIPS, cellChip, filterColumns, filterRowChip, filterRowId, removeChip, toggleChip, upsertChip,
+} from "./chips";
 import ColumnManager from "./ColumnManager";
 import { cellText, rowsAsTsv, writeClipboard } from "./copy";
+import FilterPanel from "./FilterPanel";
+import FilterRow from "./FilterRow";
 import GridBody from "./GridBody";
 import GridHeader, { MARK_WIDTH } from "./GridHeader";
 import { initialGridState, nextSort } from "./gridState";
@@ -59,6 +67,9 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; column: string } | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
   const [emptyBusy, setEmptyBusy] = useState(false);
+  const [panel, setPanel] = useState<{ column: string; x: number; y: number; opener?: HTMLElement | null } | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [clearToken, setClearToken] = useState(0);
   // The column layout: what the settings held when the grid opened, then what the analyst does. Opening writes nothing;
   // a change is saved `LAYOUT_SAVE_MS` after the last one (see `edit`).
   const [layout, setLayout] = useState<ColumnLayout | null>(() => settings.layouts[relation] ?? null);
@@ -118,6 +129,68 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     setSelection(emptySelection);
     setMenu(null);
   }, []);
+
+  // ---- filters: every layer is a chip in `state.chips` ---------------------------------------------------------------
+  const chipsRef = useRef(state.chips);
+  useEffect(() => {
+    chipsRef.current = state.chips;
+  });
+  /** Edits the chip list; more than `MAX_CHIPS` is refused with a message and nothing changes. */
+  const applyChips = useCallback(
+    (edit: (chips: Chip[]) => Chip[]) => {
+      const next = edit(chipsRef.current);
+      if (next.length > MAX_CHIPS) {
+        reportError(new Error(`at most ${MAX_CHIPS} filters: remove one first`));
+        return;
+      }
+      chipsRef.current = next; // the next edit in this tick starts from this one, not from the last render
+      changeState((s) => ({ ...s, chips: next }));
+    },
+    [changeState, reportError],
+  );
+  const onFilterRowText = useCallback(
+    (column: string, text: string) =>
+      applyChips((chips) => (text === "" ? removeChip(chips, filterRowId(column)) : upsertChip(chips, filterRowChip(column, text)))),
+    [applyChips],
+  );
+  /** Asks the engine whether the grid would take `chip` (one row is read); its message when it would not. */
+  const validate = useCallback(
+    async (chip: Chip): Promise<string | null> => {
+      const chips = upsertChip(chipsRef.current, chip);
+      if (chips.length > MAX_CHIPS) return `at most ${MAX_CHIPS} filters: remove one first`;
+      try {
+        await gridPage({ ...state, chips }, 1, 0, { zone: summary.display_zone, rules: [] }, `tab:${tab.id}:validate`);
+        return null;
+      } catch (e) {
+        if (isCmdError(e)) {
+          if (e.code === "superseded" || e.code === "interrupted") return "The check was interrupted: try again.";
+          return e.message;
+        }
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+    [state, summary.display_zone, tab.id],
+  );
+  const savePreset = useCallback(
+    async (name: string): Promise<string | null> => {
+      try {
+        // A preset is chips only: everything else of a view is left empty, which is what the engine requires.
+        await viewSave(name, "preset", relation, {
+          chips: state.chips,
+          search: { text: "", regex: false, case_sensitive: false, mode: "filter" },
+          hosts: [], group_by: [], sort: [], layout: null, colour_rules: [],
+        });
+        return null;
+      } catch (e) {
+        return isCmdError(e) ? e.message : e instanceof Error ? e.message : String(e);
+      }
+    },
+    [relation, state.chips],
+  );
+  const filtered = useMemo(
+    () => new Set(state.chips.filter((c) => c.enabled).flatMap((c) => filterColumns(c.filter))),
+    [state.chips],
+  );
 
   // ---- columns ----------------------------------------------------------------------------------------------------
   const meta = useMemo(() => new Map<string, ColumnMeta>((allMetas ?? []).map((c) => [c.name, c])), [allMetas]);
@@ -321,8 +394,29 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     if (row && names[focus.col] !== undefined) setViewer({ rowId: row.id, column: names[focus.col] });
   };
 
+  /** Filter in / Filter out on the focused cell: case-sensitive `eq` / `ne` on its stored text (a clipped one is read whole). */
+  const cellFilter = (op: "eq" | "ne") => {
+    if (!focus) return;
+    const row = rowAt(focus.row);
+    const column = names[focus.col];
+    const cell = row?.cells[cellIdx[focus.col]];
+    if (!row || !cell || column === undefined) return;
+    const session = beginCopy();
+    void guarded(
+      (async () => {
+        const text = cell.clipped ? await session.value(row.id, column) : cell.text;
+        if (!session.alive()) return viewChanged(session);
+        applyChips((chips) => [...chips, cellChip(column, op, text)]);
+      })(),
+    );
+  };
+
   const closeViewer = useCallback(() => {
     setViewer(null);
+    gridRef.current?.focus();
+  }, []);
+  const closePanel = useCallback(() => {
+    setPanel(null);
     gridRef.current?.focus();
   }, []);
   const closeMenu = useCallback(() => {
@@ -405,6 +499,19 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   return (
     <div ref={rootRef} className="grid" style={{ "--cell-size": `${settings.font_size}px` } as CSSProperties}>
+      <ChipBar
+        chips={state.chips}
+        columns={[...(allMetas ?? []).map((c) => ({ name: c.name, label: c.name })), { name: MARK_COLUMN, label: "Mark" }]}
+        onToggle={(id) => applyChips((chips) => toggleChip(chips, id))}
+        onRemove={(id) => applyChips((chips) => removeChip(chips, id))}
+        onClear={() => {
+          setClearToken((t) => t + 1);
+          applyChips(() => []);
+        }}
+        onPlus={(column, x, y, opener) => setPanel({ column, x, y, opener })}
+        onAdvanced={() => setAdvancedOpen(true)}
+        onSavePreset={savePreset}
+      />
       <div
         ref={scrollRef}
         className="grid-scroll"
@@ -438,7 +545,10 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
             onResize={(c, w) => edit((l) => setWidth(l, c, w))}
             onBestFit={(c) => fit([c])}
             onMove={(c, t) => edit((l) => moveColumn(l, c, t))}
+            onFilter={(column, x, y) => setPanel({ column, x, y })}
+            filtered={filtered}
           />
+          <FilterRow names={names} widths={widths} pinLeft={pinLeft} width={width} chips={state.chips} clearToken={clearToken} onText={onFilterRowText} />
           <GridBody
             virtualizer={virtualizer}
             rowAt={rowAt}
@@ -455,7 +565,16 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         </div>
       </div>
       {menu && (
-        <CellMenu x={menu.x} y={menu.y} onCopyCell={copyCell} onCopyRows={copyRows} onShowValue={showValue} onClose={closeMenu} />
+        <CellMenu
+          x={menu.x}
+          y={menu.y}
+          onCopyCell={copyCell}
+          onCopyRows={copyRows}
+          onShowValue={showValue}
+          onFilterIn={() => cellFilter("eq")}
+          onFilterOut={() => cellFilter("ne")}
+          onClose={closeMenu}
+        />
       )}
       {headerMenu && (
         <HeaderMenu
@@ -464,6 +583,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           pinned={resolved?.pinned.has(headerMenu.column) ?? false}
           canHide={(resolved?.shown.length ?? 0) > 1}
           onSort={(descending) => changeState((s) => ({ ...s, sort: [{ column: headerMenu.column, descending }] }))}
+          onFilter={() => setPanel({ column: headerMenu.column, x: headerMenu.x, y: headerMenu.y })}
           onPin={() => edit((l) => togglePin(l, headerMenu.column))}
           onBestFit={() => fit([headerMenu.column])}
           onHide={() => hideColumns([headerMenu.column])}
@@ -484,6 +604,34 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           onBestFit={() => fit(resolved.shown.map((c) => c.name))}
           onReset={resetLayout}
           onClose={() => setManagerOpen(false)}
+        />
+      )}
+      {panel && (
+        <FilterPanel
+          tabId={tab.id}
+          relation={relation}
+          column={panel.column}
+          meta={meta.get(panel.column)}
+          state={state}
+          zone={summary.display_zone}
+          x={panel.x}
+          y={panel.y}
+          applyChips={applyChips}
+          validate={validate}
+          onError={reportError}
+          returnFocus={panel.opener}
+          onClose={closePanel}
+        />
+      )}
+      {advancedOpen && allMetas && (
+        <AdvancedEditor
+          columns={allMetas}
+          validate={validate}
+          onAdd={(chip) => applyChips((chips) => [...chips, chip])}
+          onClose={() => {
+            setAdvancedOpen(false);
+            gridRef.current?.focus();
+          }}
         />
       )}
       {viewer && (

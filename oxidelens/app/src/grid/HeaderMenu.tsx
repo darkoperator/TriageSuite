@@ -1,5 +1,4 @@
-// The right-click menu of a column header. Group by and Filter are shown but disabled until the tasks that own them
-// hand the grid handlers. Escape, an outside press or any choice closes it.
+// The right-click menu of a column header. Group by is shown but disabled until the task that owns it hands the grid a handler. Escape, an outside press or any choice closes it.
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 export interface HeaderMenuProps {

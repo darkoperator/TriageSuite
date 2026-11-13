@@ -230,7 +230,19 @@ function compare(a: string, b: string, numbers: boolean): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function leafMatches(leaf: Leaf, rel: MockRelation, row: Row): boolean {
+/** `_mark`: `eq`, `ne` or `in` over `suspicious` / `none`, as the engine's filter compiler takes it. */
+function markMatches(leaf: Leaf, mark: string | null): boolean {
+  const is = (v: unknown) => (v === "none" ? mark === null : v === "suspicious" ? mark === "suspicious" : fail("invalid", `_mark is "suspicious" or "none"`));
+  switch (leaf.op) {
+    case "eq": return is(leaf.value);
+    case "ne": return !is(leaf.value);
+    case "in": return Array.isArray(leaf.value) && leaf.value.some(is);
+    default: return fail("invalid", "_mark takes eq, ne or in");
+  }
+}
+
+function leafMatches(leaf: Leaf, rel: MockRelation, row: Row, mark: string | null): boolean {
+  if (leaf.column === "_mark") return markMatches(leaf, mark);
   const i = rel.columns.findIndex((c) => c.name === leaf.column);
   if (i < 0) fail("invalid", `the relation has no column ${leaf.column}`);
   const col = rel.columns[i];
@@ -265,11 +277,11 @@ function leafMatches(leaf: Leaf, rel: MockRelation, row: Row): boolean {
   }
 }
 
-function nodeMatches(node: FilterNode, rel: MockRelation, row: Row): boolean {
-  if ("and" in node) return node.and.every((n) => nodeMatches(n, rel, row));
-  if ("or" in node) return node.or.some((n) => nodeMatches(n, rel, row));
-  if ("not" in node) return !nodeMatches(node.not, rel, row);
-  return leafMatches(node, rel, row);
+function nodeMatches(node: FilterNode, rel: MockRelation, row: Row, mark: string | null): boolean {
+  if ("and" in node) return node.and.every((n) => nodeMatches(n, rel, row, mark));
+  if ("or" in node) return node.or.some((n) => nodeMatches(n, rel, row, mark));
+  if ("not" in node) return !nodeMatches(node.not, rel, row, mark);
+  return leafMatches(node, rel, row, mark);
 }
 
 function searchMatcher(state: GridState): ((row: Row) => boolean) | null {
@@ -301,11 +313,13 @@ function select(state: GridState, skipChips: readonly string[] = []): Selection 
   const hostIx = rel.columns.findIndex((c) => c.role === "host");
   const chips = state.chips.filter((c) => c.enabled && !skipChips.includes(c.id));
   const hits = search ?? (() => false);
+  const marks = theCase().marks;
   let rows: number[] = [];
   for (let i = 0; i < rel.rows.length; i++) {
     const row = rel.rows[i];
     if (state.hosts.length && !state.hosts.includes(row[hostIx] ?? "")) continue;
-    if (!chips.every((c) => nodeMatches(c.filter, rel, row))) continue;
+    const mark = marks.get(rowIdOf(rel, i)) ?? null;
+    if (!chips.every((c) => nodeMatches(c.filter, rel, row, mark))) continue;
     if (search && state.search.mode === "filter" && !search(row)) continue;
     rows.push(i);
   }
@@ -470,7 +484,7 @@ const handlers: Handlers = {
         marks: picked.map((i) => marks.get(rowIdOf(sel.rel, i)) ?? null),
         cells: picked.map((i) => cols.map((c) => gridCell(sel.rel.columns[c], sel.rel.rows[i][c]))),
         row_rule: picked.map((i) => {
-          const at = rules.findIndex((r, n) => usable[n] && nodeMatches(r.filter, sel.rel, sel.rel.rows[i]));
+          const at = rules.findIndex((r, n) => usable[n] && nodeMatches(r.filter, sel.rel, sel.rel.rows[i], marks.get(rowIdOf(sel.rel, i)) ?? null));
           return at < 0 ? null : at;
         }),
         rule_columns: rules.map((r) => [...new Set(leaves(r.filter).map((l) => l.column))]),

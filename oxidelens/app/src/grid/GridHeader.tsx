@@ -29,6 +29,10 @@ export interface GridHeaderProps {
   onBestFit(column: string): void;
   /** `column` was dropped on `target`. */
   onMove(column: string, target: string): void;
+  /** The ▾ of a column (or of the Mark cell, as `_mark`) was pressed: open its filter panel at this point. */
+  onFilter(column: string, x: number, y: number): void;
+  /** Columns a filter is applied to (they show their ▾ lit). */
+  filtered: ReadonlySet<string>;
 }
 
 export default function GridHeader(p: GridHeaderProps): ReactNode {
@@ -92,7 +96,9 @@ export default function GridHeader(p: GridHeaderProps): ReactNode {
         data-fixed="true"
         className="hcell hcell-mark"
         style={{ width: MARK_WIDTH }}
-      />
+      >
+        <FilterButton column="_mark" label="Mark" active={p.filtered.has("_mark")} onFilter={p.onFilter} />
+      </div>
       {leaves.map((col, i) => {
         const sorted = col.getIsSorted();
         const left = pinLeft[i];
@@ -137,6 +143,7 @@ export default function GridHeader(p: GridHeaderProps): ReactNode {
             {needsZoneBadge(meta.get(col.id)) && (
               <span className="tz-badge" title="Zone unknown: shown as written">?tz</span>
             )}
+            <FilterButton column={col.id} label={displaySafe(col.id)} active={p.filtered.has(col.id)} onFilter={p.onFilter} />
             {sorted !== false && (
               <span className="sort-ind" aria-hidden="true">
                 {sorted === "asc" ? "▲" : "▼"}
@@ -160,5 +167,26 @@ export default function GridHeader(p: GridHeaderProps): ReactNode {
         );
       })}
     </div>
+  );
+}
+
+/** The ▾ that opens a column's filter panel. It is not a tab stop (the header row is one); Filter… in the header menu is the keyboard way. */
+function FilterButton(p: { column: string; label: string; active: boolean; onFilter(column: string, x: number, y: number): void }): ReactNode {
+  return (
+    <button
+      type="button"
+      className="col-filter"
+      tabIndex={-1}
+      data-active={p.active ? "true" : undefined}
+      aria-label={`Filter ${p.label}`}
+      draggable={false}
+      onClick={(e) => {
+        e.stopPropagation();
+        const r = e.currentTarget.getBoundingClientRect();
+        p.onFilter(p.column, r.left, r.bottom);
+      }}
+    >
+      ▾
+    </button>
   );
 }

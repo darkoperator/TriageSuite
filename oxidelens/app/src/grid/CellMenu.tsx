@@ -1,5 +1,5 @@
-// The right-click menu of a cell. Filter in / Filter out are shown but disabled until the filter task hands the grid
-// handlers; entries for later steps' keys are not shown. Escape, an outside press or any choice closes it.
+// The right-click menu of a cell. Filter in / Filter out are disabled when the grid hands no handler; entries for later
+// steps' keys are not shown. Escape, an outside press or any choice closes it.
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 export interface CellMenuProps {
@@ -8,7 +8,7 @@ export interface CellMenuProps {
   onCopyCell(): void;
   onCopyRows(): void;
   onShowValue(): void;
-  /** Set by Task 17; without it the entries are disabled. */
+  /** Without a handler the entry is disabled. */
   onFilterIn?: () => void;
   onFilterOut?: () => void;
   onClose(): void;
