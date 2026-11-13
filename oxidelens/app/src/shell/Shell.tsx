@@ -24,7 +24,7 @@ import TabPanel from "./TabPanel";
 import StatusBar from "./StatusBar";
 import TabStrip from "./TabStrip";
 import {
-  activate, closeTab, initialTabs, loadTabs, openDataset, saveTabs, OVERVIEW_ID, ScrollStore, type TabsState,
+  activate, closeTab, initialTabs, loadTabs, openDataset, openScoped, saveTabs, OVERVIEW_ID, ScrollStore, type Tab, type TabsState,
 } from "./tabs";
 import TopBar from "./TopBar";
 import { useCaseChanged } from "./useCaseChanged";
@@ -231,6 +231,7 @@ export default function Shell() {
   useEffect(() => () => store.dispose(), [caseId, store]);
 
   const openTab = useCallback((relation: string) => setTabs((t) => openDataset(t, relation)), []);
+  const openScopedTab = useCallback((tab: Tab) => setTabs((t) => openScoped(t, tab)), []);
 
   // ---- panes ------------------------------------------------------------------------------------------------------
   const togglePane = useCallback(
@@ -249,10 +250,10 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout,
           }
         : null,
-    [summary, settings, change, openTab, rightPane, scroll, reportError, saveLayout],
+    [summary, settings, change, openTab, openScopedTab, rightPane, scroll, reportError, saveLayout],
   );
 
   const dismissNote = damaged && (
@@ -284,7 +285,7 @@ export default function Shell() {
     );
   }
 
-  const titleOf = (id: string) => (id === OVERVIEW_ID ? "Overview" : (tabs.tabs.find((t) => t.id === id)?.relation ?? id));
+  const titleOf = (id: string) => (id === OVERVIEW_ID ? "Overview" : (tabs.tabs.find((t) => t.id === id)?.title ?? tabs.tabs.find((t) => t.id === id)?.relation ?? id));
   const left = settings!.left_pane;
   const right = settings!.right_pane;
   const suspicious = summary.mark_counts.suspicious;

@@ -12,6 +12,7 @@ import type { Chip } from "../contract/generated/Chip";
 import type { FilterNode } from "../contract/generated/FilterNode";
 import type { Op } from "../contract/generated/Op";
 import type { SqlType } from "../contract/generated/SqlType";
+import { displaySafe } from "../text";
 
 export const MAX_CHIPS = 50;
 export const MAX_CHIP_LABEL = 200;
@@ -62,7 +63,7 @@ export function clipLabel(text: string): string {
 const quote = (v: string) => `"${[...v].length > 60 ? [...v].slice(0, 59).join("") + "…" : v}"`;
 
 /** 16 hex digits from two FNV-1a passes over the column name: a name of any content makes a valid id. */
-function hash(s: string): string {
+export function hash(s: string): string {
   let a = 0x811c9dc5;
   let b = 0x01000193 ^ 0x9e3779b9;
   for (let i = 0; i < s.length; i++) {
@@ -219,4 +220,38 @@ export function describe(node: FilterNode): string {
   const v = node.value;
   const text = Array.isArray(v) ? v.map((x) => quote(String(x))).join(", ") : v === null ? "" : quote(String(v));
   return `${node.column} ${opLabel(node.op)} ${text}`.trim();
+}
+
+// ---- groups -------------------------------------------------------------------------------------------------------
+/**
+ * The chip that selects exactly one group's rows, as the engine's `group_filter` does: a key is a case-sensitive `eq` on
+ * the whole key (pass `full_key ?? key`), a missing key is `is_empty`; the `_mark` pseudo-column takes `eq` with the mark
+ * (`suspicious`) or `none`. The id is `gr-` and a hash of the column, with `-n` when that id is taken: a key (any text)
+ * never reaches an id. The label goes through `displaySafe` and is cut at the cap.
+ */
+export function groupChip(column: string, key: string | null, taken: ReadonlySet<string>): Chip {
+  const empty = key === null || key === "";
+  let id = `gr-${hash(column)}`;
+  for (let n = 1; taken.has(id); n++) id = `gr-${hash(column)}-${n}`;
+  if (column === MARK_COLUMN) {
+    const mark = empty ? "none" : key;
+    return { id, label: clipLabel(displaySafe(`Mark: ${mark === "none" ? "None" : mark === "suspicious" ? "Suspicious" : mark}`)), enabled: true, origin: "group", filter: leaf(column, "eq", mark, true) };
+  }
+  const label = empty ? `${column} is empty` : `${column} = ${quote(key)}`;
+  return {
+    id, label: clipLabel(displaySafe(label)), enabled: true, origin: "group",
+    filter: empty ? leaf(column, "is_empty") : leaf(column, "eq", key, true),
+  };
+}
+
+/** One group chip per level of `by` for the keys of a path, ids unique among `existing` and each other. */
+export function groupChips(by: readonly string[], keys: readonly (string | null)[], existing: readonly Chip[]): Chip[] {
+  const taken = new Set(existing.map((c) => c.id));
+  const out: Chip[] = [];
+  keys.forEach((key, i) => {
+    const c = groupChip(by[i], key, taken);
+    taken.add(c.id);
+    out.push(c);
+  });
+  return out;
 }

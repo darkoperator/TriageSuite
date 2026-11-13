@@ -24,13 +24,16 @@ import AdvancedEditor from "./AdvancedEditor";
 import CellMenu from "./CellMenu";
 import ChipBar from "./ChipBar";
 import {
-  MARK_COLUMN, MAX_CHIPS, cellChip, filterColumns, filterRowChip, filterRowId, removeChip, toggleChip, upsertChip,
+  MARK_COLUMN, MAX_CHIPS, cellChip, filterColumns, filterRowChip, filterRowId, groupChips, hash, removeChip, toggleChip, upsertChip,
 } from "./chips";
 import ColumnManager from "./ColumnManager";
 import { cellText, rowsAsTsv, writeClipboard } from "./copy";
 import FilterPanel from "./FilterPanel";
 import FilterRow from "./FilterRow";
 import GridBody from "./GridBody";
+import GroupBar from "./GroupBar";
+import GroupBody, { keyText } from "./GroupRow";
+import { MAX_GROUP_BY, useGroupTree, type Key } from "./groupTree";
 import GridHeader, { MARK_WIDTH } from "./GridHeader";
 import { initialGridState, nextSort } from "./gridState";
 import HeaderMenu from "./HeaderMenu";
@@ -60,10 +63,13 @@ interface Focus {
 }
 
 export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyProps): ReactNode {
-  const { summary, settings, change, setGridStatus, reportError, saveLayout } = useShell();
+  const { summary, settings, change, setGridStatus, reportError, saveLayout, openScoped } = useShell();
   const relation = tab.relation ?? "";
 
-  const [state, setState] = useState<GridState>(() => initialGridState(relation));
+  const [state, setState] = useState<GridState>(() => tab.seed?.state ?? initialGridState(relation));
+  // The group bar: the columns grouped by, outermost first. It is not part of `GridState` (the engine takes it per call).
+  const [by, setBy] = useState<string[]>(() => tab.seed?.by ?? []);
+  const grouped = by.length > 0;
   const [selection, setSelection] = useState<Selection>(emptySelection);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -93,9 +99,13 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const shownState = useMemo<GridState>(() => ({ ...state, columns: fetched }), [state, fetched]);
 
   const data = useGridData({
-    tabId: tab.id, state: shownState, zone: summary.display_zone, enabled: active && allMetas !== null, onError: reportError,
+    tabId: tab.id, state: shownState, zone: summary.display_zone, enabled: active && allMetas !== null && !grouped, onError: reportError,
   });
   const { want, refresh, rowAt, beginCopy, loadedTexts } = data;
+  const tree = useGroupTree({
+    tabId: tab.id, state: shownState, by, zone: summary.display_zone, enabled: active && allMetas !== null && grouped, onError: reportError,
+  });
+  const rowCount = grouped ? tree.items.length : data.total;
 
   // ---- the layout: one edit function, saved after a pause -------------------------------------------------------------
   const flushLayout = useCallback(() => {
@@ -274,17 +284,21 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   }, [relation, tab.id, generation, reportError]);
 
   // A write to the case (a mark, a load, a zone) re-reads the rows; filters, selection and scroll stay.
+  const treeRefresh = tree.refresh;
   const seenGeneration = useRef(change.generation);
   useEffect(() => {
     if (change.generation === seenGeneration.current) return;
     seenGeneration.current = change.generation;
-    if (change.kinds.some((k) => k !== "views")) refresh();
-  }, [change, refresh]);
+    if (change.kinds.some((k) => k !== "views")) {
+      refresh();
+      treeRefresh();
+    }
+  }, [change, refresh, treeRefresh]);
 
   // ---- virtual rows -----------------------------------------------------------------------------------------------
   const rowHeight = settings.font_size + 10;
   const virtualizer = useVirtualizer({
-    count: data.total,
+    count: rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 12,
@@ -294,8 +308,8 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const firstShown = items.length > 0 ? items[0].index : 0;
   const lastShown = items.length > 0 ? items[items.length - 1].index : 0;
   useEffect(() => {
-    if (items.length > 0) want(firstShown, lastShown);
-  }, [firstShown, lastShown, items.length, want]);
+    if (items.length > 0 && !grouped) want(firstShown, lastShown);
+  }, [firstShown, lastShown, items.length, want, grouped]);
 
   // ---- scroll: restore on mount and on showing the tab, report as it moves ----------------------------------------
   const lastOffset = useRef(scrollOffset);
@@ -304,28 +318,31 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     const el = scrollRef.current;
     if (!active || !el) return;
     // The scrollbar only spans the saved offset once the row count is known; until then a restore would be clamped.
-    if (!restored.current && data.total * rowHeight < lastOffset.current + el.clientHeight) return;
+    if (!restored.current && rowCount * rowHeight < lastOffset.current + el.clientHeight) return;
     restored.current = true;
     el.scrollTop = lastOffset.current;
-  }, [active, data.total, rowHeight]);
+  }, [active, rowCount, rowHeight]);
 
   // ---- the status line --------------------------------------------------------------------------------------------
   const shownColumns = names.length;
   const totalColumns = allMetas?.length ?? shownColumns;
   const counts = data.counts;
   const selectedCount = size(selection);
+  const groupedBy = by.map((c) => displaySafe(c === MARK_COLUMN ? "Mark" : c)).join(" › ");
   const statusNode = useMemo(
     () =>
-      counts === null ? null : (
+      counts === null && !grouped ? null : (
         <>
-          {`${fmt(counts.rows)} of ${fmt(counts.total)} rows · ${fmt(selectedCount)} selected · ${fmt(shownColumns)} of ${fmt(totalColumns)} columns · `}
+          {grouped
+            ? `Grouped by ${groupedBy} · ${fmt(shownColumns)} of ${fmt(totalColumns)} columns · `
+            : `${fmt(counts!.rows)} of ${fmt(counts!.total)} rows · ${fmt(selectedCount)} selected · ${fmt(shownColumns)} of ${fmt(totalColumns)} columns · `}
           <button type="button" className="status-link" aria-haspopup="dialog" onClick={() => setManagerOpen((o) => !o)}>
             {`${fmt(totalColumns - shownColumns)} hidden ▾`}
           </button>
-          {` · ${fmt(counts.failed_values)} ${plural(counts.failed_values, "value", "values")} failed to convert`}
+          {!grouped && ` · ${fmt(counts!.failed_values)} ${plural(counts!.failed_values, "value", "values")} failed to convert`}
         </>
       ),
-    [counts, selectedCount, shownColumns, totalColumns],
+    [counts, grouped, groupedBy, selectedCount, shownColumns, totalColumns],
   );
   useEffect(() => {
     if (!active) return;
@@ -479,6 +496,8 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
     if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return;
+    // The shortcuts below work on the flat list's offsets; the group list has its own (buttons, native Space and Enter).
+    if (grouped) return;
     const height = scrollRef.current?.clientHeight ?? 0;
     const page = height > 0 ? Math.max(1, Math.floor(height / rowHeight) - 1) : 10;
     const mod = e.ctrlKey || e.metaKey;
@@ -550,6 +569,34 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     ).finally(() => setEmptyBusy(false));
   };
 
+  // ---- grouping ---------------------------------------------------------------------------------------------------
+  const changeBy = useCallback((next: string[]) => {
+    setBy(next);
+    setSelection(emptySelection);
+    setFocus(null);
+    setMenu(null);
+  }, []);
+  const addGroup = (column: string) => {
+    if (by.includes(column)) return;
+    if (by.length >= MAX_GROUP_BY) {
+      reportError(new Error(`group by at most ${MAX_GROUP_BY} columns: remove one first`));
+      return;
+    }
+    changeBy([...by, column]);
+  };
+  /** Double-click on a group: a new tab with this state, the group's chips and the levels below it still grouped. */
+  const openGroup = (path: Key[]) => {
+    const chips = groupChips(by, path, state.chips);
+    if (state.chips.length + chips.length > MAX_CHIPS) {
+      reportError(new Error(`at most ${MAX_CHIPS} filters: remove one first`));
+      return;
+    }
+    const seed = { state: { ...state, chips: [...state.chips, ...chips] }, by: by.slice(path.length) };
+    const clip = (t: string) => (t.length > 40 ? t.slice(0, 39) + "…" : t);
+    const title = `${relation} · ${path.map((k, i) => clip(keyText(by[i], k, false))).join(" · ")}`;
+    openScoped({ id: `scoped:${hash(stableKey([relation, seed]))}`, kind: "dataset", relation, title, seed });
+  };
+
   return (
     <div ref={rootRef} className="grid" style={{ "--cell-size": `${settings.font_size}px` } as CSSProperties}>
       <div className="grid-toolbar">
@@ -578,6 +625,13 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         onAdvanced={() => setAdvancedOpen(true)}
         onSavePreset={savePreset}
       />
+      <GroupBar
+        by={by}
+        onAdd={addGroup}
+        onChange={changeBy}
+        onExpandAll={tree.expandAll}
+        onCollapseAll={tree.collapseAll}
+      />
       <div
         ref={scrollRef}
         className="grid-scroll"
@@ -593,7 +647,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           role="grid"
           tabIndex={0}
           aria-label="Rows"
-          aria-rowcount={data.total + 1}
+          aria-rowcount={rowCount + 1}
           aria-colcount={names.length + 1}
           aria-multiselectable="true"
           className="grid-inner"
@@ -615,6 +669,21 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
             filtered={filtered}
           />
           <FilterRow names={names} widths={widths} pinLeft={pinLeft} width={width} chips={state.chips} clearToken={clearToken} onText={onFilterRowText} />
+          {grouped ? (
+            <GroupBody
+              virtualizer={virtualizer}
+              items={tree.items}
+              by={by}
+              names={names}
+              widths={widths}
+              pinLeft={pinLeft}
+              width={width}
+              rowHeight={rowHeight}
+              onToggle={tree.toggle}
+              onOpen={openGroup}
+              onMore={tree.more}
+            />
+          ) : (
           <GridBody
             virtualizer={virtualizer}
             rowAt={rowAt}
@@ -628,6 +697,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
             onCellClick={onCellClick}
             onCellContextMenu={onCellContextMenu}
           />
+          )}
         </div>
       </div>
       {menu && (
@@ -649,6 +719,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           pinned={resolved?.pinned.has(headerMenu.column) ?? false}
           canHide={(resolved?.shown.length ?? 0) > 1}
           onSort={(descending) => changeState((s) => ({ ...s, sort: [{ column: headerMenu.column, descending }] }))}
+          onGroupBy={() => addGroup(headerMenu.column)}
           onFilter={() => setPanel({ column: headerMenu.column, x: headerMenu.x, y: headerMenu.y })}
           onPin={() => edit((l) => togglePin(l, headerMenu.column))}
           onBestFit={() => fit([headerMenu.column])}

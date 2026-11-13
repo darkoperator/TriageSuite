@@ -6,6 +6,7 @@ import type { Table } from "@tanstack/react-table";
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import { displaySafe } from "../text";
+import { COLUMN_DRAG } from "./GroupBar";
 
 export const MARK_WIDTH = 28;
 
@@ -122,6 +123,7 @@ export default function GridHeader(p: GridHeaderProps): ReactNode {
             onDragStart={(e) => {
               dragging.current = col.id;
               e.dataTransfer?.setData("text/plain", "");
+              e.dataTransfer?.setData(COLUMN_DRAG, col.id);
             }}
             onDragOver={(e) => {
               if (dragging.current !== null) e.preventDefault();

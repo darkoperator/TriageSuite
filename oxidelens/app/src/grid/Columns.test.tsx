@@ -51,7 +51,7 @@ async function mount(tab: Tab = events, path = "/cases/x.duckdb") {
   const summary = await caseSummary("t");
   const settings = (await settingsGet()).settings;
   const ctx: ShellContext = {
-    summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, setGridStatus: () => {},
+    summary, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped: () => {}, setGridStatus: () => {},
     setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout,
   };
   const utils = render(<Host ctx={ctx} tab={tab} />);
@@ -186,12 +186,12 @@ describe("columns", () => {
     const menu = await screen.findByRole("menu");
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(header("Channel")));
-    // The ContextMenu key opens it too; arrow to Pin left (the fifth item) and choose it.
+    // The ContextMenu key opens it too; arrow to Pin left (the fifth item after Group by and Filter) and choose it.
     fireEvent.keyDown(header("Channel"), { key: "ContextMenu" });
     const again = await screen.findByRole("menu");
     const firstItem = within(again).getByRole("menuitem", { name: "Sort ascending" });
     await waitFor(() => expect(document.activeElement).toBe(firstItem));
-    for (let i = 0; i < 3; i++) fireEvent.keyDown(again, { key: "ArrowDown" }); // Group by is disabled and skipped
+    for (let i = 0; i < 4; i++) fireEvent.keyDown(again, { key: "ArrowDown" }); // Sort descending, Group by, Filter, Pin left
     expect(document.activeElement).toBe(within(again).getByRole("menuitem", { name: "Pin left" }));
     await user.keyboard("{Enter}");
     expect(names()[0]).toBe("Channel");
@@ -200,7 +200,7 @@ describe("columns", () => {
     // Hide through the keyboard; focus falls back to a header that is left.
     fireEvent.keyDown(header("Channel"), { key: "F10", shiftKey: true });
     const last = await screen.findByRole("menu");
-    for (let i = 0; i < 5; i++) fireEvent.keyDown(last, { key: "ArrowDown" });
+    for (let i = 0; i < 6; i++) fireEvent.keyDown(last, { key: "ArrowDown" });
     expect(document.activeElement).toBe(within(last).getByRole("menuitem", { name: "Hide" }));
     await user.keyboard("{Enter}");
     expect(names()).not.toContain("Channel");
@@ -275,13 +275,13 @@ describe("columns", () => {
     expect(names()).not.toContain("_triage_run_id"); // defaults again
   });
 
-  it("header_menu_sorts_filters_hides_and_leaves_group_to_a_later_task", async () => {
+  it("header_menu_sorts_groups_filters_and_hides", async () => {
     await mount();
     const menu = await openMenu("Channel");
     for (const n of ["Sort ascending", "Sort descending", "Group by this column", "Filter…", "Pin left", "Best fit", "Hide"]) {
       expect(within(menu).getByRole("menuitem", { name: n })).toBeTruthy();
     }
-    expect(within(menu).getByRole("menuitem", { name: "Group by this column" })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Group by this column" })).not.toBeDisabled();
     expect(within(menu).getByRole("menuitem", { name: "Filter…" })).not.toBeDisabled();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Sort descending" }));
     await waitFor(() => expect(lastState().sort).toEqual([{ column: "Channel", descending: true }]));

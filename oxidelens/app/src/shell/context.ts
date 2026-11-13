@@ -4,6 +4,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
 import type { Settings } from "../contract/generated/Settings";
+import type { Tab } from "./tabs";
 
 export interface ShellContext {
   summary: CaseSummary;
@@ -12,6 +13,8 @@ export interface ShellContext {
   change: { generation: number; kinds: string[] };
   /** Opens (or switches to) the dataset tab of a relation. */
   openDataset(relation: string): void;
+  /** Opens a tab the grid made (a group's rows); a tab with the same id is switched to. */
+  openScoped(tab: Tab): void;
   /** What the status bar's grid-status area shows (rows, filters, hidden columns...); `null` clears it. */
   setGridStatus(node: ReactNode): void;
   /** What the right pane shows (row detail); `null` shows its empty hint. */
