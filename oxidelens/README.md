@@ -184,8 +184,10 @@ A leaf is `{"column": …, "op": …, "value": …, "case_sensitive": false}`.
 `starts_with`, `ends_with` and `regex` (these compare the cell's text, on
 typed columns too); a list of strings for `in` and `not_in`; a two-element
 list `[low, high]` for `between`; a scalar for `gt`, `gte`, `lt` and `lte`;
-and absent for `is_empty`, `not_empty` and `conversion_failed`. Text comparison
-ignores case unless `case_sensitive` is true.
+and absent for `is_empty`, `not_empty` and `conversion_failed`. A value never
+nests: an object, a list where one value goes, or a list holding a list or an
+object is refused as soon as the document is read, before any column is looked
+at. Text comparison ignores case unless `case_sensitive` is true.
 A condition on an empty cell is false, so `not` is the exact complement of
 what it wraps.
 

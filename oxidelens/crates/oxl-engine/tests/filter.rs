@@ -342,3 +342,146 @@ fn a_serialised_document_parses_back_to_itself() {
     let again = serde_json::to_string(&node).unwrap();
     assert_eq!(parse_filter(&again).unwrap(), node);
 }
+
+#[test]
+fn a_leaf_value_has_the_shape_its_operator_takes() {
+    let (_d, case, cols) = setup();
+    // Refused by `parse_filter` itself, before any column is looked at: a
+    // value never nests.
+    let nested_100 = format!("{}\"1\"{}", "[".repeat(100), "]".repeat(100));
+    for bad in [
+        leaf("EventId", "eq", r#"["4624"]"#),
+        leaf("EventId", "eq", r#"{"a":"4624"}"#),
+        leaf("EventId", "eq", "null"),
+        leaf("EventId", "gt", "[4000]"),
+        leaf("EventId", "in", r#"[["4624"]]"#),
+        leaf("EventId", "in", r#"["4624",{"a":1}]"#),
+        leaf("EventId", "in", r#"["4624",null]"#),
+        leaf("EventId", "in", r#""4624""#),
+        leaf("EventId", "not_in", r#"[["4624"]]"#),
+        leaf("EventId", "between", r#"[[1],[2]]"#),
+        leaf("EventId", "contains", &nested_100),
+        leaf("UserName", "is_empty", r#""""#),
+        leaf("UserName", "not_empty", "[]"),
+        // What the compiler takes apart, the check refuses: exactly two
+        // bounds for `between`, strings only in a list.
+        leaf("EventId", "between", "[]"),
+        leaf("EventId", "between", "[4000]"),
+        leaf("EventId", "between", "[1, 2, 3]"),
+        leaf("EventId", "between", "[null, 2]"),
+        leaf("EventId", "in", "[4624]"),
+        leaf("EventId", "in", r#"["4624", true]"#),
+        leaf("EventId", "not_in", "[false]"),
+        leaf("EventId", "eq", "4624"),
+        leaf("EventId", "contains", "true"),
+        leaf("EventId", "gt", "null"),
+        leaf("_mark", "in", "[1]"),
+    ] {
+        let e = parse_filter(&bad).expect_err(&bad);
+        assert_eq!(e.code(), "invalid", "{bad}");
+        assert!(e.to_string().contains("takes"), "{bad}: {e}");
+    }
+    // Every shape the compiler accepts still parses and runs (`count_in`
+    // panics on any refusal).
+    let count = |json: &str| count_in(&case, &cols, json);
+    assert_eq!(count(&leaf("EventId", "in", "[]")), 0);
+    count(&leaf("EventId", "between", "[4000, 5000]"));
+    count(&leaf("EventId", "gt", "4000"));
+    count(&leaf("UserName", "starts_with", r#""svc""#));
+    count(r#"{"column":"UserName","op":"is_empty"}"#);
+    count(&leaf("UserName", "not_empty", "null"));
+    count(&leaf("EventId", "in", r#"["4624", "4625"]"#));
+    count(&leaf("EventId", "not_in", r#"["4624"]"#));
+    count(&leaf(
+        "TimeCreated",
+        "between",
+        r#"["2026-01-05T00:00:00Z", "2026-01-06T00:00:00Z"]"#,
+    ));
+    count(&leaf("UserName", "between", r#"["a", "z"]"#));
+    count(r#"{"column":"_mark","op":"in","value":["none"]}"#);
+    // A node built in code, not parsed, is held to the same shape where it
+    // is compiled.
+    let mut node = parse_filter(&leaf("EventId", "eq", r#""4624""#)).unwrap();
+    let FilterNode::Leaf(l) = &mut node else {
+        unreachable!("one condition")
+    };
+    l.value = serde_json::json!([["4624"]]);
+    assert_eq!(compile_filter(&node, &cols).unwrap_err().code(), "invalid");
+}
+
+/// The check and the compiler agree on every operator against a spread of
+/// values: what `parse_filter` accepts, the compiler never refuses for its
+/// shape (only, on some columns, for what the column needs: a typed value,
+/// a number or string on an untyped column, bounds of one kind, a typed
+/// column for `conversion_failed`), and what it refuses for its shape, the
+/// compiler would refuse the same way.
+#[test]
+fn the_shape_check_and_the_compiler_agree() {
+    let (_d, _case, cols) = setup();
+    let column_reasons = [
+        "needs a",
+        "expects a number or a string",
+        "bounds must be of the same kind",
+    ];
+    let ops = [
+        "eq",
+        "ne",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+        "regex",
+        "in",
+        "not_in",
+        "between",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "is_empty",
+        "not_empty",
+        "conversion_failed",
+    ];
+    let values = [
+        "null",
+        r#""a""#,
+        "1",
+        "true",
+        "[]",
+        r#"["a"]"#,
+        r#"["a", "b"]"#,
+        r#"["a", "b", "c"]"#,
+        "[1, 2]",
+        "[true, false]",
+        r#"["a", 1]"#,
+        "[[1], [2]]",
+        r#"{"a": 1}"#,
+    ];
+    // Untyped, a BIGINT and a UTC TIMESTAMP column.
+    for column in ["UserName", "EventId", "TimeCreated"] {
+        for op in ops {
+            for value in values {
+                let json = leaf(column, op, value);
+                // The same leaf built without the check, as code could.
+                let built = FilterNode::Leaf(serde_json::from_str(&json).unwrap());
+                match parse_filter(&json) {
+                    Ok(node) => {
+                        assert_eq!(node, built);
+                        if let Err(e) = compile_filter(&node, &cols) {
+                            let e = e.to_string();
+                            assert!(
+                                column_reasons.iter().any(|r| e.contains(r)),
+                                "{json} parsed, then failed to compile for its shape: {e}"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        assert!(e.to_string().contains(" takes "), "{json}: {e}");
+                        let compiled = compile_filter(&built, &cols).unwrap_err();
+                        assert_eq!(compiled.to_string(), e.to_string(), "{json}");
+                    }
+                }
+            }
+        }
+    }
+}

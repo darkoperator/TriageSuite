@@ -52,9 +52,12 @@ pub use query::{
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};
 pub use view::{
-    count_view, date_range_chip, default_colour_rules, empty_columns, groups_view, histogram_view,
-    match_count, matches, page_view, values, Chip, ChipOrigin, ColourRule, ColumnMeta, GridCell,
-    GridCounts, GridPage, GridState, GroupView, MatchPos, PageOptions, RuleColour, RuleScope,
-    SearchMode, SearchState, ValueCount, ValueOrder, MAX_CHIPS, MAX_CHIP_ID, MAX_CHIP_LABEL,
-    MAX_RULES, MAX_RULE_NAME,
+    apply_view, count_view, date_range_chip, default_colour_rules, delete_view, empty_columns,
+    export_view, groups_view, histogram_view, import_view, match_count, matches, page_view,
+    save_view, values, views, AppliedView, Chip, ChipOrigin, ColourRule, ColumnLayout, ColumnMeta,
+    GridCell, GridCounts, GridPage, GridState, GroupView, MatchPos, PageOptions, RuleColour,
+    RuleScope, SavedView, SearchMode, SearchState, ValueCount, ValueOrder, ViewDoc, ViewKind,
+    ViewWarning, MAX_CHIPS, MAX_CHIP_ID, MAX_CHIP_LABEL, MAX_COLUMN_WIDTH, MAX_RULES,
+    MAX_RULE_NAME, MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN,
+    MIN_COLUMN_WIDTH,
 };

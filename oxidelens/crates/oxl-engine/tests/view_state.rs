@@ -356,3 +356,21 @@ fn group_by_mark() {
     let none = group_filter(&q, &by, &[None]);
     assert_eq!(oxl_engine::count(&case, &none).unwrap(), 9);
 }
+
+#[test]
+fn a_chip_value_that_nests_is_invalid_switched_on_or_off() {
+    let (_d, case) = loaded();
+    // A grid state as the app sends it, its chip's value nested 60 deep:
+    // within serde_json's recursion limit, so it deserialises, and refused
+    // by the filter checks whether the chip is applied or not.
+    let nested = format!("{}\"Security\"{}", "[".repeat(60), "]".repeat(60));
+    for enabled in [true, false] {
+        let json = format!(
+            r#"{{"relation":"{EVENTS}","chips":[{{"id":"c1","label":"x","enabled":{enabled},
+                "origin":"filter_row","filter":{{"column":"Channel","op":"eq","value":{nested}}}}}]}}"#
+        );
+        let s: GridState = serde_json::from_str(&json).unwrap();
+        assert!(is_invalid(s.query()), "enabled {enabled}");
+        assert!(is_invalid(count_view(&case, &s)), "enabled {enabled}");
+    }
+}

@@ -16,12 +16,18 @@
 
 mod page;
 mod rules;
+mod saved;
 mod time;
 mod values;
 
 pub use page::{page_view, ColumnMeta, GridCell, GridPage, PageOptions};
 pub use rules::{
     default_colour_rules, ColourRule, RuleColour, RuleScope, MAX_RULES, MAX_RULE_NAME,
+};
+pub use saved::{
+    apply_view, delete_view, export_view, import_view, save_view, views, AppliedView, ColumnLayout,
+    SavedView, ViewDoc, ViewKind, ViewWarning, MAX_COLUMN_WIDTH, MAX_VIEW_BYTES,
+    MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN, MIN_COLUMN_WIDTH,
 };
 pub use time::{date_range_chip, groups_view, histogram_view, GroupView};
 pub use values::{values, ValueCount, ValueOrder};
@@ -68,7 +74,7 @@ pub struct GridState {
 }
 
 /// One filter chip. A disabled chip is kept, shown dimmed, and not applied.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
 pub struct Chip {
@@ -125,8 +131,9 @@ impl GridState {
     /// ANDed (`None` when no chip is enabled), the search only in filter
     /// mode, and the hosts, sort and columns as they are. `Invalid` for more
     /// than `MAX_CHIPS` chips, a bad or repeated chip id, a label over
-    /// `MAX_CHIP_LABEL` characters, or a combined filter over the depth or
-    /// condition caps. Columns and hosts are checked by the query that runs
+    /// `MAX_CHIP_LABEL` characters, any chip's filter (switched on or off)
+    /// over the caps or with a value of the wrong shape, or a combined filter
+    /// over the depth or condition caps. Columns and hosts are checked by the query that runs
     /// it.
     pub fn query(&self) -> Result<GridQuery> {
         self.compile(&[])
@@ -192,6 +199,12 @@ impl GridState {
                     "chip id {id} is used by more than one chip"
                 )));
             }
+            // Every chip's filter on its own, switched on or off: depth,
+            // conditions and value shapes. A switched-off chip is kept and
+            // may be switched on, saved or exported, so it is held to the
+            // same rules as one that is applied.
+            check_caps(&chip.filter)
+                .map_err(|e| EngineError::Invalid(format!("chip {id}: {e}")))?;
         }
         Ok(())
     }

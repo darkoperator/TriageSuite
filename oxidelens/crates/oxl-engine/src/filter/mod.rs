@@ -13,6 +13,7 @@
 
 mod compile;
 
+use compile::leaf_value;
 pub use compile::{compile_filter, SqlFragment};
 pub(crate) use compile::{
     failed_sql, literal_eq_sql, literal_sql, null_safe, regex_sql, LiteralMatch, MARK_NONE,
@@ -158,7 +159,8 @@ fn build(value: &Value) -> Result<FilterNode> {
     }
 }
 
-/// Every cap, over a built node. `parse_filter` has already bounded depth
+/// Every cap, and every leaf value's shape (`compile::leaf_value`), over a
+/// built node. `parse_filter` has already bounded depth
 /// and leaves on the raw JSON; this repeats them because `compile_filter`
 /// also runs it, and a node can arrive by other routes (a saved view read
 /// back with the derived `Deserialize`, or code). Iterative, like
@@ -204,6 +206,13 @@ pub(crate) fn check_caps(root: &FilterNode) -> Result<()> {
             }
             _ => {}
         }
+        // The value's shape, by the very function the compiler takes it
+        // apart with, so the two cannot disagree: a document that passes
+        // here never fails to compile for its value's shape, only for what
+        // depends on the column. It also bounds the value: a leaf's `value`
+        // is any JSON to serde, and one nested past serde_json's recursion
+        // limit would save and then never read back.
+        leaf_value(leaf)?;
     }
     Ok(())
 }

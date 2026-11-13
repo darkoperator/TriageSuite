@@ -75,6 +75,65 @@ fn invalid(leaf: &Leaf, what: &str) -> EngineError {
     EngineError::Invalid(format!("filter on \"{}\": {what}", leaf.column))
 }
 
+/// A leaf's value, taken apart by the shape its operator takes. Whatever
+/// depends on the column (a timestamp's form, an integer's range, `_mark`'s
+/// two values) is checked where the value is used.
+pub(super) enum LeafValue<'a> {
+    /// `is_empty`, `not_empty`, `conversion_failed`: no value (`null`).
+    Nothing,
+    /// `eq`, `ne`, `contains`, `not_contains`, `starts_with`, `ends_with`,
+    /// `regex`: one string.
+    Text(&'a str),
+    /// `in`, `not_in`: a list of strings, possibly empty.
+    Texts(Vec<&'a str>),
+    /// `gt`, `gte`, `lt`, `lte`: one string, number or boolean.
+    Ordered(&'a Value),
+    /// `between`: exactly two, each a string, number or boolean.
+    Range(&'a Value, &'a Value),
+}
+
+/// `leaf.value` as the shape `leaf.op` takes, or `Invalid` naming it. The
+/// one place a value's shape is decided: `check_caps` calls it on every
+/// leaf of every document, and the compiler takes values apart only through
+/// it. Not recursive: a list is looked into one level, and a value that
+/// nests is refused.
+pub(super) fn leaf_value(leaf: &Leaf) -> Result<LeafValue<'_>> {
+    let wrong = |wants: &str| invalid(leaf, &format!("{} takes {wants}", op_name(leaf.op)));
+    let ordered = |v: &Value| matches!(v, Value::String(_) | Value::Number(_) | Value::Bool(_));
+    match leaf.op {
+        Op::IsEmpty | Op::NotEmpty | Op::ConversionFailed => leaf
+            .value
+            .is_null()
+            .then_some(LeafValue::Nothing)
+            .ok_or_else(|| wrong("no value")),
+        Op::Eq
+        | Op::Ne
+        | Op::Contains
+        | Op::NotContains
+        | Op::StartsWith
+        | Op::EndsWith
+        | Op::Regex => leaf
+            .value
+            .as_str()
+            .map(LeafValue::Text)
+            .ok_or_else(|| wrong("a string")),
+        Op::In | Op::NotIn => leaf
+            .value
+            .as_array()
+            .and_then(|values| values.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
+            .map(LeafValue::Texts)
+            .ok_or_else(|| wrong("a list of strings")),
+        Op::Gt | Op::Gte | Op::Lt | Op::Lte => Some(&leaf.value)
+            .filter(|v| ordered(v))
+            .map(LeafValue::Ordered)
+            .ok_or_else(|| wrong("a string, a number or a boolean")),
+        Op::Between => match leaf.value.as_array().map(Vec::as_slice) {
+            Some([low, high]) if ordered(low) && ordered(high) => Ok(LeafValue::Range(low, high)),
+            _ => Err(wrong("[low, high], each a string, a number or a boolean")),
+        },
+    }
+}
+
 fn leaf_sql(leaf: &Leaf, columns: &[ColumnInfo], params: &mut Vec<SqlValue>) -> Result<String> {
     if leaf.column == MARK_COLUMN {
         return mark_sql(leaf, params);
@@ -185,24 +244,22 @@ fn positive_sql(
 ) -> Result<String> {
     let text = quote_ident(&column.text_column);
     let fold = |sql: &str| fold(sql, leaf.case_sensitive);
-    match op {
-        Op::Eq => {
-            params.push(string_value(leaf)?);
+    // `op` is `leaf.op` made positive by `leaf_sql`, which takes the same
+    // shape of value, so each operator meets the shape `leaf_value` gave it.
+    match (op, leaf_value(leaf)?) {
+        (Op::Eq, LeafValue::Text(value)) => {
+            params.push(SqlValue::Text(value.to_string()));
             Ok(format!("{} = {}", fold(&text), fold("?")))
         }
-        Op::In => {
-            let values = string_list(leaf)?;
+        (Op::In, LeafValue::Texts(values)) => {
             if values.is_empty() {
                 return Ok("FALSE".into());
             }
             let slots = vec![fold("?"); values.len()].join(", ");
-            params.extend(values);
+            params.extend(values.into_iter().map(|v| SqlValue::Text(v.to_string())));
             Ok(format!("{} IN ({slots})", fold(&text)))
         }
-        Op::Contains | Op::StartsWith | Op::EndsWith => {
-            let SqlValue::Text(needle) = string_value(leaf)? else {
-                return Err(invalid(leaf, "expects a string value"));
-            };
+        (Op::Contains | Op::StartsWith | Op::EndsWith, LeafValue::Text(needle)) => {
             let shape = match op {
                 Op::Contains => LiteralMatch::Contains,
                 Op::StartsWith => LiteralMatch::StartsWith,
@@ -210,32 +267,25 @@ fn positive_sql(
             };
             Ok(literal_sql(
                 &text,
-                &needle,
+                needle,
                 shape,
                 leaf.case_sensitive,
                 params,
             ))
         }
-        Op::Regex => {
-            let SqlValue::Text(pattern) = string_value(leaf)? else {
-                return Err(invalid(leaf, "expects a string value"));
-            };
-            Ok(regex_sql(&text, &pattern, leaf.case_sensitive, params))
+        (Op::Regex, LeafValue::Text(pattern)) => {
+            Ok(regex_sql(&text, pattern, leaf.case_sensitive, params))
         }
-        Op::IsEmpty => {
-            require_no_value(leaf)?;
-            Ok(format!("({text} IS NULL OR {text} = '')"))
-        }
-        Op::ConversionFailed => {
-            require_no_value(leaf)?;
+        (Op::IsEmpty, LeafValue::Nothing) => Ok(format!("({text} IS NULL OR {text} = '')")),
+        (Op::ConversionFailed, LeafValue::Nothing) => {
             let typed = column
                 .typed_column
                 .as_deref()
                 .ok_or_else(|| invalid(leaf, "conversion_failed needs a typed column"))?;
             Ok(failed_sql(&text, &quote_ident(typed)))
         }
-        Op::Gt | Op::Gte | Op::Lt | Op::Lte => {
-            let (lhs, rhs) = ordered_operand(leaf, &leaf.value, column, params)?;
+        (Op::Gt | Op::Gte | Op::Lt | Op::Lte, LeafValue::Ordered(value)) => {
+            let (lhs, rhs) = ordered_operand(leaf, value, column, params)?;
             let cmp = match op {
                 Op::Gt => ">",
                 Op::Gte => ">=",
@@ -244,10 +294,7 @@ fn positive_sql(
             };
             Ok(format!("{lhs} {cmp} {rhs}"))
         }
-        Op::Between => {
-            let [low, high] = leaf.value.as_array().map(Vec::as_slice).unwrap_or_default() else {
-                return Err(invalid(leaf, "between expects [low, high]"));
-            };
+        (Op::Between, LeafValue::Range(low, high)) => {
             let (lhs, low) = ordered_operand(leaf, low, column, params)?;
             let (lhs_high, high) = ordered_operand(leaf, high, column, params)?;
             // The left side is chosen by the bound's kind, so a mismatch is
@@ -257,10 +304,13 @@ fn positive_sql(
             }
             Ok(format!("{lhs} BETWEEN {low} AND {high}"))
         }
-        // Negated operators were turned positive by `leaf_sql`.
-        Op::Ne | Op::NotContains | Op::NotIn | Op::NotEmpty => Err(EngineError::Internal(format!(
-            "filter on \"{}\": a negated operator reached positive_sql",
-            leaf.column
+        // Negated operators were turned positive by `leaf_sql`, and every
+        // positive one is paired above with the shape `leaf_value` gives it.
+        _ => Err(EngineError::Internal(format!(
+            "filter on \"{}\": {} reached positive_sql as {} with a value not of its shape",
+            leaf.column,
+            op_name(leaf.op),
+            op_name(op)
         ))),
     }
 }
@@ -271,46 +321,6 @@ fn fold(sql: &str, case_sensitive: bool) -> String {
         sql.to_string()
     } else {
         format!("lower({sql})")
-    }
-}
-
-fn string_value(leaf: &Leaf) -> Result<SqlValue> {
-    match &leaf.value {
-        Value::String(s) => Ok(SqlValue::Text(s.clone())),
-        _ => Err(invalid(
-            leaf,
-            &format!("{} expects a string value", op_name(leaf.op)),
-        )),
-    }
-}
-
-fn string_list(leaf: &Leaf) -> Result<Vec<SqlValue>> {
-    let shape = || {
-        invalid(
-            leaf,
-            &format!("{} expects an array of strings", op_name(leaf.op)),
-        )
-    };
-    leaf.value
-        .as_array()
-        .ok_or_else(shape)?
-        .iter()
-        .map(|v| {
-            v.as_str()
-                .map(|s| SqlValue::Text(s.into()))
-                .ok_or_else(shape)
-        })
-        .collect()
-}
-
-fn require_no_value(leaf: &Leaf) -> Result<()> {
-    if leaf.value.is_null() {
-        Ok(())
-    } else {
-        Err(invalid(
-            leaf,
-            &format!("{} takes no value", op_name(leaf.op)),
-        ))
     }
 }
 
@@ -394,14 +404,14 @@ fn op_name(op: Op) -> String {
 /// `_mark`: whether `ox.row_mark` holds a mark for the row. `"none"` is the
 /// absence of any mark.
 fn mark_sql(leaf: &Leaf, params: &mut Vec<SqlValue>) -> Result<String> {
-    let one = |value: &Value, params: &mut Vec<SqlValue>| -> Result<String> {
+    let one = |value: &str, params: &mut Vec<SqlValue>| -> Result<String> {
         let exists = format!(
             "EXISTS (SELECT 1 FROM ox.row_mark AS ox_m WHERE ox_m.row_id = {}",
             quote_ident("_ox_row")
         );
-        match value.as_str() {
-            Some(MARK_NONE) => Ok(format!("NOT {exists})")),
-            Some(MARK_SUSPICIOUS) => {
+        match value {
+            MARK_NONE => Ok(format!("NOT {exists})")),
+            MARK_SUSPICIOUS => {
                 params.push(SqlValue::Text(MARK_SUSPICIOUS.into()));
                 Ok(format!("{exists} AND ox_m.mark = ?)"))
             }
@@ -411,19 +421,15 @@ fn mark_sql(leaf: &Leaf, params: &mut Vec<SqlValue>) -> Result<String> {
             )),
         }
     };
-    match leaf.op {
-        Op::Eq => one(&leaf.value, params),
-        Op::Ne => Ok(format!("NOT {}", one(&leaf.value, params)?)),
-        Op::In => {
-            let values = leaf
-                .value
-                .as_array()
-                .ok_or_else(|| invalid(leaf, "in expects an array"))?;
+    match (leaf.op, leaf_value(leaf)?) {
+        (Op::Eq, LeafValue::Text(value)) => one(value, params),
+        (Op::Ne, LeafValue::Text(value)) => Ok(format!("NOT {}", one(value, params)?)),
+        (Op::In, LeafValue::Texts(values)) => {
             if values.is_empty() {
                 return Ok("FALSE".into());
             }
             let parts = values
-                .iter()
+                .into_iter()
                 .map(|v| one(v, params))
                 .collect::<Result<Vec<_>>>()?;
             Ok(format!("({})", parts.join(" OR ")))

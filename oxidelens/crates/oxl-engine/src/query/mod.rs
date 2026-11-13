@@ -71,7 +71,10 @@ pub struct GridQuery {
     pub columns: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// One sort key. It arrives untrusted inside a grid state or a saved view,
+/// so unknown fields are refused.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SortKey {
     pub column: String,
     #[serde(default)]
