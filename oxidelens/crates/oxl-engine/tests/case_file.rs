@@ -167,7 +167,7 @@ fn create_then_open_round_trips_info() {
     let info = Case::open(&p).unwrap().info().unwrap();
     assert_eq!(
         (info.name.as_str(), info.format, info.created_by.as_str()),
-        ("IR-1", 1, "analyst:tester")
+        ("IR-1", 2, "analyst:tester")
     );
     assert_eq!(info.path, p);
     assert!(
@@ -295,7 +295,7 @@ fn a_newer_format_needs_upgrade() {
     drop(Case::create(&p, "IR-1", &Actor::Analyst("tester".into())).unwrap());
     {
         let conn = duckdb::Connection::open(&p).unwrap();
-        conn.execute("UPDATE ox.meta SET value = '2' WHERE key = 'format'", [])
+        conn.execute("UPDATE ox.meta SET value = '3' WHERE key = 'format'", [])
             .unwrap();
     }
     match Case::open(&p) {
@@ -304,12 +304,12 @@ fn a_newer_format_needs_upgrade() {
             assert!(matches!(
                 e,
                 oxl_engine::EngineError::NeedsUpgrade {
-                    found: 2,
-                    expected: 1
+                    found: 3,
+                    expected: 2
                 }
             ));
         }
-        Ok(_) => panic!("a format-2 case opened under format 1"),
+        Ok(_) => panic!("a format-3 case opened under format 2"),
     }
 }
 
@@ -387,11 +387,11 @@ fn every_ox_table_and_column_has_a_comment() {
     let tables = case
         .scalar_i64("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'ox'")
         .unwrap();
-    assert_eq!(tables, 14, "schema ox should hold the 14 format-1 tables");
+    assert_eq!(tables, 17, "schema ox should hold the 17 format-2 tables");
     let sequences = case
         .scalar_i64("SELECT count(*) FROM duckdb_sequences() WHERE schema_name = 'ox'")
         .unwrap();
-    assert_eq!(sequences, 4);
+    assert_eq!(sequences, 5);
 
     let bare_tables = case
         .scalar_i64(

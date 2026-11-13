@@ -12,13 +12,16 @@
 //! removed source is out of every view, so it takes no new mark, tag or
 //! note; what it already carries can still be cleared.
 
+mod counts;
 mod history;
 mod marks;
 mod notes;
 mod row;
 mod tags;
 
+pub use counts::{mark_counts, MarkCounts};
 pub use history::{history, HistoryRow};
+pub(crate) use history::{record, Change};
 pub use marks::{clear_suspicious, mark_suspicious, marks, MarkedRow};
 pub use notes::{add_note, delete_note, notes, Note, MAX_NOTE};
 pub use row::{row_detail, row_place, RowDetail, RowPlace, RowStanding};

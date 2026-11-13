@@ -1,4 +1,6 @@
--- OxideLens case file, format 1: the case tables in schema ox.
+-- OxideLens case file, format 2: the case tables in schema ox. A format-1
+-- case (step 1) is brought to this by upgrade.sql, which must make the same
+-- tables; tests/case_upgrade.rs compares the two.
 --
 -- Every table and column carries a COMMENT, because an analyst or an agent
 -- reading the case with plain SQL has nothing else to go on. Every time
@@ -12,12 +14,13 @@ CREATE SEQUENCE ox.row_seq START 1;
 CREATE SEQUENCE ox.source_seq START 1;
 CREATE SEQUENCE ox.note_seq START 1;
 CREATE SEQUENCE ox.history_seq START 1;
+CREATE SEQUENCE ox.view_seq START 1;
 
 CREATE TABLE ox.meta (
     key VARCHAR PRIMARY KEY,
     value VARCHAR NOT NULL
 );
-COMMENT ON TABLE ox.meta IS 'Facts about the case file itself: name, format, created_by, created_at.';
+COMMENT ON TABLE ox.meta IS 'Facts about the case file itself: name, format, created_by, created_at, case_id (32 lowercase hex digits, random, fixed for the life of the case).';
 COMMENT ON COLUMN ox.meta.key IS 'The fact''s name.';
 COMMENT ON COLUMN ox.meta.value IS 'The fact''s value, as text.';
 
@@ -242,8 +245,54 @@ COMMENT ON TABLE ox.history IS 'Append-only log of every change to the case; not
 COMMENT ON COLUMN ox.history.id IS 'Entry id, from ox.history_seq; increases with time.';
 COMMENT ON COLUMN ox.history."at" IS 'When the change was made (UTC text).';
 COMMENT ON COLUMN ox.history."by" IS 'Who made it (actor label).';
-COMMENT ON COLUMN ox.history.target_kind IS 'source, relation, row_mark, row_tag or note.';
+COMMENT ON COLUMN ox.history.target_kind IS 'source, relation, row_mark, row_tag, note, case or saved_view.';
 COMMENT ON COLUMN ox.history.target_id IS 'The changed object''s id, as text.';
 COMMENT ON COLUMN ox.history.action IS 'What was done, for example source_load or mark_set.';
 COMMENT ON COLUMN ox.history.before_json IS 'The object before the change, as JSON; NULL when it did not exist.';
 COMMENT ON COLUMN ox.history.after_json IS 'The object after the change, as JSON; NULL when it no longer exists.';
+
+CREATE TABLE ox.saved_view (
+    id BIGINT PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    kind VARCHAR NOT NULL,
+    pattern VARCHAR NOT NULL,
+    doc_json VARCHAR NOT NULL,
+    created_by VARCHAR NOT NULL,
+    created_at VARCHAR NOT NULL,
+    updated_by VARCHAR NOT NULL,
+    updated_at VARCHAR NOT NULL,
+    deleted BOOLEAN NOT NULL DEFAULT false
+);
+COMMENT ON TABLE ox.saved_view IS 'Saved grid views and filter presets. A deleted view is kept and flagged, never removed.';
+COMMENT ON COLUMN ox.saved_view.id IS 'View id, from ox.view_seq.';
+COMMENT ON COLUMN ox.saved_view.name IS 'The view''s name; one name per kind.';
+COMMENT ON COLUMN ox.saved_view.kind IS 'view (a whole grid state) or preset (filter chips only).';
+COMMENT ON COLUMN ox.saved_view.pattern IS 'The relations it applies to: a relation name, where * stands for any run of characters.';
+COMMENT ON COLUMN ox.saved_view.doc_json IS 'What the view holds (chips, search, hosts, grouping, sort, layout, colour rules), as JSON.';
+COMMENT ON COLUMN ox.saved_view.created_by IS 'Who saved it first (actor label).';
+COMMENT ON COLUMN ox.saved_view.created_at IS 'When it was saved first (UTC text).';
+COMMENT ON COLUMN ox.saved_view.updated_by IS 'Who saved it last (actor label).';
+COMMENT ON COLUMN ox.saved_view.updated_at IS 'When it was saved last (UTC text).';
+COMMENT ON COLUMN ox.saved_view.deleted IS 'True once deleted.';
+
+CREATE TABLE ox.run_session (
+    source_id BIGINT NOT NULL,
+    name VARCHAR NOT NULL,
+    files_json VARCHAR NOT NULL
+);
+COMMENT ON TABLE ox.run_session IS 'One row per Timeline Explorer session (Sessions/<name>.tle_sess) a loaded run carried, read when it was loaded.';
+COMMENT ON COLUMN ox.run_session.source_id IS 'The ox.source (run) the session file came with.';
+COMMENT ON COLUMN ox.run_session.name IS 'The session''s name: its file name without .tle_sess.';
+COMMENT ON COLUMN ox.run_session.files_json IS 'The paths the session names, as written in the file (absolute, where the run was written), as a JSON array.';
+
+CREATE TABLE ox.setting (
+    key VARCHAR PRIMARY KEY,
+    value VARCHAR NOT NULL,
+    set_by VARCHAR NOT NULL,
+    set_at VARCHAR NOT NULL
+);
+COMMENT ON TABLE ox.setting IS 'Settings of the case itself, for example display_zone (the IANA zone the case''s times are shown in; UTC when absent).';
+COMMENT ON COLUMN ox.setting.key IS 'The setting''s name.';
+COMMENT ON COLUMN ox.setting.value IS 'The setting''s value, as text.';
+COMMENT ON COLUMN ox.setting.set_by IS 'Who set it last (actor label).';
+COMMENT ON COLUMN ox.setting.set_at IS 'When it was set last (UTC text).';

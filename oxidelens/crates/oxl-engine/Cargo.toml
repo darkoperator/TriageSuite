@@ -17,6 +17,13 @@ chrono.workspace = true
 regex.workspace = true
 # The SQL lockdown's ATTACH probe names a file in a directory of its own.
 tempfile.workspace = true
+# A case's id (ox.meta case_id), from the operating system's random source.
+getrandom.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# O_NOFOLLOW and O_NONBLOCK, so a run's session file is never read through a
+# link or blocks on a FIFO.
+libc.workspace = true
 
 [dev-dependencies]
 # Integration tests (files under tests/). oxl-fixtures depends on this crate,

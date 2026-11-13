@@ -126,7 +126,114 @@ fn petriage_timeline(files: Vec<FileSpec<'_>>) -> DatasetSpec<'_> {
 /// The two-host run: `evtxtriage_events` (11 rows: WS01 8, SRV01 3),
 /// `petriage_timeline` (5 rows) and `ext_hayabusa_csv_timeline` (5 rows,
 /// WS01 only, untyped). Run id `20260101000000-aaaa`.
+///
+/// Like a real run it has a Timeline Explorer session at the run root,
+/// `Sessions/Execution_Analysis.tle_sess`, naming by absolute path WS01's
+/// prefetch and event files as built, and one file that is nowhere
+/// (`C:\gone\nowhere.csv`).
 pub fn two_hosts(dir: &Path) -> PathBuf {
+    let root = two_hosts_tree(dir);
+    let ws = "Processed-WS01-20260101000000";
+    let absolute = |relative: &str| -> String {
+        let native: PathBuf = relative.split('/').collect();
+        std::path::absolute(root.join(native))
+            .expect("an absolute path")
+            .display()
+            .to_string()
+    };
+    write_session(
+        &root,
+        "Execution_Analysis",
+        &[
+            &absolute(&format!("{ws}/Execution/pf.csv")),
+            &absolute(&format!("{ws}/EventLogs/evtx.csv")),
+            r"C:\gone\nowhere.csv",
+        ],
+    );
+    root
+}
+
+/// [`two_hosts`] built in `dir/a`, and its run root copied to `dir/b`, which
+/// is returned: a run that moved after it was written, so its session file
+/// names the files where they were (`dir/a`), not where they are.
+pub fn two_hosts_moved(dir: &Path) -> PathBuf {
+    let built = two_hosts(&dir.join("a"));
+    let moved = dir.join("b");
+    copy_tree(&built, &moved);
+    moved
+}
+
+/// A run with RETriage's time zone dataset, `retriage_timezoneinfo_system`
+/// (tool `RETriage`, id `timezoneinfo_system`, columns `ValueName`,
+/// `ValueData`, as the real relation has them): WS01 is on Eastern Standard
+/// Time with a bias of 300 minutes, SRV01 on UTC. Run id
+/// `20260104000000-dddd`.
+pub fn host_zones_run(dir: &Path) -> PathBuf {
+    let ws = "Processed-WS01-20260104000000/Registry/timezoneinfo.csv";
+    let srv = "Processed-SRV01-20260104000000/Registry/timezoneinfo.csv";
+    write_run(
+        &dir.join("run-20260104000000-dddd"),
+        "20260104000000-dddd",
+        vec![DatasetSpec {
+            tool: "RETriage",
+            dataset_id: "timezoneinfo_system",
+            view: "retriage_timezoneinfo_system",
+            source: "internal",
+            evidence_path_column: None,
+            typed: &[],
+            files: vec![
+                FileSpec {
+                    host: "WS01",
+                    path: ws,
+                    header: "ValueName,ValueData",
+                    rows: &["TimeZoneKeyName,Eastern Standard Time", "Bias,300"],
+                },
+                FileSpec {
+                    host: "SRV01",
+                    path: srv,
+                    header: "ValueName,ValueData",
+                    rows: &["TimeZoneKeyName,UTC"],
+                },
+            ],
+        }],
+    )
+}
+
+/// Write `Sessions/<name>.tle_sess` under `root` as the suite writes one:
+/// JSON whose `SessionFiles` maps each file's path to an empty list.
+pub fn write_session(root: &Path, name: &str, files: &[&str]) -> PathBuf {
+    let files: serde_json::Map<String, serde_json::Value> = files
+        .iter()
+        .map(|f| ((*f).to_string(), serde_json::json!([])))
+        .collect();
+    let dir = root.join("Sessions");
+    std::fs::create_dir_all(&dir).expect("create Sessions/");
+    let path = dir.join(format!("{name}.tle_sess"));
+    let json = serde_json::json!({ "SessionFiles": files });
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).expect("serialize a session"),
+    )
+    .expect("write a session file");
+    path
+}
+
+/// Copy the tree at `from` to `to`.
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create a directory of the copy");
+    for entry in std::fs::read_dir(from).expect("read a directory to copy") {
+        let entry = entry.expect("a directory entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("a file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).expect("copy a file");
+        }
+    }
+}
+
+/// The two-host run's CSVs and inventory, without its session.
+fn two_hosts_tree(dir: &Path) -> PathBuf {
     let ws = "Processed-WS01-20260101000000";
     let srv = "Processed-SRV01-20260101000000";
     let evtx_ws = format!("{ws}/EventLogs/evtx.csv");

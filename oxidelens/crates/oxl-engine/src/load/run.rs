@@ -7,11 +7,12 @@
 //! to the output root, and the root is taken from where the run is now, so a
 //! collection that moved since it was written loads without regenerating.
 
+use super::sessions::{read_sessions, store_sessions, RunSessions};
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::supersede::supersede;
 use super::{fold_name, LoadReport, LoadThreads, LoadedRelation, RunOptions, SkippedDataset};
 use crate::actor::Actor;
-use crate::case::Case;
+use crate::case::{Case, CASE_FORMAT};
 use crate::catalog::{catalog_dataset, check_sql_type, check_typing, column_names};
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
@@ -50,6 +51,12 @@ thread_local! {
 /// an earlier run's rows are superseded (see `supersede`). Any failure leaves
 /// the case exactly as it was. EvtxTriage's per-channel copies are left out
 /// (see `RunOptions`).
+///
+/// The run's Timeline Explorer sessions (`Sessions/*.tle_sess`) are kept
+/// with it: at most `MAX_SESSION_FILES` of them, each at most
+/// `MAX_SESSION_BYTES`. The rest, and any that is not a session, are left
+/// out and named under `sessions_skipped` in the load's history row; a
+/// session file never fails a load.
 pub fn load_run(case: &mut Case, out_root: &Path, actor: &Actor) -> Result<LoadReport> {
     load_run_with(case, out_root, RunOptions::default(), actor)
 }
@@ -72,11 +79,15 @@ pub fn load_run_with(
     };
 
     let skipped = copies(&inventory, options);
+    // Read before the transaction: files, not the case. A format-1 case
+    // (only the upgrade tests load into one) has nowhere to keep them.
+    let sessions = (case.format() >= CASE_FORMAT).then(|| read_sessions(&root));
     let load = Load {
         inventory: &inventory,
         skipped,
         root: &root,
         actor,
+        sessions: sessions.as_ref(),
     };
     let conn = case.conn_mut();
     let mut source_id = None;
@@ -302,6 +313,8 @@ struct Load<'a> {
     skipped: Vec<SkippedDataset>,
     root: &'a Path,
     actor: &'a Actor,
+    /// The run's session files; `None` for a case that keeps none.
+    sessions: Option<&'a RunSessions>,
 }
 
 impl Load<'_> {
@@ -428,8 +441,11 @@ fn load_in(
 
     // The whole inventory: the case says what the run held, loaded or not.
     record_inventory(conn, id, full)?;
+    if let Some(sessions) = load.sessions {
+        store_sessions(conn, id, sessions)?;
+    }
 
-    let after = serde_json::json!({
+    let mut after = serde_json::json!({
         "kind": "run",
         "path": path,
         "run_id": inventory.run_id,
@@ -441,6 +457,11 @@ fn load_in(
             "relation": s.relation, "tool": s.tool, "dataset_id": s.dataset_id, "hosts": s.hosts,
         })).collect::<Vec<_>>(),
     });
+    if let (Some(sessions), Some(fields)) = (load.sessions, after.as_object_mut()) {
+        let (kept, skipped) = sessions.history_json();
+        fields.insert("sessions".to_string(), kept);
+        fields.insert("sessions_skipped".to_string(), skipped);
+    }
     conn.execute(
         "INSERT INTO ox.history \
          (id, \"at\", \"by\", target_kind, target_id, action, before_json, after_json) \

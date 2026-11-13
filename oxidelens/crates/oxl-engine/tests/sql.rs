@@ -260,7 +260,7 @@ fn everything_that_is_not_one_select_is_refused() {
     );
     // None of it wrote anything.
     let case = Case::open(&path).unwrap();
-    assert_eq!(common::n(&case, "SELECT count(*) FROM ox.meta"), 4);
+    assert_eq!(common::n(&case, "SELECT count(*) FROM ox.meta"), 5);
     assert_eq!(common::n(&case, "SELECT count(*) FROM ox.tag"), 0);
     assert!(!path.with_file_name("x.duckdb").exists());
 }
@@ -475,8 +475,8 @@ fn describe_lists_relations_and_case_tables_with_comments() {
     assert!(d.iter().all(|t| !t.schema.starts_with("src_")));
     assert_eq!(describe(&path, Some("petriage_timeline")).unwrap().len(), 1);
 
-    // Every format-1 case table is there, and the views are views.
-    assert_eq!(d.iter().filter(|t| t.schema == "ox").count(), 14);
+    // Every format-2 case table is there, and the views are views.
+    assert_eq!(d.iter().filter(|t| t.schema == "ox").count(), 17);
     assert!(d
         .iter()
         .filter(|t| t.schema == "ox")
@@ -502,7 +502,7 @@ fn describe_lists_relations_and_case_tables_with_comments() {
         .iter()
         .find(|t| t.schema == "ox" && t.name == "meta")
         .unwrap();
-    assert_eq!(meta.rows, Some(4));
+    assert_eq!(meta.rows, Some(5));
 
     assert_eq!(
         describe(&path, Some("no_such_relation"))

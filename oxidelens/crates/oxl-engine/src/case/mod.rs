@@ -4,28 +4,50 @@
 //! The file carries its own format number in `ox.meta`. A file written by a
 //! newer build is refused rather than read, because reading a format this
 //! build does not know is how annotations get silently misread.
+//!
+//! Format 1 is step 1's. Opened to change it, a format-1 case is upgraded
+//! in place to format 2, in one transaction (`upgrade_from_1`); opened
+//! read-only, it is read as it is, and every reader of a format-2 table
+//! answers that table's default (`Case::format` tells them apart).
+
+mod settings;
+
+pub use settings::{display_zone, set_display_zone};
 
 use crate::actor::Actor;
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
 use duckdb::{params, AccessMode, Config, Connection};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
-/// The case file format this build reads and writes.
-pub const CASE_FORMAT: u32 = 1;
+/// The case file format this build writes. It reads this one and every
+/// earlier one (format 1).
+pub const CASE_FORMAT: u32 = 2;
 
-/// The DDL for a new case, format 1.
+/// The oldest case file format this build reads.
+const OLDEST_FORMAT: u32 = 1;
+
+/// The DDL for a new case, format 2.
 const SCHEMA: &str = include_str!("schema.sql");
+
+/// The DDL that brings a format-1 case to format 2.
+const UPGRADE: &str = include_str!("upgrade.sql");
 
 /// The suffix a case file must carry, so that a case is recognisable as a
 /// DuckDB database and `create` cannot be pointed at an unrelated file.
 const SUFFIX: &str = ".duckdb";
 
-/// An open case file. Dropping it closes the file and releases its lock.
+/// An open case file: one connection to its database. Dropping it closes
+/// the connection; the file and its lock are released when the last
+/// connection to it (see `try_clone`) closes.
 pub struct Case {
     path: PathBuf,
     conn: Connection,
+    /// The file's format as it was opened: `CASE_FORMAT`, or an older one
+    /// only for a case opened read-only.
+    format: u32,
 }
 
 /// What `ox.meta` says about a case.
@@ -84,11 +106,41 @@ impl Case {
     /// must not exist yet.
     pub fn create(path: &Path, name: &str, actor: &Actor) -> Result<Case> {
         check_new_path(path)?;
+        Case::create_with(path, |conn| initialise(conn, name, actor), CASE_FORMAT)
+    }
+
+    /// A new case at `path` made by `ddl` and declared format 1, exactly as
+    /// step 1 made one, and left open at format 1 to change: only the
+    /// upgrade tests make one, to have a step 1 case to load, annotate and
+    /// then upgrade. Every other way to open a format-1 case to change it
+    /// upgrades it.
+    #[doc(hidden)]
+    pub fn create_at_format_1(path: &Path, ddl: &str, name: &str, actor: &Actor) -> Result<Case> {
+        check_new_path(path)?;
+        Case::create_with(
+            path,
+            |conn| {
+                let tx = conn.transaction()?;
+                tx.execute_batch(ddl)?;
+                write_meta(&tx, name, OLDEST_FORMAT, actor)?;
+                tx.commit()?;
+                Ok(())
+            },
+            OLDEST_FORMAT,
+        )
+    }
+
+    fn create_with(
+        path: &Path,
+        make: impl FnOnce(&mut Connection) -> Result<()>,
+        format: u32,
+    ) -> Result<Case> {
         let mut conn = connect(path, AccessMode::ReadWrite)?;
-        match initialise(&mut conn, name, actor) {
+        match make(&mut conn) {
             Ok(()) => Ok(Case {
                 path: path.to_path_buf(),
                 conn,
+                format,
             }),
             Err(e) => {
                 // A half-written case is worse than none: it would open later
@@ -105,31 +157,101 @@ impl Case {
     /// Open an existing case file to change it. The file is held to this
     /// process alone: `CaseLocked` when any other process has it open, and
     /// for any other process until this one lets go.
+    ///
+    /// A format-1 case is upgraded to format 2 first, in place and in one
+    /// transaction: the format-2 tables, a new `case_id`, the sessions of
+    /// each run still in the case (read again from where the run is, best
+    /// effort), and a `case_upgrade` history row. When any of it fails,
+    /// none of it is kept, the file is still format 1, and the error is
+    /// returned.
     pub fn open(path: &Path) -> Result<Case> {
-        Case::open_as(path, AccessMode::ReadWrite)
+        Case::open_as(path, AccessMode::ReadWrite, true)
     }
 
     /// Open an existing case file for reading only, which is how any number
     /// of processes may have it open at once. `CaseLocked` only while a
     /// process has it open to change it. A call that changes the case fails
-    /// on a case opened this way.
+    /// on a case opened this way. A format-1 case is read as it is: what
+    /// format 2 added reads as its default (`format` says which it is).
     pub fn open_read_only(path: &Path) -> Result<Case> {
-        Case::open_as(path, AccessMode::ReadOnly)
+        Case::open_as(path, AccessMode::ReadOnly, false)
     }
 
-    fn open_as(path: &Path, mode: AccessMode) -> Result<Case> {
+    fn open_as(path: &Path, mode: AccessMode, upgrade: bool) -> Result<Case> {
         if !path.try_exists()? {
             return Err(EngineError::NotFound(format!(
                 "no case file at {}",
                 path.display()
             )));
         }
-        let conn = connect(path, mode)?;
-        check_format(&conn, path)?;
+        let mut conn = connect(path, mode)?;
+        let mut format = check_format(&conn, path)?;
+        if upgrade && format == OLDEST_FORMAT {
+            upgrade_from_1(&mut conn)?;
+            format = CASE_FORMAT;
+        }
         Ok(Case {
             path: path.to_path_buf(),
             conn,
+            format,
         })
+    }
+
+    /// A second connection to this case's database, in this process: it
+    /// sees everything committed through any connection to it, and runs its
+    /// own statements, on its own thread if need be, beside this one's.
+    /// The clone of a case opened read-only is read-only. The file stays
+    /// open, and its lock held, until the last connection to it closes.
+    pub fn try_clone(&self) -> Result<Case> {
+        Ok(Case {
+            path: self.path.clone(),
+            conn: self.conn.try_clone()?,
+            format: self.format,
+        })
+    }
+
+    /// A handle that interrupts the statement this connection is running,
+    /// from any thread; it fails with DuckDB's interrupt error. DuckDB
+    /// clears an interrupt when the next statement starts, so one that
+    /// lands between statements is lost: a caller that must stop a call
+    /// interrupts again until the call returns. A handle outliving its
+    /// connection does nothing.
+    pub fn interrupt_handle(&self) -> Arc<duckdb::InterruptHandle> {
+        self.conn.interrupt_handle()
+    }
+
+    /// The case file's format: `CASE_FORMAT`, except for a format-1 case
+    /// opened read-only, which is 1.
+    pub fn format(&self) -> u32 {
+        self.format
+    }
+
+    /// The case's id, 32 lowercase hex digits made when the case was
+    /// created (or upgraded) and fixed from then on; empty for a format-1
+    /// case opened read-only, which has none.
+    pub fn case_id(&self) -> Result<String> {
+        if self.format < CASE_FORMAT {
+            return Ok(String::new());
+        }
+        let id: Option<String> = self
+            .conn()
+            .query_row("SELECT value FROM ox.meta WHERE key = 'case_id'", [], |r| {
+                r.get(0)
+            })
+            .map(Some)
+            .or_else(|e| match e {
+                duckdb::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        match id {
+            Some(id) if is_case_id(&id) => Ok(id),
+            Some(id) => Err(EngineError::Internal(format!(
+                "the case's case_id is not 32 lowercase hex digits: {id:?}"
+            ))),
+            None => Err(EngineError::Internal(
+                "the case has no case_id in ox.meta".to_string(),
+            )),
+        }
     }
 
     /// The case's name, format and creation record.
@@ -363,7 +485,18 @@ impl Case {
 fn initialise(conn: &mut Connection, name: &str, actor: &Actor) -> Result<()> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
-    let format = CASE_FORMAT.to_string();
+    write_meta(&tx, name, CASE_FORMAT, actor)?;
+    tx.execute(
+        "INSERT INTO ox.meta (key, value) VALUES ('case_id', ?)",
+        params![new_case_id()?],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The facts every case's `ox.meta` has had since format 1.
+fn write_meta(conn: &Connection, name: &str, format: u32, actor: &Actor) -> Result<()> {
+    let format = format.to_string();
     let created_by = actor.label();
     let created_at = now_iso();
     for (key, value) in [
@@ -372,11 +505,70 @@ fn initialise(conn: &mut Connection, name: &str, actor: &Actor) -> Result<()> {
         ("created_by", created_by.as_str()),
         ("created_at", created_at.as_str()),
     ] {
-        tx.execute(
+        conn.execute(
             "INSERT INTO ox.meta (key, value) VALUES (?, ?)",
             params![key, value],
         )?;
     }
+    Ok(())
+}
+
+/// A new case id: 128 bits from the operating system's random source, as
+/// 32 lowercase hex digits. Random rather than derived from the path or the
+/// time, so that a copy of a case keeps its id and two cases never share one.
+fn new_case_id() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| {
+        EngineError::Io(std::io::Error::other(format!(
+            "the operating system's random source failed: {e}"
+        )))
+    })?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn is_case_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Bring the format-1 case on `conn` to format 2, all in one transaction:
+/// the format-2 tables (`upgrade.sql`), a new `case_id`, each run's
+/// sessions read again from where the run is (best effort: a run that moved
+/// or whose sessions cannot be read has none), the format, and a
+/// `case_upgrade` history row. Any failure rolls all of it back.
+///
+/// Opening takes no actor, so the history row names the analyst the
+/// operating system user stands for, as the CLI's default actor does.
+fn upgrade_from_1(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(UPGRADE)?;
+    let id = new_case_id()?;
+    tx.execute(
+        "INSERT INTO ox.meta (key, value) VALUES ('case_id', ?)",
+        params![id],
+    )?;
+    crate::load::backfill_sessions(&tx)?;
+    let changed = tx.execute(
+        "UPDATE ox.meta SET value = ? WHERE key = 'format' AND value = ?",
+        params![CASE_FORMAT.to_string(), OLDEST_FORMAT.to_string()],
+    )?;
+    if changed != 1 {
+        return Err(EngineError::Internal(format!(
+            "the case's format changed while it was upgraded ({changed} rows)"
+        )));
+    }
+    let user = std::env::var(if cfg!(windows) { "USERNAME" } else { "USER" }).unwrap_or_default();
+    tx.execute(
+        "INSERT INTO ox.history \
+         (id, \"at\", \"by\", target_kind, target_id, action, before_json, after_json) \
+         VALUES (nextval('ox.history_seq'), ?, ?, 'case', ?, 'case_upgrade', ?, ?)",
+        params![
+            now_iso(),
+            Actor::from_os_user(&user).label(),
+            id,
+            serde_json::json!({ "format": OLDEST_FORMAT }).to_string(),
+            serde_json::json!({ "format": CASE_FORMAT }).to_string()
+        ],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -411,9 +603,9 @@ pub(crate) fn is_lock_conflict(e: &duckdb::Error) -> bool {
     .any(|needle| message.contains(needle))
 }
 
-/// Refuse a case, at `path`, whose `ox.meta` format this build does not
-/// read. `conn`'s default database must be the case.
-pub(crate) fn check_format(conn: &Connection, path: &Path) -> Result<()> {
+/// The `ox.meta` format of the case at `path`, refused when this build
+/// does not read it. `conn`'s default database must be the case.
+pub(crate) fn check_format(conn: &Connection, path: &Path) -> Result<u32> {
     let format = read_format(conn, path)?;
     if format > CASE_FORMAT {
         return Err(EngineError::NeedsUpgrade {
@@ -421,13 +613,13 @@ pub(crate) fn check_format(conn: &Connection, path: &Path) -> Result<()> {
             expected: CASE_FORMAT,
         });
     }
-    if format < CASE_FORMAT {
+    if format < OLDEST_FORMAT {
         return Err(EngineError::Invalid(format!(
             "{} declares case format {format}, which never existed",
             path.display()
         )));
     }
-    Ok(())
+    Ok(format)
 }
 
 fn read_format(conn: &Connection, path: &Path) -> Result<u32> {

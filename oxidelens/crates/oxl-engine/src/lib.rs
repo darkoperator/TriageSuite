@@ -20,11 +20,14 @@ pub mod time;
 
 pub use actor::Actor;
 pub use annot::{
-    add_note, add_tag, clear_suspicious, delete_note, history, mark_suspicious, marks, notes,
-    remove_tag, row_detail, row_place, tags, HistoryRow, MarkedRow, Note, RowDetail, RowOutcome,
-    RowPlace, RowStanding, TagInfo, AGENT_ROWS_PER_CALL, AGENT_TAG_PREFIX, MAX_NOTE, MAX_TAG,
+    add_note, add_tag, clear_suspicious, delete_note, history, mark_counts, mark_suspicious, marks,
+    notes, remove_tag, row_detail, row_place, tags, HistoryRow, MarkCounts, MarkedRow, Note,
+    RowDetail, RowOutcome, RowPlace, RowStanding, TagInfo, AGENT_ROWS_PER_CALL, AGENT_TAG_PREFIX,
+    MAX_NOTE, MAX_TAG,
 };
-pub use case::{Case, CaseInfo, CaseSize, CompactReport, CASE_FORMAT};
+pub use case::{
+    display_zone, set_display_zone, Case, CaseInfo, CaseSize, CompactReport, CASE_FORMAT,
+};
 pub use catalog::{
     column_comments, columns, declare_type, relation, relations, set_primary_time, ColumnInfo,
     ColumnRole, RelationInfo, RelationKind, SqlType, TimeSemantics, TypeOrigin,
@@ -33,9 +36,9 @@ pub use error::{EngineError, Result};
 pub use filter::{compile_filter, parse_filter, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN};
 pub use listing::Listing;
 pub use load::{
-    load_file, load_run, load_run_with, relation_name_for_file, remove_source, sources,
-    FileOptions, LoadReport, LoadedRelation, RemoveReport, RunOptions, SkippedDataset, SourceInfo,
-    Superseded,
+    load_file, load_run, load_run_with, relation_name_for_file, remove_source, sessions, sources,
+    FileOptions, LoadReport, LoadedRelation, RemoveReport, RunOptions, Session, SessionRelation,
+    SkippedDataset, SourceInfo, Superseded,
 };
 pub use query::{
     anchor_of, around, count, describe, find, group_filter, groups, histogram, merged_rows, page,

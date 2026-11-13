@@ -34,7 +34,7 @@ fn case_new_info_and_load_run() {
     let (code, v) = ox(&["--case", p, "case", "info"]);
     assert_eq!(
         (code, v["ok"].as_bool(), v["data"]["format"].as_u64()),
-        (0, Some(true), Some(1))
+        (0, Some(true), Some(2))
     );
     assert_eq!(inner(&v["data"]["untrusted"])["name"], "IR-1");
     let (code, v) = ox(&["--case", p, "load", "run", &run]);
@@ -271,7 +271,7 @@ fn capabilities_needs_no_case_and_lists_limits() {
     let (code, v) = ox(&["capabilities"]);
     assert_eq!(code, 0);
     assert_eq!(v["data"]["limits"]["rows_max"], 1000);
-    assert_eq!(v["data"]["case_format"], 1);
+    assert_eq!(v["data"]["case_format"], 2);
     assert!(!v["data"]["commands"].as_array().unwrap().is_empty());
     assert!(v["data"]["untrusted_wrapper"]
         .as_str()

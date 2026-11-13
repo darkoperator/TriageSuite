@@ -1,5 +1,6 @@
-//! The append-only change log, `ox.history`: written here for marks, tags
-//! and notes, read back newest first. Nothing updates or deletes it.
+//! The append-only change log, `ox.history`: written here for marks, tags,
+//! notes and the case's settings, read back newest first. Nothing updates or
+//! deletes it.
 
 use super::{text_or_null, write_rows};
 use crate::actor::Actor;
@@ -11,7 +12,15 @@ use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
 
 /// Every target kind a history row names (ruling R2).
-const TARGET_KINDS: [&str; 5] = ["source", "relation", "row_mark", "row_tag", "note"];
+const TARGET_KINDS: [&str; 7] = [
+    "source",
+    "relation",
+    "row_mark",
+    "row_tag",
+    "note",
+    "case",
+    "saved_view",
+];
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HistoryRow {
@@ -27,7 +36,7 @@ pub struct HistoryRow {
 
 /// One change to record: what it touched, what was done, and the object
 /// before and after (`None` when it did not exist, or no longer does).
-pub(super) struct Change<'a> {
+pub(crate) struct Change<'a> {
     pub target_kind: &'a str,
     pub target_id: String,
     pub action: &'a str,
@@ -37,7 +46,7 @@ pub(super) struct Change<'a> {
 
 /// Write `change`'s history row in the caller's transaction, stamped `at`
 /// and by `actor`.
-pub(super) fn record(conn: &Connection, actor: &Actor, at: &str, change: Change<'_>) -> Result<()> {
+pub(crate) fn record(conn: &Connection, actor: &Actor, at: &str, change: Change<'_>) -> Result<()> {
     record_all(conn, actor, at, vec![change])
 }
 
