@@ -242,7 +242,12 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         read!(c, grid_empty_columns(state: GridState) -> Vec<String>),
         read!(
             c,
-            grid_matches(state: GridState, after: Option<u64>, limit: u32) -> Listing<MatchPos>
+            grid_matches(
+                state: GridState,
+                from: Option<u64>,
+                backward: bool,
+                limit: u32,
+            ) -> Listing<MatchPos>
         ),
         read!(c, grid_match_count(state: GridState) -> u64),
         read!(

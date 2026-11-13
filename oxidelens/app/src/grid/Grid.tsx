@@ -16,6 +16,7 @@ import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { GridPage } from "../contract/generated/GridPage";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import type { GridState } from "../contract/generated/GridState";
+import type { SearchState } from "../contract/generated/SearchState";
 import { useShell } from "../shell/context";
 import { displaySafe } from "../text";
 import type { TabBodyProps } from "../shell/slots";
@@ -33,14 +34,18 @@ import GridBody from "./GridBody";
 import GridHeader, { MARK_WIDTH } from "./GridHeader";
 import { initialGridState, nextSort } from "./gridState";
 import HeaderMenu from "./HeaderMenu";
+import HostScope from "./HostScope";
 import {
   bestFitWidth, fetchedColumns, hide, materialise, moveColumn, resolve, setWidth, setWidths, show, showAll, togglePin,
 } from "./layout";
 import { measureText } from "./measure";
 import { BLOCK_ROWS, blockOf } from "./blocks";
 import { MAX_COPY_ROWS, contains, emptySelection, indices, selectOnly, selectRange, size, toggle, type Selection } from "./selection";
-import { useGridData } from "./useGridData";
+import SearchBox from "./SearchBox";
+import { stableKey, useGridData } from "./useGridData";
+import { useMatches } from "./useMatches";
 import ValueViewer from "./ValueViewer";
+import ZonePicker from "./ZonePicker";
 import "./grid.css";
 
 const NO_ROWS: unknown[] = [];
@@ -148,6 +153,41 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     },
     [changeState, reportError],
   );
+  // ---- search: applied only once the engine accepts it, so a refusal leaves the results on screen ---------------------
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+  const searchSeq = useRef(0);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const applySearch = useCallback(
+    async (next: SearchState) => {
+      const seq = ++searchSeq.current;
+      const current = stateRef.current;
+      if (stableKey(next) === stableKey(current.search)) {
+        setSearchError(null);
+        return;
+      }
+      if (next.text !== "") {
+        try {
+          // The same one-row read as a chip check: the engine parses the text and says if it cannot.
+          await gridPage({ ...current, search: next }, 1, 0, { zone: summary.display_zone, rules: [] }, `tab:${tab.id}:search`);
+        } catch (e) {
+          if (seq !== searchSeq.current || (isCmdError(e) && (e.code === "superseded" || e.code === "interrupted"))) return;
+          if (isCmdError(e) && e.code === "invalid") setSearchError(e.message);
+          else reportError(e);
+          return;
+        }
+      }
+      if (seq !== searchSeq.current) return;
+      setSearchError(null);
+      changeState((s) => ({ ...s, search: next }));
+    },
+    [changeState, reportError, summary.display_zone, tab.id],
+  );
+  const findActive = state.search.mode === "find" && state.search.text !== "";
+  const matches = useMatches(tab.id, state, findActive, change.generation, reportError);
+
   const onFilterRowText = useCallback(
     (column: string, text: string) =>
       applyChips((chips) => (text === "" ? removeChip(chips, filterRowId(column)) : upsertChip(chips, filterRowChip(column, text)))),
@@ -318,6 +358,18 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     virtualizer.scrollToIndex(row, { align: "auto" });
   };
 
+  /** F3 / Shift+F3 / ▲▼: the next or previous match after where the analyst is, scrolled into view and focused. */
+  const stepMatch = (direction: 1 | -1) => {
+    if (!findActive) return;
+    // Where the focus has been moved away from the current match, stepping goes on from the focus.
+    const anchor = focus && focus.row !== matches.current ? focus.row : null;
+    void matches.step(direction, anchor).then((offset) => {
+      if (offset === null) return;
+      setFocus((f) => ({ row: offset, col: f?.col ?? 0 }));
+      virtualizer.scrollToIndex(offset, { align: "center" });
+    });
+  };
+
   // ---- copy and the viewer ----------------------------------------------------------------------------------------
   const viewChanged = (session: { replaced(): boolean }) => {
     if (!session.replaced()) reportError(new Error("the view changed; copy again"));
@@ -437,6 +489,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       return;
     }
     switch (e.key) {
+      case "F3": e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); break;
       case " ":
         e.preventDefault();
         showValue();
@@ -499,7 +552,20 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   return (
     <div ref={rootRef} className="grid" style={{ "--cell-size": `${settings.font_size}px` } as CSSProperties}>
+      <div className="grid-toolbar">
+        <SearchBox
+          search={state.search}
+          error={searchError}
+          find={findActive ? { count: matches.count, position: matches.position } : null}
+          onApply={(next) => void applySearch(next)}
+          onStep={stepMatch}
+        />
+        <HostScope hosts={summary.hosts} chosen={state.hosts} onChange={(hosts) => changeState((s) => ({ ...s, hosts }))} />
+        <ZonePicker zone={summary.display_zone} tabId={tab.id} onError={reportError} />
+      </div>
       <ChipBar
+        search={state.search}
+        onClearSearch={() => void applySearch({ ...state.search, text: "" })}
         chips={state.chips}
         columns={[...(allMetas ?? []).map((c) => ({ name: c.name, label: c.name })), { name: MARK_COLUMN, label: "Mark" }]}
         onToggle={(id) => applyChips((chips) => toggleChip(chips, id))}

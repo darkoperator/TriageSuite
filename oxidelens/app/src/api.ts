@@ -169,8 +169,9 @@ export const gridValues = (
   );
 export const gridEmptyColumns = (state: GridState, slot: string, queryId = newQueryId()) =>
   call<CommandResult["grid_empty_columns"]>("grid_empty_columns", { queryId, slot, state } satisfies Args<"grid_empty_columns">);
-export const gridMatches = (state: GridState, after: number | null, limit: number, slot: string, queryId = newQueryId()) =>
-  call<CommandResult["grid_matches"]>("grid_matches", { queryId, slot, state, after, limit } satisfies Args<"grid_matches">);
+/** Forward: the matches after `from` (all when null), nearest first; backward: those before it, nearest first. */
+export const gridMatches = (state: GridState, from: number | null, backward: boolean, limit: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["grid_matches"]>("grid_matches", { queryId, slot, state, from, backward, limit } satisfies Args<"grid_matches">);
 export const gridMatchCount = (state: GridState, slot: string, queryId = newQueryId()) =>
   call<CommandResult["grid_match_count"]>("grid_match_count", { queryId, slot, state } satisfies Args<"grid_match_count">);
 export const gridExport = (

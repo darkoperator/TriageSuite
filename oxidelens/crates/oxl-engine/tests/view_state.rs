@@ -89,7 +89,7 @@ fn find_mode_does_not_filter() {
         &case,
         "select _ox_row from evtxtriage_events where \"PayloadData1\" = 'rclone.exe'",
     );
-    let found = matches(&case, &s, None, 10).unwrap();
+    let found = matches(&case, &s, None, false, 10).unwrap();
     // The default order is TimeCreated ascending, untimed last: 02:13:58,
     // 02:14:07, 02:15:44, 02:15:46, then 02:17:02, the rclone row, at 4.
     assert_eq!(found.items.len(), 1);
@@ -99,14 +99,20 @@ fn find_mode_does_not_filter() {
     let shown = page(&case, &s.query().unwrap(), 1, 4).unwrap();
     assert_eq!(shown.row_ids, [rclone]);
     // Stepping past the only match finds nothing more.
-    assert!(matches(&case, &s, Some(4), 10).unwrap().items.is_empty());
-    assert_eq!(matches(&case, &s, Some(3), 10).unwrap().items[0].offset, 4);
+    assert!(matches(&case, &s, Some(4), false, 10)
+        .unwrap()
+        .items
+        .is_empty());
+    assert_eq!(
+        matches(&case, &s, Some(3), false, 10).unwrap().items[0].offset,
+        4
+    );
 
     // In filter mode the same search hides the other rows, and find is
     // refused.
     s.search.mode = SearchMode::Filter;
     assert_eq!(count_view(&case, &s).unwrap().rows, 1);
-    assert!(is_invalid(matches(&case, &s, None, 10)));
+    assert!(is_invalid(matches(&case, &s, None, false, 10)));
     assert!(is_invalid(match_count(&case, &s)));
 }
 
@@ -129,7 +135,7 @@ fn find_positions_follow_the_sort_and_the_chips() {
         descending: true,
     }];
     assert_eq!(match_count(&case, &s).unwrap(), 3);
-    let found = matches(&case, &s, None, 2).unwrap();
+    let found = matches(&case, &s, None, false, 2).unwrap();
     assert_eq!(
         found.items.iter().map(|m| m.offset).collect::<Vec<_>>(),
         [0, 1]
@@ -138,8 +144,42 @@ fn find_positions_follow_the_sort_and_the_chips() {
     // EventId descending: 5140 first.
     let first = page(&case, &s.query().unwrap(), 1, 0).unwrap();
     assert_eq!(first.row_ids[0], found.items[0].row_id);
-    assert!(is_invalid(matches(&case, &s, None, 0)));
-    assert!(is_invalid(matches(&case, &s, Some(u64::MAX), 10)));
+    // Forward from the middle: the match after it. Backward: the nearest before it first; from nothing, the last
+    // match first.
+    let offsets = |from, backward, limit| {
+        matches(&case, &s, from, backward, limit)
+            .unwrap()
+            .items
+            .iter()
+            .map(|m| m.offset)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(offsets(Some(0), false, 1), [1]);
+    assert_eq!(offsets(None, false, 1), [0]);
+    assert_eq!(offsets(Some(1), true, 1), [0]);
+    assert_eq!(offsets(Some(2), true, 10), [1, 0]);
+    assert_eq!(offsets(None, true, 1), [2]);
+    assert_eq!(offsets(None, true, 10), [2, 1, 0]);
+    // Each position carries its 1-based rank among all the matches, whichever way and from wherever it was asked.
+    let ordinals = |from, backward, limit| {
+        matches(&case, &s, from, backward, limit)
+            .unwrap()
+            .items
+            .iter()
+            .map(|m| m.ordinal)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ordinals(None, false, 10), [1, 2, 3]);
+    assert_eq!(ordinals(Some(0), false, 1), [2]);
+    assert_eq!(ordinals(Some(1), true, 1), [1]);
+    assert_eq!(ordinals(None, true, 10), [3, 2, 1]);
+    assert_eq!(ordinals(Some(2), true, 1), [2]);
+    assert!(offsets(Some(0), true, 10).is_empty());
+    assert!(offsets(Some(2), false, 10).is_empty());
+    assert!(matches(&case, &s, None, true, 1).unwrap().truncated);
+    assert!(is_invalid(matches(&case, &s, Some(u64::MAX), true, 10)));
+    assert!(is_invalid(matches(&case, &s, None, false, 0)));
+    assert!(is_invalid(matches(&case, &s, Some(u64::MAX), false, 10)));
 
     // A regex search is checked in find mode as in filter mode.
     s.search.regex = true;
@@ -150,7 +190,10 @@ fn find_positions_follow_the_sort_and_the_chips() {
     // A blank search finds nothing and narrows nothing.
     s.search.text = "  ".into();
     assert_eq!(match_count(&case, &s).unwrap(), 0);
-    assert!(matches(&case, &s, None, 10).unwrap().items.is_empty());
+    assert!(matches(&case, &s, None, false, 10)
+        .unwrap()
+        .items
+        .is_empty());
     assert_eq!(count_view(&case, &s).unwrap().rows, 3);
 }
 

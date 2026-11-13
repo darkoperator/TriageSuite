@@ -28,6 +28,7 @@ import {
 } from "./tabs";
 import TopBar from "./TopBar";
 import { useCaseChanged } from "./useCaseChanged";
+import { useZoneOffset } from "./useZoneOffset";
 import "./shell.css";
 
 const describe = (e: unknown): string =>
@@ -51,6 +52,7 @@ export default function Shell() {
   const [gridStatus, setGridStatus] = useState<ReactNode>(null);
   const [rightPane, setRightPane] = useState<ReactNode>(null);
   const [store] = useState(() => new ScrollStore());
+  const zoneOffset = useZoneOffset(summary, change.generation);
   const readSeq = useRef(0);
 
   const reportError = useCallback((e: unknown) => setError(describe(e)), []);
@@ -330,7 +332,7 @@ export default function Shell() {
             <Rail side="right" suspicious={suspicious} onExpand={() => togglePane("right_pane")} />
           )}
         </div>
-        <StatusBar progress={job} error={error} zone={summary.display_zone} gridStatus={gridStatus} onDismissError={() => setError(null)} />
+        <StatusBar progress={job} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
         <KeyStrip />
       </div>
     </ShellCtx.Provider>

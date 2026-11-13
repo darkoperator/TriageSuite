@@ -591,11 +591,17 @@ const handlers: Handlers = {
     read(a.slot, a.queryId, () => {
       const sel = select(a.state);
       const all = a.state.search.mode === "find"
-        ? sel.rows.map((r, offset) => ({ offset, r })).filter(({ r }) => sel.hits(sel.rel.rows[r]))
+        ? sel.rows
+            .map((r, offset) => ({ offset, r }))
+            .filter(({ r }) => sel.hits(sel.rel.rows[r]))
+            .map((m, i) => ({ ...m, ordinal: i + 1 }))
         : [];
-      const later = all.filter(({ offset }) => a.after === null || a.after === undefined || offset > a.after);
+      const none = a.from === null || a.from === undefined;
+      const later = a.backward
+        ? all.filter(({ offset }) => none || offset < a.from!).reverse()
+        : all.filter(({ offset }) => none || offset > a.from!);
       return {
-        items: later.slice(0, a.limit).map(({ offset, r }) => ({ offset, row_id: rowIdOf(sel.rel, r) })),
+        items: later.slice(0, a.limit).map(({ offset, r, ordinal }) => ({ offset, row_id: rowIdOf(sel.rel, r), ordinal })),
         truncated: later.length > a.limit,
       };
     }),

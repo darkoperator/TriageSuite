@@ -117,10 +117,13 @@ pub fn grid_matches(
     state: &AppState,
     at: At<'_>,
     grid: &GridState,
-    after: Option<u64>,
+    from: Option<u64>,
+    backward: bool,
     limit: u32,
 ) -> Result<Listing<MatchPos>, CmdError> {
-    at.read(state, |c| oxl_engine::matches(c, grid, after, limit))
+    at.read(state, |c| {
+        oxl_engine::matches(c, grid, from, backward, limit)
+    })
 }
 
 /// How many rows a find-mode search selects (`match_count`).
@@ -310,10 +313,18 @@ pub mod commands {
         query_id: String,
         slot: String,
         state: GridState,
-        after: Option<u64>,
+        from: Option<u64>,
+        backward: bool,
         limit: u32,
     ) -> Result<Listing<MatchPos>, CmdError> {
-        super::grid_matches(&app, At::new(&query_id, &slot), &state, after, limit)
+        super::grid_matches(
+            &app,
+            At::new(&query_id, &slot),
+            &state,
+            from,
+            backward,
+            limit,
+        )
     }
 
     #[tauri::command(async)]

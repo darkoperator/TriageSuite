@@ -2,6 +2,7 @@
 
 /**
  * One row the search finds: its place in the grid's order (the offset a
- * page starting at it takes) and its id.
+ * page starting at it takes), its id and its rank among all the matches
+ * (the first match is 1), so a step can say "k of n".
  */
-export type MatchPos = { offset: number, row_id: number, };
+export type MatchPos = { offset: number, row_id: number, ordinal: number, };

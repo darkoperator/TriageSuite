@@ -101,7 +101,7 @@ export type CommandArgs = {
   grid_histogram: { queryId: string; slot: string; state: GridState; column?: string | null; maxBuckets: number; zone: string };
   grid_values: { queryId: string; slot: string; state: GridState; column: string; exceptChips: Array<string>; contains?: string | null; order: ValueOrder; limit: number; offset: number };
   grid_empty_columns: { queryId: string; slot: string; state: GridState };
-  grid_matches: { queryId: string; slot: string; state: GridState; after?: number | null; limit: number };
+  grid_matches: { queryId: string; slot: string; state: GridState; from?: number | null; backward: boolean; limit: number };
   grid_match_count: { queryId: string; slot: string; state: GridState };
   grid_export: { queryId: string; slot: string; state: GridState; path: string; zoneTimes?: string | null };
   date_range_chip: { queryId: string; slot: string; relation: string; column: string; from?: string | null; to?: string | null; zone: string };

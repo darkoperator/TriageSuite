@@ -2,12 +2,16 @@
 // `+ filter` (pick a column, open its panel), Advanced…, Save preset… and Clear all. Labels are untrusted display text.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Chip } from "../contract/generated/Chip";
+import type { SearchState } from "../contract/generated/SearchState";
 import { displaySafe } from "../text";
 
 export interface ChipBarProps {
   chips: readonly Chip[];
   /** Every column a filter can name, in the order to offer them (the Mark column is `_mark`, shown as "Mark"). */
   columns: readonly { name: string; label: string }[];
+  /** The grid's search, shown as a pill before the chips when it has a text (it is `GridState.search`, not a chip). */
+  search?: SearchState;
+  onClearSearch?(): void;
   onToggle(id: string): void;
   onRemove(id: string): void;
   onClear(): void;
@@ -45,6 +49,17 @@ export default function ChipBar(p: ChipBarProps): ReactNode {
 
   return (
     <div className="chip-bar" role="region" aria-label="Filters">
+      {p.search && p.search.text !== "" && (
+        <span className="search-pill" title={`search: ${displaySafe(p.search.text)}`}>
+          <span className="chip-label">{`search: ${displaySafe(p.search.text)}`}</span>
+          <span className="chip-flags">
+            {[p.search.regex ? "Rx" : "", p.search.case_sensitive ? "Aa" : "", p.search.mode === "find" ? "find" : ""].filter(Boolean).join(" ")}
+          </span>
+          <button type="button" className="chip-remove" aria-label="Clear search" onClick={() => p.onClearSearch?.()}>
+            ×
+          </button>
+        </span>
+      )}
       <ul className="chips" aria-label="Active filters">
         {p.chips.map((c) => {
           const label = displaySafe(c.label);

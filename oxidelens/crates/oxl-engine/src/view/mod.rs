@@ -333,28 +333,33 @@ pub fn empty_columns(case: &Case, state: &GridState) -> Result<Vec<String>> {
 }
 
 /// One row the search finds: its place in the grid's order (the offset a
-/// page starting at it takes) and its id.
+/// page starting at it takes), its id and its rank among all the matches
+/// (the first match is 1), so a step can say "k of n".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MatchPos {
     pub offset: u64,
     pub row_id: i64,
+    pub ordinal: u64,
 }
 
-/// Up to `limit` positions after `after` (from the first when `None`), in
-/// the state's order, of the rows the search selects among the rows the
-/// chips and hosts select. `Invalid` unless the search is in find mode, for
-/// a `limit` of 0 or over `MAX_LIMIT`, or an `after` past `i64::MAX`. A
-/// blank search finds nothing.
+/// Up to `limit` positions of the rows the search selects among the rows the
+/// chips and hosts select, in the state's order. Forward (`backward` false):
+/// the matches after `from` (all when `None`), nearest first, ascending.
+/// Backward: the matches before `from` (all when `None`), nearest first,
+/// descending, so `None` starts at the last match. `Invalid` unless the
+/// search is in find mode, for a `limit` of 0 or over `MAX_LIMIT`, or a
+/// `from` past `i64::MAX`. A blank search finds nothing.
 pub fn matches(
     case: &Case,
     state: &GridState,
-    after: Option<u64>,
+    from: Option<u64>,
+    backward: bool,
     limit: u32,
 ) -> Result<Listing<MatchPos>> {
     check_limit(limit)?;
-    if let Some(after) = after {
-        check_offset(after)?;
+    if let Some(from) = from {
+        check_offset(from)?;
     }
     let (q, scope, search) = find_scope(case, state)?;
     let Some(search) = search else {
@@ -365,11 +370,16 @@ pub fn matches(
     // column of that numbering, not a narrowing of it, so the numbers are
     // the rows' places in the grid.
     let sql = format!(
-        "SELECT ox_pos, ox_id FROM (\
-           SELECT row_number() OVER (ORDER BY {order}) - 1 AS ox_pos, \
-                  {ROW_ALIAS}._ox_row AS ox_id, ({hit}) AS ox_hit \
-           FROM {from} WHERE {where_sql}) \
-         WHERE ox_hit AND ox_pos > ? ORDER BY ox_pos LIMIT ?",
+        "SELECT ox_pos, ox_id, ox_ord FROM (\
+           SELECT ox_pos, ox_id, ox_hit, \
+                  sum(CASE WHEN ox_hit THEN 1 ELSE 0 END) OVER (ORDER BY ox_pos) AS ox_ord \
+           FROM (\
+             SELECT row_number() OVER (ORDER BY {order}) - 1 AS ox_pos, \
+                    {ROW_ALIAS}._ox_row AS ox_id, ({hit}) AS ox_hit \
+             FROM {from} WHERE {where_sql})) \
+         WHERE ox_hit AND ox_pos {cmp} ? ORDER BY ox_pos {dir} LIMIT ?",
+        cmp = if backward { "<" } else { ">" },
+        dir = if backward { "DESC" } else { "ASC" },
         hit = search.sql,
         from = scope.from_sql,
         where_sql = scope.where_sql,
@@ -377,9 +387,11 @@ pub fn matches(
     // The search's `?`s come first in the text, then the scope's.
     let mut params = search.params;
     params.extend(scope.params);
-    // `check_offset` bounded `after`, so it fits.
+    // `check_offset` bounded `from`, so it fits; no `from` is before the
+    // first row going forward and past the last going backward.
+    let none = if backward { i64::MAX } else { -1 };
     params.push(SqlValue::BigInt(
-        after.map_or(-1, |a| i64::try_from(a).unwrap_or(i64::MAX)),
+        from.map_or(none, |a| i64::try_from(a).unwrap_or(i64::MAX)),
     ));
     params.push(SqlValue::BigInt(fetch_limit(limit)));
     let found: Vec<MatchPos> = case
@@ -389,6 +401,7 @@ pub fn matches(
             Ok(MatchPos {
                 offset: as_count(r.get(0)?),
                 row_id: r.get(1)?,
+                ordinal: as_count(r.get(2)?),
             })
         })?
         .collect::<std::result::Result<_, _>>()?;

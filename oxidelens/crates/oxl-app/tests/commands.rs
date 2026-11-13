@@ -349,10 +349,16 @@ fn grid_matches_and_count_find_in_the_grids_order() {
         "relation": EVENTS,
         "search": { "text": "rclone", "mode": "find" },
     }));
-    let found = g::grid_matches(&l.state, at("t1:find"), &find, None, 10).unwrap();
+    let found = g::grid_matches(&l.state, at("t1:find"), &find, None, false, 10).unwrap();
     assert_eq!(found.items.len(), 1);
     assert_eq!(found.items[0].offset, 4);
+    assert_eq!(found.items[0].ordinal, 1); // offset 4, but the first match
     assert!(!found.truncated);
+    // Backward from nothing starts at the last match; from the only match there is nothing before it.
+    let back = g::grid_matches(&l.state, at("t1:findb"), &find, None, true, 1).unwrap();
+    assert_eq!(back.items[0].offset, 4);
+    let before = g::grid_matches(&l.state, at("t1:findb"), &find, Some(4), true, 1).unwrap();
+    assert!(before.items.is_empty());
     let n = g::grid_match_count(&l.state, at("t1:findn"), &find).unwrap();
     assert_eq!(n, 1);
     let err = g::grid_match_count(&l.state, at("t1:findn"), &grid(EVENTS)).unwrap_err();

@@ -109,6 +109,7 @@ fn sample(arg: &str, dir: &Path) -> Value {
         "parent" | "exceptChips" => json!([]),
         "order" => json!("commonest"),
         "after" | "contains" | "zoneTimes" | "from" | "to" => Value::Null,
+        "backward" => json!(false),
         "windows" => json!([60]),
         "source" => json!({ "around": { "host": "WS01", "at": "2026-01-05T02:14:00Z",
                                         "window_seconds": 60 } }),

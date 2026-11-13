@@ -4,8 +4,10 @@ import type { ReactNode } from "react";
 import { displaySafe } from "../text";
 
 export default function StatusBar({
-  progress, error, zone, gridStatus, onDismissError,
+  progress, error, zone, zoneOffset, gridStatus, onDismissError,
 }: {
+  /** The engine's offset for the zone (`−05:00`); null when it has none to give. */
+  zoneOffset: string | null;
   progress: string | null;
   error: string | null;
   zone: string;
@@ -26,7 +28,9 @@ export default function StatusBar({
         </span>
       )}
       <span className="status-spacer" />
-      <span className="status-zone">Zone {displaySafe(zone)}</span>
+      <span className="status-zone">
+        {`TZ ${displaySafe(zone)}${zoneOffset === null ? "" : ` (${zoneOffset})`} · storage and export stay UTC`}
+      </span>
       <span className="status-grid" data-testid="grid-status">
         {gridStatus}
       </span>
