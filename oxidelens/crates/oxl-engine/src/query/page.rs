@@ -190,7 +190,7 @@ fn clip(text: Option<String>, failed: bool) -> Cell {
 }
 
 /// `text` cut to its first `CELL_CAP` characters, and whether it was cut.
-pub(super) fn clip_text(text: Option<String>) -> (Option<String>, bool) {
+pub(crate) fn clip_text(text: Option<String>) -> (Option<String>, bool) {
     let Some(mut text) = text else {
         return (None, false);
     };

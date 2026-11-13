@@ -25,6 +25,13 @@ getrandom.workspace = true
 # link or blocks on a FIFO.
 libc.workspace = true
 
+[features]
+# TypeScript bindings of the app's contract types (`ts-rs`), derived only in
+# the build that generates them. The dependency arrives with that generator;
+# until then the feature is declared so the `cfg_attr`s on the types are a
+# known cfg and the default build never sees them.
+ts = []
+
 [dev-dependencies]
 # Integration tests (files under tests/). oxl-fixtures depends on this crate,
 # so a unit test inside src/ links a second copy: it may take a directory

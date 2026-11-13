@@ -21,7 +21,6 @@ pub struct Histogram {
     pub column: String,
     /// How `column` is zoned. Buckets of an `unknown` time are aligned to
     /// the epoch as if it were UTC.
-    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
     pub time_semantics: Option<TimeSemantics>,
     pub bucket_seconds: u64,
     /// Non-empty buckets only, oldest first.

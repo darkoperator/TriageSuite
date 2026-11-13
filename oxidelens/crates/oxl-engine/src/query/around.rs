@@ -40,7 +40,6 @@ pub struct AroundCount {
     pub count: u64,
     /// How the relation's primary time is zoned. An `unknown` time was
     /// compared with the window as written.
-    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
     pub time_semantics: Option<TimeSemantics>,
 }
 
@@ -149,7 +148,6 @@ pub struct MergedRow {
     pub time: Option<String>,
     /// How the relation's primary time is zoned; `None` without one. Rows
     /// with an `unknown` time sort by their written value.
-    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
     pub time_semantics: Option<TimeSemantics>,
     pub host: Option<String>,
     pub summary: String,

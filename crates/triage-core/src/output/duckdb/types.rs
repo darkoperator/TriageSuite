@@ -61,6 +61,24 @@ impl SqlType {
     }
 }
 
+/// Serialised as `sql()` spells it, the text a catalog stores, so there is
+/// no second string table to drift from the one `TRY_CAST` uses.
+impl serde::Serialize for SqlType {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.sql())
+    }
+}
+
+/// Read back through `from_sql`: a spelling `sql()` never produced is an
+/// error, never a guess.
+impl<'de> serde::Deserialize<'de> for SqlType {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let spelling = <String as serde::Deserialize>::deserialize(d)?;
+        SqlType::from_sql(&spelling)
+            .ok_or_else(|| serde::de::Error::custom(format_args!("unknown SQL type {spelling:?}")))
+    }
+}
+
 /// Declared SQL types for datasets whose id is built at run time.
 ///
 /// `DatasetColumnTypes` names one exact `dataset_id`, which a dynamic
@@ -97,12 +115,45 @@ pub enum TimeSemantics {
 }
 
 impl TimeSemantics {
+    /// Every variant, exactly once, with the array length spelled out, as
+    /// `SqlType::ALL` is: a fourth variant not added here fails to compile
+    /// rather than becoming a spelling `parse` rejects.
+    pub const ALL: [TimeSemantics; 3] = [
+        TimeSemantics::Utc,
+        TimeSemantics::Local,
+        TimeSemantics::Unknown,
+    ];
+
+    /// The spelling an inventory and a catalog store.
     pub fn as_str(&self) -> &'static str {
         match self {
             TimeSemantics::Utc => "utc",
             TimeSemantics::Local => "local",
             TimeSemantics::Unknown => "unknown",
         }
+    }
+
+    /// The inverse of `as_str()`, derived from `ALL` as `SqlType::from_sql`
+    /// is from `sql()`; `None` for any other text.
+    pub fn parse(spelling: &str) -> Option<TimeSemantics> {
+        Self::ALL.into_iter().find(|t| t.as_str() == spelling)
+    }
+}
+
+/// Serialised as `as_str()` spells it, the text a catalog stores.
+impl serde::Serialize for TimeSemantics {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+/// Read back through `parse`: any other spelling is an error.
+impl<'de> serde::Deserialize<'de> for TimeSemantics {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let spelling = <String as serde::Deserialize>::deserialize(d)?;
+        TimeSemantics::parse(&spelling).ok_or_else(|| {
+            serde::de::Error::custom(format_args!("unknown time semantics {spelling:?}"))
+        })
     }
 }
 
@@ -126,7 +177,28 @@ pub struct DatasetColumnTypes {
 
 #[cfg(test)]
 mod tests {
-    use super::SqlType;
+    use super::{SqlType, TimeSemantics};
+
+    /// Each type serialises as the text a catalog stores (`sql()`,
+    /// `as_str()`), reads back to itself, and refuses any other spelling.
+    #[test]
+    fn serde_uses_the_stored_spelling_and_round_trips() {
+        for t in SqlType::ALL {
+            let json = serde_json::to_value(t).unwrap();
+            assert_eq!(json, serde_json::Value::String(t.sql().into()), "{t:?}");
+            assert_eq!(serde_json::from_value::<SqlType>(json).unwrap(), t);
+        }
+        for t in TimeSemantics::ALL {
+            let json = serde_json::to_value(t).unwrap();
+            assert_eq!(json, serde_json::Value::String(t.as_str().into()), "{t:?}");
+            assert_eq!(serde_json::from_value::<TimeSemantics>(json).unwrap(), t);
+            assert_eq!(TimeSemantics::parse(t.as_str()), Some(t));
+        }
+        for bad in ["\"bigint\"", "\"big_int\"", "\"UTC\"", "\"\"", "1", "null"] {
+            assert!(serde_json::from_str::<SqlType>(bad).is_err(), "{bad}");
+            assert!(serde_json::from_str::<TimeSemantics>(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn from_sql_inverts_sql_for_every_variant() {

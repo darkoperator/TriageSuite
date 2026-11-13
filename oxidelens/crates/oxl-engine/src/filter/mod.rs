@@ -15,7 +15,7 @@ mod compile;
 
 pub use compile::{compile_filter, SqlFragment};
 pub(crate) use compile::{
-    failed_sql, literal_eq_sql, literal_sql, null_safe, regex_sql, LiteralMatch,
+    failed_sql, literal_eq_sql, literal_sql, null_safe, regex_sql, LiteralMatch, MARK_NONE,
 };
 
 use crate::error::{EngineError, Result};

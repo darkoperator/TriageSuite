@@ -5,8 +5,8 @@
 
 use super::appmap::app_types_for;
 use super::{
-    default_primary_time, parse_semantics, read_columns, set_typing, sync_companions, ColumnRole,
-    SqlType, TimeSemantics, TypeOrigin, UNTYPED,
+    default_primary_time, read_columns, set_typing, sync_companions, ColumnRole, SqlType,
+    TimeSemantics, TypeOrigin, UNTYPED,
 };
 use crate::error::{EngineError, Result};
 use duckdb::{params, Connection};
@@ -71,7 +71,7 @@ pub(crate) fn check_typing(conn: &Connection, dataset: &Dataset) -> Result<()> {
             (Some(TypeOrigin::Suite), Some(t)) => {
                 SqlType::from_sql(&t.sql_type) == column.sql_type
                     && t.text_column.to_lowercase() == column.text_column.to_lowercase()
-                    && t.time_semantics.as_deref().map(parse_semantics)
+                    && t.time_semantics.as_deref().map(TimeSemantics::parse)
                         == column.time_semantics.map(Some)
             }
             (Some(TypeOrigin::Suite), None) | (_, Some(_)) => false,
@@ -206,7 +206,7 @@ fn record_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
                         .time_semantics
                         .as_deref()
                         .map(|s| {
-                            parse_semantics(s).ok_or_else(|| {
+                            TimeSemantics::parse(s).ok_or_else(|| {
                                 EngineError::Invalid(format!(
                                     "{relation}: column {column:?} declares time semantics {s:?}"
                                 ))

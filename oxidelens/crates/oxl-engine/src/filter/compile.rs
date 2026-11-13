@@ -33,7 +33,7 @@ pub struct SqlFragment {
 
 /// The value a `_mark` condition takes for the absence of any mark; the
 /// other value it accepts is the stored spelling, `MARK_SUSPICIOUS`.
-const MARK_NONE: &str = "none";
+pub(crate) const MARK_NONE: &str = "none";
 
 /// Compile `node` against `columns`, the catalogued columns of the relation
 /// it will run over. `Invalid` on an unknown column or a value of the wrong

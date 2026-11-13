@@ -25,8 +25,10 @@ mod stack;
 
 pub use around::{anchor_of, around, merged_rows, AroundCount, MergedRow, MergedSource};
 pub use find::{find, FindHit, FindMode, FindRequest, FindResult, MAX_VALUE};
+pub(crate) use group::{as_count, group_key_sql};
 pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
+pub(crate) use page::clip_text;
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
 pub(crate) use page::{read_mark, MARK_SUSPICIOUS};
 pub use sql::{
@@ -38,7 +40,7 @@ pub use stack::{stack, Stack, StackOrder, StackRow};
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo, RelationInfo};
 use crate::error::{EngineError, Result};
-use crate::filter::{compile_filter, FilterNode, Op};
+use crate::filter::{compile_filter, FilterNode, Op, SqlFragment};
 use crate::load::stage::view_columns;
 use crate::search::{compile_search, parse_search, Search, SearchOptions};
 use duckdb::types::Value as SqlValue;
@@ -271,22 +273,18 @@ pub(crate) fn scope_of(case: &Case, subject: &Subject, q: &GridQuery) -> Result<
         parts.push(fragment.sql);
         params.extend(fragment.params);
     }
+    for (pattern, case_sensitive) in &patterns {
+        probe_regex(conn, pattern, *case_sensitive)?;
+    }
     if let Some(text) = &q.search {
         let opts = SearchOptions {
             regex: q.search_regex,
             case_sensitive: q.search_case_sensitive,
         };
-        if let Some(search) = parse_search(text, opts, all)? {
-            if let Search::Regex(pattern) = &search {
-                patterns.push((pattern.clone(), opts.case_sensitive));
-            }
-            let fragment = compile_search(&search, opts, all)?;
+        if let Some(fragment) = search_fragment(conn, text, opts, all)? {
             parts.push(fragment.sql);
             params.extend(fragment.params);
         }
-    }
-    for (pattern, case_sensitive) in &patterns {
-        probe_regex(conn, pattern, *case_sensitive)?;
     }
 
     let where_sql = if parts.is_empty() {
@@ -345,7 +343,31 @@ pub(crate) fn order_sql(scope: &Scope, q: &GridQuery) -> Result<String> {
     Ok(out.join(", "))
 }
 
-fn find_column<'a>(all: &'a [ColumnInfo], relation: &str, name: &str) -> Result<&'a ColumnInfo> {
+/// The search box's text as a boolean expression over `all`, the catalogued
+/// columns of the relation, with the parameters it binds; `None` when there
+/// is nothing to search for. A regex is compiled in DuckDB first, so one RE2
+/// refuses is `Invalid` here. Every column it names is unqualified, so it is
+/// placed where `Scope::from_sql` is the only FROM item, as `where_sql` is.
+pub(crate) fn search_fragment(
+    conn: &Connection,
+    text: &str,
+    opts: SearchOptions,
+    all: &[ColumnInfo],
+) -> Result<Option<SqlFragment>> {
+    let Some(search) = parse_search(text, opts, all)? else {
+        return Ok(None);
+    };
+    if let Search::Regex(pattern) = &search {
+        probe_regex(conn, pattern, opts.case_sensitive)?;
+    }
+    compile_search(&search, opts, all).map(Some)
+}
+
+pub(crate) fn find_column<'a>(
+    all: &'a [ColumnInfo],
+    relation: &str,
+    name: &str,
+) -> Result<&'a ColumnInfo> {
     all.iter()
         .find(|c| c.name == name)
         .ok_or_else(|| EngineError::NotFound(format!("{relation} has no column {name}")))

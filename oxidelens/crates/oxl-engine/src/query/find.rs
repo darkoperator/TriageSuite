@@ -70,7 +70,6 @@ pub struct FindHit {
     pub last: Option<String>,
     /// How the relation's primary time is zoned; `None` without one. An
     /// `unknown` time was compared with `from`/`to` as written.
-    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
     pub time_semantics: Option<TimeSemantics>,
 }
 

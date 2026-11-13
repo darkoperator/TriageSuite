@@ -52,7 +52,6 @@ pub struct Stack {
     pub cells_clipped: bool,
     /// How the relation's primary time, which `first` and `last` show, is
     /// zoned; `None` without one.
-    #[serde(serialize_with = "crate::catalog::serialize_semantics")]
     pub time_semantics: Option<TimeSemantics>,
 }
 

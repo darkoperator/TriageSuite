@@ -28,8 +28,10 @@ use duckdb::{params, params_from_iter, Connection};
 use std::collections::{BTreeMap, BTreeSet};
 use triage_core::output::duckdb::sql::{quote_ident, NameAllocator};
 
-/// Who typed a column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Who typed a column. Serialised as `ox.column_catalog.origin` spells it
+/// (`as_str`), which a test pins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TypeOrigin {
     Suite,
     AppMap,
@@ -69,7 +71,8 @@ impl TypeOrigin {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     Dataset,
     File,
@@ -89,7 +92,8 @@ impl RelationKind {
 /// columns the suite injects into a run's datasets (or the engine adds to a
 /// loose file loaded with a host). Metadata names can carry a collision
 /// suffix (`_triage_host_1`), so the role, not the name, says which is which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ColumnRole {
     Data,
     RunId,
@@ -127,7 +131,7 @@ impl ColumnRole {
 }
 
 /// One logical column of a relation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ColumnInfo {
     pub name: String,
     pub role: ColumnRole,
@@ -142,7 +146,7 @@ pub struct ColumnInfo {
 }
 
 /// One queryable relation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RelationInfo {
     pub name: String,
     pub kind: RelationKind,
@@ -698,7 +702,7 @@ fn decode_column(row: CatalogRow) -> Result<ColumnInfo> {
         .map(|t| SqlType::from_sql(&t).ok_or_else(|| corrupt(format!("SQL type {t:?}"))))
         .transpose()?;
     let time_semantics = semantics
-        .map(|s| parse_semantics(&s).ok_or_else(|| corrupt(format!("time semantics {s:?}"))))
+        .map(|s| TimeSemantics::parse(&s).ok_or_else(|| corrupt(format!("time semantics {s:?}"))))
         .transpose()?;
     Ok(ColumnInfo {
         name,
@@ -709,28 +713,6 @@ fn decode_column(row: CatalogRow) -> Result<ColumnInfo> {
         time_semantics,
         origin: TypeOrigin::parse(&origin)?,
     })
-}
-
-/// Serialise an optional `TimeSemantics` as the catalog spells it (`"utc"`,
-/// `"local"`, `"unknown"`) or null. The suite's type is not `Serialize`.
-pub(crate) fn serialize_semantics<S: serde::Serializer>(
-    value: &Option<TimeSemantics>,
-    s: S,
-) -> std::result::Result<S::Ok, S::Error> {
-    match value {
-        Some(t) => s.serialize_str(t.as_str()),
-        None => s.serialize_none(),
-    }
-}
-
-fn parse_semantics(text: &str) -> Option<TimeSemantics> {
-    [
-        TimeSemantics::Utc,
-        TimeSemantics::Local,
-        TimeSemantics::Unknown,
-    ]
-    .into_iter()
-    .find(|s| s.as_str() == text)
 }
 
 /// A catalog value the engine never writes: the case is damaged, not the
@@ -773,4 +755,53 @@ fn record(
         ],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json<T: serde::Serialize>(value: T) -> String {
+        serde_json::to_value(value)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// The app reads the catalog as JSON, and the spellings it gets are the
+    /// ones the case stores: the derived names must not drift from the
+    /// `as_str` the catalog reads back with `parse`.
+    #[test]
+    fn serialised_spellings_are_the_stored_ones() {
+        for origin in [
+            TypeOrigin::Suite,
+            TypeOrigin::AppMap,
+            TypeOrigin::Sniffed,
+            TypeOrigin::Analyst,
+        ] {
+            assert_eq!(json(origin), origin.as_str());
+            assert_eq!(TypeOrigin::parse(&json(origin)).unwrap(), Some(origin));
+        }
+        for role in ColumnRole::ALL {
+            assert_eq!(json(role), role.as_str());
+            assert_eq!(ColumnRole::parse(&json(role)).unwrap(), role);
+        }
+        for kind in [RelationKind::Dataset, RelationKind::File] {
+            assert_eq!(RelationKind::parse(&json(kind)).unwrap(), kind);
+        }
+    }
+
+    /// A column's type and time semantics reach the app as the catalog
+    /// stores them in `ox.column_catalog.sql_type` and `.time_semantics`,
+    /// which `decode_column` reads back with `from_sql` and `parse`.
+    #[test]
+    fn column_types_serialise_as_the_catalog_stores_them() {
+        for t in SqlType::ALL {
+            assert_eq!(SqlType::from_sql(&json(t)), Some(t));
+        }
+        for s in TimeSemantics::ALL {
+            assert_eq!(TimeSemantics::parse(&json(s)), Some(s));
+        }
+    }
 }

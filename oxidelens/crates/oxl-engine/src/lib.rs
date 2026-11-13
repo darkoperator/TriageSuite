@@ -17,6 +17,7 @@ pub mod load;
 pub mod query;
 pub mod search;
 pub mod time;
+pub mod view;
 
 pub use actor::Actor;
 pub use annot::{
@@ -50,3 +51,8 @@ pub use query::{
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};
+pub use view::{
+    count_view, empty_columns, match_count, matches, values, Chip, ChipOrigin, GridCounts,
+    GridState, MatchPos, SearchMode, SearchState, ValueCount, ValueOrder, MAX_CHIPS, MAX_CHIP_ID,
+    MAX_CHIP_LABEL,
+};

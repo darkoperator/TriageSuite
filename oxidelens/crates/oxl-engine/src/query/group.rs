@@ -1,12 +1,12 @@
 //! Timeline Explorer-style grouping: groups of one column with counts and
 //! time spans, nested by further columns and expanded one level at a time.
 
-use super::page::clip_text;
+use super::page::{clip_text, mark_sql};
 use super::{check_offset, find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
 use crate::case::Case;
 use crate::catalog::{ColumnInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
-use crate::filter::{FilterNode, Leaf, Op};
+use crate::filter::{FilterNode, Leaf, Op, MARK_COLUMN, MARK_NONE};
 use crate::listing::{check_limit, fetch_limit, Listing};
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
@@ -40,7 +40,8 @@ pub struct GroupRow {
 
 /// Up to `limit` groups of `by[parent.len()]` from `offset`, among rows
 /// whose earlier `by` columns equal `parent`. Ordered by count descending,
-/// then key. `Invalid` for an empty `by`, more than four columns, a
+/// then key. A `by` column may be the `_mark` pseudo-column, whose key is
+/// `suspicious` or `None` for an unmarked row. `Invalid` for an empty `by`, more than four columns, a
 /// `parent` as long as `by`, a `limit` of 0 or over `MAX_LIMIT`, or an
 /// `offset` past `i64::MAX`.
 pub fn groups(
@@ -63,18 +64,18 @@ pub fn groups(
     }
     let scope = scope(case, q)?;
     let all = &scope.all;
-    let by_cols: Vec<&ColumnInfo> = by
+    let keys: Vec<String> = by
         .iter()
-        .map(|name| find_column(all, &scope.relation.name, name))
+        .map(|name| group_key_sql(all, &scope.relation.name, name))
         .collect::<Result<_>>()?;
 
     let mut conditions = String::new();
     let mut params = scope.params.clone();
-    for (col, key) in by_cols.iter().zip(parent) {
+    for (key_expr, key) in keys.iter().zip(parent) {
         match key {
-            None => conditions.push_str(&format!(" AND {} IS NULL", key_sql(col))),
+            None => conditions.push_str(&format!(" AND {key_expr} IS NULL")),
             Some(text) => {
-                conditions.push_str(&format!(" AND {} = ?", key_sql(col)));
+                conditions.push_str(&format!(" AND {key_expr} = ?"));
                 params.push(SqlValue::Text(text.clone()));
             }
         }
@@ -85,7 +86,7 @@ pub fn groups(
          count(*) FILTER (WHERE {marked}) \
          FROM {from} WHERE ({where_sql}){conditions} \
          GROUP BY ox_key ORDER BY count(*) DESC, ox_key ASC NULLS LAST LIMIT ? OFFSET ?",
-        key = key_sql(by_cols[parent.len()]),
+        key = keys[parent.len()],
         marked = marked_sql(),
         from = scope.from_sql,
         where_sql = scope.where_sql,
@@ -115,10 +116,18 @@ pub fn groups(
 /// The filter that selects one group's rows: q's filter AND each `by[i] =
 /// key[i]` (IsEmpty for a None key). Pairs beyond the shorter list are
 /// ignored. The keys are whole keys (`GroupRow::full_key`); a key cut to
-/// the cell cap matches no row.
+/// the cell cap matches no row. On `_mark` a key is the mark (`eq
+/// "suspicious"`) and `None` is no mark (`eq "none"`), as its filter
+/// spells them.
 pub fn group_filter(q: &GridQuery, by: &[String], key: &[Option<String>]) -> GridQuery {
     let leaves = by.iter().zip(key).map(|(column, key)| {
         FilterNode::Leaf(match key {
+            _ if column == MARK_COLUMN => Leaf {
+                column: column.clone(),
+                op: Op::Eq,
+                value: Value::String(key.clone().unwrap_or_else(|| MARK_NONE.to_string())),
+                case_sensitive: true,
+            },
             Some(text) => Leaf {
                 column: column.clone(),
                 op: Op::Eq,
@@ -145,6 +154,17 @@ pub fn group_filter(q: &GridQuery, by: &[String], key: &[Option<String>]) -> Gri
     let mut out = q.clone();
     out.filter = Some(FilterNode::And(all));
     out
+}
+
+/// The group key of `name` among `all`, the relation's catalogued columns:
+/// `key_sql` of the column, or for the `_mark` pseudo-column the row's mark
+/// as `ox.row_mark` spells it, NULL for none. `NotFound` for a column the
+/// relation lacks.
+pub(crate) fn group_key_sql(all: &[ColumnInfo], relation: &str, name: &str) -> Result<String> {
+    if name == MARK_COLUMN {
+        return Ok(mark_sql());
+    }
+    Ok(key_sql(find_column(all, relation, name)?))
 }
 
 /// A cell's group key: its text, with an empty cell read as NULL.
@@ -197,6 +217,6 @@ pub(super) fn primary_time_semantics(
         .and_then(|c| c.time_semantics)
 }
 
-pub(super) fn as_count(n: i64) -> u64 {
+pub(crate) fn as_count(n: i64) -> u64 {
     u64::try_from(n).unwrap_or_default()
 }
