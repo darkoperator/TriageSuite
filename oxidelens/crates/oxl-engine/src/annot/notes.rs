@@ -7,6 +7,7 @@ use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
+use crate::query::check_offset;
 use crate::time::now_iso;
 use duckdb::{params, Connection};
 
@@ -143,9 +144,10 @@ fn change(
 
 /// Up to `limit` of the notes on row `row_id` that are not deleted, from
 /// `offset`, oldest first; none for an unknown row. `Invalid` when `limit`
-/// is 0 or over `MAX_LIMIT`.
+/// is 0 or over `MAX_LIMIT`, or `offset` past `i64::MAX`.
 pub fn notes(case: &Case, row_id: i64, limit: u32, offset: u64) -> Result<Listing<Note>> {
     check_limit(limit)?;
+    check_offset(offset)?;
     let fetched = case
         .conn()
         .prepare(&format!("{NOTES_ON} LIMIT ? OFFSET ?"))?

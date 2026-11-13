@@ -418,3 +418,154 @@ fn hostile_headers_page_and_filter() {
     };
     assert_eq!(count(&case, &q).unwrap(), 1);
 }
+
+/// Found by the step 1 check: a small CRLF file failed to load with an
+/// `engine` error. The bytes `a,b\r\n1,2\r\n...` load; what failed was the
+/// same text written another way (UTF-16, as Windows PowerShell 5.1's `>`
+/// writes it, or with each CR doubled, as a text-mode write of `\r\n` on
+/// Windows gives), which DuckDB cannot sniff. That is the file's fault, not
+/// the engine's: `invalid`, naming the file, and nothing left behind.
+#[test]
+fn small_crlf_csv_loads_or_is_invalid() {
+    let (d, mut case) = fresh();
+    for (name, bytes) in [
+        (
+            "utf16.csv",
+            b"\xff\xfea\x00,\x00b\x00\r\x00\n\x001\x00,\x002\x00\r\x00\n\x00".to_vec(),
+        ),
+        ("crcr.csv", b"a,b\r\r\n1,2\r\r\n3,4\r\r\n".to_vec()),
+    ] {
+        let p = d.path().join(name);
+        std::fs::write(&p, bytes).unwrap();
+        let (c, m) = code(load_file(&mut case, &p, FileOptions::default(), &analyst()));
+        assert_eq!(c, "invalid", "{name}: {m}");
+        assert!(m.contains(name), "{name}: {m}");
+        assert_eq!(n(&case, "select count(*) from ox.source"), 0);
+    }
+
+    let p = d.path().join("crlf.csv");
+    std::fs::write(&p, b"a,b\r\n1,2\r\n3,4\r\n5,6\r\n").unwrap();
+    let r = load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    assert_eq!(r.relations[0].rows, 3);
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from crlf_csv where b in ('2', '4', '6')"
+        ),
+        3
+    );
+    // No carriage return is left on the last column's text.
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from crlf_csv where contains(b, chr(13))"
+        ),
+        0
+    );
+}
+
+/// 2^70 does not fit a BIGINT: a companion would hold NULL for it, and the
+/// cell would read as failed though its text is a good number.
+#[test]
+fn huge_integers_stay_text() {
+    let (d, mut case) = fresh();
+    let p = d.path().join("huge.csv");
+    std::fs::write(
+        &p,
+        "h,u\n1180591620717411303424,1\n-1180591620717411303424,2\n",
+    )
+    .unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    let cols = columns(&case, "huge_csv").unwrap();
+    let h = cols.iter().find(|c| c.name == "h").unwrap();
+    assert_eq!((h.typed_column.as_deref(), h.sql_type), (None, None));
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from huge_csv where h = '1180591620717411303424'"
+        ),
+        1
+    );
+}
+
+/// A copy of the two-host run built under `from`, copied to `to`, its run
+/// id `run_id` and its Hayabusa dataset's view renamed `view`.
+fn run_with_view(from: &Path, to: &Path, run_id: &str, view: &str) -> std::path::PathBuf {
+    let original = oxl_fixtures::two_hosts(from);
+    common::copy_tree(&original, to);
+    let path = to.join("duckdb").join("datasets.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    json["run_id"] = run_id.into();
+    json["generation"] = format!("{run_id}-g1").into();
+    let hayabusa = json["datasets"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|ds| ds["view"] == "ext_hayabusa_csv_timeline")
+        .unwrap();
+    hayabusa["view"] = view.into();
+    hayabusa["raw_view"] = format!("raw_{view}").into();
+    std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    to.to_path_buf()
+}
+
+/// Both loaders fold a relation name's case the same way, `str::to_lowercase`,
+/// so whichever loads second, two names that differ only in case collide.
+/// A run's view can be any text; a file's relation name is made of
+/// `[a-z0-9_]`, so a file meets a non-ASCII name only through a character
+/// whose lower case is ASCII, such as the Kelvin sign (U+212A), lower case `k`.
+#[test]
+fn collision_fold_is_the_same_in_both_loaders() {
+    // Run after run: É and é.
+    let (d, mut case) = fresh();
+    let first = run_with_view(
+        &d.path().join("a"),
+        &d.path().join("a2"),
+        "20260104000000-dddd",
+        "Événement",
+    );
+    oxl_engine::load_run(&mut case, &first, &analyst()).unwrap();
+    let second = run_with_view(
+        &d.path().join("b"),
+        &d.path().join("b2"),
+        "20260105000000-eeee",
+        "événement",
+    );
+    let (c, m) = code(oxl_engine::load_run(&mut case, &second, &analyst()));
+    assert_eq!(c, "refused", "{m}");
+
+    // A file after a run, under the name asked for: refused, as the run
+    // after the file would be.
+    let (d, mut case) = fresh();
+    let kelvin = run_with_view(
+        &d.path().join("a"),
+        &d.path().join("a2"),
+        "20260104000000-dddd",
+        "\u{212A}fw",
+    );
+    oxl_engine::load_run(&mut case, &kelvin, &analyst()).unwrap();
+    let fw = loose_fw_csv(d.path());
+    let asked = FileOptions {
+        name: Some("kfw".into()),
+        ..Default::default()
+    };
+    let (c, m) = code(load_file(&mut case, &fw, asked, &analyst()));
+    assert_eq!(c, "refused", "{m}");
+
+    // Under the name derived from the file's: the next free one.
+    let derived = run_with_view(
+        &d.path().join("b"),
+        &d.path().join("b2"),
+        "20260105000000-eeee",
+        "\u{212A}fw_csv",
+    );
+    let other = d.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let mut case = oxl_fixtures::new_case(&other);
+    oxl_engine::load_run(&mut case, &derived, &analyst()).unwrap();
+    let p = other.join("kfw.csv");
+    std::fs::copy(&fw, &p).unwrap();
+    let r = load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    assert_eq!(r.relations[0].name, "kfw_csv_2");
+}

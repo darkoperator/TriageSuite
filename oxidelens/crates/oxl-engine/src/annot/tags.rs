@@ -5,13 +5,14 @@
 
 use super::history::{record_all, Change};
 use super::{
-    check_batch, id_list, locate_rows, no_row, per_id_chunk, unwritable, write_rows, LocatedRow,
-    RowOutcome, IDS_PER_STATEMENT,
+    check_batch, id_list, locate_rows, no_row, per_id_chunk, unwritable, who_may_undo, write_rows,
+    LocatedRow, RowOutcome, IDS_PER_STATEMENT,
 };
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
+use crate::query::check_offset;
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection};
@@ -51,9 +52,16 @@ fn normalise(text: &str) -> Result<String> {
 /// namespace is `Refused`, since the same tag is fine from the other actor.
 /// An unknown or inactive row is not done; a row already carrying the tag
 /// is done, unchanged. Whole-call problems as `mark_suspicious`'s, and
-/// `Invalid` for a malformed tag.
+/// `Invalid` for a malformed tag, `ai:` alone among them: the prefix says
+/// whose a tag is, not what it says.
 pub fn add_tag(case: &mut Case, rows: &[i64], tag: &str, actor: &Actor) -> Result<Vec<RowOutcome>> {
     let tag = normalise(tag)?;
+    if tag == AGENT_TAG_PREFIX {
+        return Err(EngineError::Invalid(format!(
+            "{AGENT_TAG_PREFIX:?} alone is not a tag: an agent's tag is {AGENT_TAG_PREFIX} \
+             followed by at least one character"
+        )));
+    }
     let prefixed = tag.starts_with(AGENT_TAG_PREFIX);
     if actor.is_agent() && !prefixed {
         return Err(EngineError::Refused(format!(
@@ -65,7 +73,7 @@ pub fn add_tag(case: &mut Case, rows: &[i64], tag: &str, actor: &Actor) -> Resul
             "a tag starting {AGENT_TAG_PREFIX} is an agent's; an analyst's tag may not"
         )));
     }
-    check_batch(rows, actor)?;
+    let rows = &check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
     let mut batch = TagBatch::new(&tx, rows, &tag, actor, &at)?;
@@ -78,7 +86,8 @@ pub fn add_tag(case: &mut Case, rows: &[i64], tag: &str, actor: &Actor) -> Resul
 /// Remove `tag` from each of `rows`. An agent removes only a tag it
 /// applied; a row without the tag is not done. A row out of the view may
 /// still lose a tag it carries. Whole-call problems as `add_tag`'s, but the
-/// prefix rules do not apply: the per-row owner check decides.
+/// prefix rules do not apply: the per-row owner check decides (so a bare
+/// `ai:` an earlier build let an agent add can still be removed).
 pub fn remove_tag(
     case: &mut Case,
     rows: &[i64],
@@ -86,7 +95,7 @@ pub fn remove_tag(
     actor: &Actor,
 ) -> Result<Vec<RowOutcome>> {
     let tag = normalise(tag)?;
-    check_batch(rows, actor)?;
+    let rows = &check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
     let mut batch = TagBatch::new(&tx, rows, &tag, actor, &at)?;
@@ -96,10 +105,9 @@ pub fn remove_tag(
     Ok(out)
 }
 
-/// One call's change to one tag over its rows. It reads what it needs about
-/// them up front, decides each row in order against what it has decided so
-/// far (so a row named twice sees the first change), and writes every
-/// change at the end a few statements at a time.
+/// One call's change to one tag over its rows, each named once. It reads
+/// what it needs about them up front, decides each row in order, and writes
+/// every change at the end a few statements at a time.
 struct TagBatch<'a> {
     conn: &'a Connection,
     tag: &'a str,
@@ -166,7 +174,10 @@ impl<'a> TagBatch<'a> {
         if self.actor.is_agent() && by != self.actor.label() {
             return RowOutcome::refused(
                 row,
-                format!("tagged {tag} by {by}; only an analyst can remove it"),
+                format!(
+                    "tagged {tag} by {by}; only {} can remove it",
+                    who_may_undo(&by)
+                ),
             );
         }
         let before = tag_json(row, tag, &by, &tagged_at);
@@ -272,9 +283,10 @@ fn change(
 /// the rows carrying each (rows out of the view included). A tag is defined
 /// while a row carries it: removing it from its last row drops it, and a
 /// definition an earlier build left without rows is not listed. `Invalid`
-/// when `limit` is 0 or over `MAX_LIMIT`.
+/// when `limit` is 0 or over `MAX_LIMIT`, or `offset` past `i64::MAX`.
 pub fn tags(case: &Case, limit: u32, offset: u64) -> Result<Listing<TagInfo>> {
     check_limit(limit)?;
+    check_offset(offset)?;
     let fetched = case
         .conn()
         .prepare(

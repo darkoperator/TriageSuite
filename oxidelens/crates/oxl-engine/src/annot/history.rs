@@ -6,6 +6,7 @@ use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
+use crate::query::check_offset;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
 
@@ -87,8 +88,8 @@ pub(super) fn record_all(
 }
 
 /// Up to `limit` history rows from `offset`, newest first, of one target
-/// kind or of all. `Invalid` for an unknown target kind or a `limit` of 0
-/// or over `MAX_LIMIT`.
+/// kind or of all. `Invalid` for an unknown target kind, a `limit` of 0 or
+/// over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
 pub fn history(
     case: &Case,
     target_kind: Option<&str>,
@@ -96,6 +97,7 @@ pub fn history(
     offset: u64,
 ) -> Result<Listing<HistoryRow>> {
     check_limit(limit)?;
+    check_offset(offset)?;
     let mut params = Vec::new();
     let filter = match target_kind {
         None => "",
@@ -136,8 +138,9 @@ pub fn history(
 
 fn json(id: i64, text: Option<String>) -> Result<Option<serde_json::Value>> {
     text.map(|text| {
+        // The engine writes every history row's JSON itself.
         serde_json::from_str(&text).map_err(|e| {
-            EngineError::Invalid(format!(
+            EngineError::Internal(format!(
                 "history row {id} holds JSON that does not parse: {e}"
             ))
         })

@@ -76,6 +76,13 @@ fn a_page_over_the_maximum_is_invalid() {
         query_sql(&path, "select 1", MAX_LIMIT, 0).unwrap().rows,
         vec![vec![s("1")]]
     );
+    // An offset past what DuckDB's OFFSET holds is the caller's input too.
+    let e = query_sql(&path, "select 1", 10, u64::MAX).unwrap_err();
+    assert_eq!(e.code(), "invalid", "{e}");
+    assert!(query_sql(&path, "select 1", 10, i64::MAX as u64)
+        .unwrap()
+        .rows
+        .is_empty());
 }
 
 /// Found on the first real run: a typo in a column name came back as

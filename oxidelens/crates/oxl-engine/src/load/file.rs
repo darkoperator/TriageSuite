@@ -13,7 +13,7 @@
 
 use super::run::{canonical_path, discard, read_path};
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
-use super::{LoadReport, LoadThreads, LoadedRelation};
+use super::{fold_name, LoadReport, LoadThreads, LoadedRelation};
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::catalog::{catalog_file, ColumnRole, FileColumn, SqlType, TimeSemantics};
@@ -38,7 +38,8 @@ pub struct FileOptions {
 /// The relation name for a file called `file_name`: lower case, every
 /// character outside `[a-z0-9_]` an underscore, a leading digit prefixed
 /// with `_`, `file` when nothing is left, and `_2`, `_3`... until it is not
-/// in `taken` (compared without regard to case).
+/// in `taken` (compared without regard to case, as the run loader compares
+/// relation names: `fold_name`).
 pub fn relation_name_for_file(file_name: &str, taken: &[String]) -> String {
     let mut base = sanitise(file_name);
     if base.is_empty() {
@@ -47,7 +48,7 @@ pub fn relation_name_for_file(file_name: &str, taken: &[String]) -> String {
     if base.starts_with(|c: char| c.is_ascii_digit()) {
         base.insert(0, '_');
     }
-    let is_taken = |name: &str| taken.iter().any(|t| t.eq_ignore_ascii_case(name));
+    let is_taken = |name: &str| taken.iter().any(|t| fold_name(t) == fold_name(name));
     let mut candidate = base.clone();
     let mut n = 2u64;
     while is_taken(&candidate) {
@@ -70,8 +71,9 @@ fn sanitise(text: &str) -> String {
 /// Load the CSV or TSV file at `path` into `case`.
 ///
 /// Refused when the file's canonical path is already a live source;
-/// `Invalid` for any extension but `.csv` and `.tsv`. Any failure leaves the
-/// case exactly as it was.
+/// `Invalid` for any extension but `.csv` and `.tsv`, or a file DuckDB's
+/// reader refuses (`unreadable`). Any failure leaves the case exactly as it
+/// was.
 pub fn load_file(
     case: &mut Case,
     path: &Path,
@@ -154,14 +156,51 @@ fn describe(
         .collect::<std::result::Result<_, _>>()?)
 }
 
+/// A failure reading the file at `path` (its canonical text), as the error
+/// it is. DuckDB's reader refusing the file, `Invalid Input` in its words
+/// (a dialect it cannot sniff, text that is not UTF-8, a row it cannot
+/// parse), is the file's fault: `Invalid`, naming the file, with DuckDB's
+/// reason and without its list of options to try, which are not this
+/// loader's. Found by the step 1 check: a small CRLF file saved as UTF-16
+/// (as Windows PowerShell 5.1's `>` writes text) or with every CR doubled
+/// was reported as an engine failure. Any other error is unchanged.
+fn unreadable(path: &str, e: EngineError) -> EngineError {
+    let EngineError::Db(db) = e else {
+        return e;
+    };
+    let message = db.to_string();
+    if !message.starts_with("Invalid Input Error: ") {
+        return EngineError::Db(db);
+    }
+    let reason = [
+        "\nThe search space used was",
+        "\nPossible fixes",
+        "\n\nLINE ",
+    ]
+    .iter()
+    .filter_map(|marker| message.find(marker))
+    .min()
+    .map_or(message.as_str(), |end| &message[..end])
+    .trim_end();
+    EngineError::Invalid(format!(
+        "{path} cannot be read as CSV: {reason}. A file loads when it is UTF-8 text \
+         with a header row and lines ending in LF or CRLF"
+    ))
+}
+
 /// The engine's type for a type DuckDB detected, or `None` to stay text.
+/// `HUGEINT` and `UHUGEINT` stay text: their values can pass what a
+/// `BIGINT` or `UBIGINT` companion holds, and such a cell would read NULL
+/// and be flagged failed though its text is a good number. (The pinned
+/// DuckDB's sniffer never offers them; a later one might.)
 fn sniffed_type(detected: &str) -> Option<SqlType> {
     match detected {
         t if t.starts_with("TIMESTAMP") => Some(SqlType::Timestamp),
         "BOOLEAN" => Some(SqlType::Boolean),
-        "UBIGINT" | "UHUGEINT" => Some(SqlType::UBigInt),
-        "BIGINT" | "INTEGER" | "SMALLINT" | "TINYINT" | "UINTEGER" | "USMALLINT" | "UTINYINT"
-        | "HUGEINT" => Some(SqlType::BigInt),
+        "UBIGINT" => Some(SqlType::UBigInt),
+        "BIGINT" | "INTEGER" | "SMALLINT" | "TINYINT" | "UINTEGER" | "USMALLINT" | "UTINYINT" => {
+            Some(SqlType::BigInt)
+        }
         _ => None,
     }
 }
@@ -194,8 +233,9 @@ fn load_in(
     // Names as DuckDB reports them (it already makes empty and repeated ones
     // distinct), then as the case will hold them.
     let read = read_path(&path);
-    let reported = describe(conn, &read, delim, ", all_varchar = true")?;
-    let detected = describe(conn, &read, delim, "")?;
+    let reported =
+        describe(conn, &read, delim, ", all_varchar = true").map_err(|e| unreadable(&path, e))?;
+    let detected = describe(conn, &read, delim, "").map_err(|e| unreadable(&path, e))?;
     if reported.len() != detected.len() {
         return Err(EngineError::Invalid(format!(
             "{path}: the header and the detected columns disagree"
@@ -264,7 +304,9 @@ fn load_in(
             name,
         })
         .collect();
-    let (rows, first, last) = materialize(conn, id, &relation, &staged, &hash_columns)?;
+    // A row past what the sniffer read can still be one the reader refuses.
+    let (rows, first, last) = materialize(conn, id, &relation, &staged, &hash_columns)
+        .map_err(|e| unreadable(&path, e))?;
     let (first, last) = if rows == 0 {
         (None, None)
     } else {
@@ -393,12 +435,12 @@ fn choose_relation(conn: &Connection, file_name: &str, requested: Option<&str>) 
     let clashes = |name: &str| {
         existing
             .iter()
-            .any(|n| n.eq_ignore_ascii_case(&format!("raw_{name}")))
+            .any(|n| fold_name(n) == fold_name(&format!("raw_{name}")))
     };
     if let Some(requested) = requested {
         let name = relation_name_for_file(requested, &[]);
         if matches!(name.as_str(), "ox" | "main")
-            || taken.iter().any(|t| t.eq_ignore_ascii_case(&name))
+            || taken.iter().any(|t| fold_name(t) == fold_name(&name))
             || clashes(&name)
         {
             return Err(EngineError::Refused(format!(

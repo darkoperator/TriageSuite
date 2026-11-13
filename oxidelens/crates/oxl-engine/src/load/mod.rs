@@ -58,6 +58,13 @@ impl LoadThreads {
     }
 }
 
+/// `name` as both loaders compare relation names when they look for a
+/// collision: lower-cased with `str::to_lowercase`, so names that differ
+/// only in case, ASCII or not, are the same name to either loader.
+pub(super) fn fold_name(name: &str) -> String {
+    name.to_lowercase()
+}
+
 /// One relation a load fed, and how much.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedRelation {

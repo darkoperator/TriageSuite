@@ -73,8 +73,24 @@
 //!    `enable_external_access = false` (no file, network or environment
 //!    access) and `lock_configuration = true` (no `SET` can undo it). The
 //!    lockdown is probed before anything runs; if a probe succeeds or a
-//!    setting did not take, nothing does.
-//! 4. **Never a writer.** The case is only ever attached read-only.
+//!    setting did not take, nothing does (`internal`).
+//! 4. **Never a writer.** The case is only ever attached read-only, and a
+//!    probe that tries to create a table in it must fail.
+//!
+//! Three limits of the above:
+//!
+//! - `SQL_MEMORY_LIMIT` is per DuckDB instance, and each call opens its own
+//!   instance, so calls running at once can together hold more than it.
+//!   Some allocations DuckDB does not track at all (one huge string from
+//!   `repeat`, for one).
+//! - The parse gate (layers 1 and 2) checks the caller's text only. A view
+//!   stored in the case runs as it is stored, with only the instance's
+//!   lockdown (layer 3) behind it. The engine writes every view a case it
+//!   made holds, so this is a trust boundary: the case files are the
+//!   analyst's own. A case file from elsewhere is as trusted as its author.
+//! - A timestamp at the top level of a result is rendered as R1 UTC text; one
+//!   nested inside a STRUCT, LIST or MAP is rendered as DuckDB casts it to
+//!   text.
 //!
 //! What a query reaches, then: the case's tables and views by name (in
 //! `main`, `ox` and `src_<n>`), scalar functions, the allowed table
@@ -104,7 +120,7 @@
 //! caller must not hold the case open read-write meanwhile.
 
 use super::page::clip_text;
-use super::ISO_FORMAT;
+use super::{check_offset, ISO_FORMAT};
 use crate::case::{check_format, is_lock_conflict};
 use crate::error::{EngineError, Result};
 use crate::listing::check_limit;
@@ -279,6 +295,7 @@ pub fn query_sql_within(
     time_limit: Duration,
 ) -> Result<SqlResult> {
     check_limit(limit)?;
+    check_offset(offset)?;
     if !(SQL_TIME_LIMIT_MIN..=SQL_TIME_LIMIT_MAX).contains(&time_limit) {
         return Err(EngineError::Invalid(format!(
             "a query's time limit is {} to {}, not {}",
@@ -482,7 +499,7 @@ fn the_select(sql: &str) -> Result<String> {
             r.get(0)
         })?;
     let v: Value = serde_json::from_str(&parsed).map_err(|e| {
-        EngineError::Invalid(format!("the query parser returned invalid JSON: {e}"))
+        EngineError::Internal(format!("the query parser returned invalid JSON: {e}"))
     })?;
     if v["error"] != Value::Bool(false) {
         return Err(EngineError::Invalid(format!(
@@ -672,13 +689,20 @@ fn locked(case_path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-/// Prove the lockdown holds on `conn`: each attempt to undo it or to reach
-/// outside the process must fail, else `Invalid`. `existing` names a file
-/// that exists and is not attached, so that reading it fails only because
-/// access is off.
+/// Prove the lockdown holds on `conn`: each attempt to undo it, to reach
+/// outside the process or to write to the case must fail, else `Internal`
+/// (no query the caller writes fixes a lockdown that did not take).
+/// `existing` names a file that exists and is not attached, so that reading
+/// it fails only because access is off.
+///
+/// The ATTACH probe names a file in a directory made for this call alone,
+/// so the path is not one another process can predict and prepare, and
+/// whatever a successful attach left there goes with the directory. The
+/// write probe creates a table in the case as it is attached (`ox_case`);
+/// it fails only because the attach is read-only.
 fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
-    let probe_file =
-        std::env::temp_dir().join(format!("oxidelens-sql-probe-{}.duckdb", std::process::id()));
+    let probe_dir = tempfile::TempDir::new()?;
+    let probe_file = probe_dir.path().join("probe.duckdb");
     let probe_path = probe_file.to_string_lossy();
     let probes = [
         "SET enable_external_access = true".to_string(),
@@ -687,12 +711,15 @@ fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
         format!("SELECT * FROM read_blob({})", quote_literal(existing)),
         format!("SELECT * FROM glob({})", quote_literal(existing)),
         format!("ATTACH {} AS ox_probe", quote_literal(&probe_path)),
+        format!("CREATE TABLE {CASE_ALIAS}.main.ox_probe_write (x INTEGER)"),
     ];
     for probe in &probes {
         if conn.execute_batch(probe).is_ok() {
             let _ = conn.execute_batch("DETACH ox_probe");
-            let _ = std::fs::remove_file(&probe_file);
-            return Err(EngineError::Invalid(format!(
+            let _ = conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS {CASE_ALIAS}.main.ox_probe_write"
+            ));
+            return Err(EngineError::Internal(format!(
                 "the query connection is not locked down ({probe} succeeded)"
             )));
         }
@@ -707,7 +734,7 @@ fn probe_lockdown(conn: &Connection, existing: &str) -> Result<()> {
                     other => Err(other),
                 })?;
         if value.as_deref() != Some(expected) {
-            return Err(EngineError::Invalid(format!(
+            return Err(EngineError::Internal(format!(
                 "the query connection is not locked down ({name} is {value:?}, not {expected:?})"
             )));
         }
@@ -1058,7 +1085,40 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         let exe = std::env::current_exe().unwrap();
         let e = probe_lockdown(&conn, exe.to_str().unwrap()).unwrap_err();
-        assert_eq!(e.code(), "invalid", "{e}");
+        // Not the caller's mistake: no change to the query fixes it.
+        assert_eq!(e.code(), "internal", "{e}");
+    }
+
+    /// The case must be attached read-only: a write to it is probed, and
+    /// must fail, though every setting is as it should be.
+    #[test]
+    fn the_probe_catches_a_case_attached_for_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("w.duckdb");
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(NO_SPILL).unwrap();
+        conn.execute_batch(&format!(
+            "ATTACH {} AS {CASE_ALIAS}; USE {CASE_ALIAS};",
+            quote_literal(file.to_str().unwrap())
+        ))
+        .unwrap();
+        conn.execute_batch(LOCK).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let e = probe_lockdown(&conn, exe.to_str().unwrap()).unwrap_err();
+        assert_eq!(e.code(), "internal", "{e}");
+        assert!(e.to_string().contains("CREATE TABLE"), "{e}");
+        drop(conn);
+
+        // Attached read-only, as `locked` attaches the case, it passes.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(NO_SPILL).unwrap();
+        conn.execute_batch(&format!(
+            "ATTACH {} AS {CASE_ALIAS} (READ_ONLY); USE {CASE_ALIAS};",
+            quote_literal(file.to_str().unwrap())
+        ))
+        .unwrap();
+        conn.execute_batch(LOCK).unwrap();
+        probe_lockdown(&conn, exe.to_str().unwrap()).unwrap();
     }
 
     #[test]

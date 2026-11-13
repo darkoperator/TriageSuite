@@ -4,9 +4,9 @@
 
 use super::group::{as_count, first_last_sql, key_sql, primary_time_semantics, MAX_BY};
 use super::page::clip_text;
-use super::{find_column, marked_sql, scope, GridQuery, ROW_ALIAS};
+use super::{check_offset, find_column, marked_sql, scope, GridQuery, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, ColumnInfo, TimeSemantics};
+use crate::catalog::{ColumnInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::listing::check_limit;
 use duckdb::params_from_iter;
@@ -26,7 +26,8 @@ pub struct StackRow {
     /// an empty cell.
     pub values: Vec<Option<String>>,
     pub count: u64,
-    /// Distinct hosts the combination appears on; 0 without a host column.
+    /// Distinct hosts the combination appears on, an empty host cell not
+    /// counted; 0 without a host column.
     pub hosts: u64,
     pub first: Option<String>,
     pub last: Option<String>,
@@ -36,7 +37,8 @@ pub struct StackRow {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Stack {
     pub by: Vec<String>,
-    /// Distinct hosts among the filtered rows; 0 without a host column.
+    /// Distinct hosts among the filtered rows, counted as `hosts` is; 0
+    /// without a host column.
     pub hosts_total: u64,
     /// Distinct value combinations in the whole stack, not the page.
     pub distinct: u64,
@@ -56,8 +58,9 @@ pub struct Stack {
 
 /// Up to `limit` combinations from `offset` of `by` (1 to 4 columns) over
 /// the rows `q` selects, ordered by count (ties by the values ascending,
-/// empty last). `Invalid` for a bad column count or a `limit` of 0 or over
-/// `MAX_LIMIT`; `NotFound` for a column the relation lacks.
+/// empty last). `Invalid` for a bad column count, a `limit` of 0 or over
+/// `MAX_LIMIT`, or an `offset` past `i64::MAX`; `NotFound` for a column the
+/// relation lacks.
 pub fn stack(
     case: &Case,
     q: &GridQuery,
@@ -67,6 +70,7 @@ pub fn stack(
     offset: u64,
 ) -> Result<Stack> {
     check_limit(limit)?;
+    check_offset(offset)?;
     if by.is_empty() || by.len() > MAX_BY {
         return Err(EngineError::Invalid(format!(
             "stack needs 1 to {MAX_BY} columns (got {})",
@@ -74,19 +78,23 @@ pub fn stack(
         )));
     }
     let scope = scope(case, q)?;
-    let all = catalog::columns(case, &q.relation)?;
+    let all = &scope.all;
     let by_cols: Vec<&ColumnInfo> = by
         .iter()
-        .map(|name| find_column(&all, &scope.relation.name, name))
+        .map(|name| find_column(all, &scope.relation.name, name))
         .collect::<Result<_>>()?;
 
     let keys: Vec<String> = by_cols.iter().map(|c| key_sql(c)).collect();
     let key_list = keys.join(", ");
+    // An empty host cell is no host, as an empty key cell is no value.
     let host = match &scope.relation.host_column {
-        Some(h) => format!("count(DISTINCT {ROW_ALIAS}.{})", quote_ident(h)),
+        Some(h) => format!(
+            "count(DISTINCT NULLIF(CAST({ROW_ALIAS}.{} AS VARCHAR), ''))",
+            quote_ident(h)
+        ),
         None => "CAST(0 AS BIGINT)".to_string(),
     };
-    let (first, last) = first_last_sql(&scope.relation.primary_time, &all);
+    let (first, last) = first_last_sql(&scope.relation.primary_time, all);
     let from = &scope.from_sql;
     let where_sql = &scope.where_sql;
     let conn = case.conn();
@@ -157,6 +165,6 @@ pub fn stack(
         truncated: shown < distinct,
         rows: out,
         cells_clipped,
-        time_semantics: primary_time_semantics(&scope.relation.primary_time, &all),
+        time_semantics: primary_time_semantics(&scope.relation.primary_time, all),
     })
 }

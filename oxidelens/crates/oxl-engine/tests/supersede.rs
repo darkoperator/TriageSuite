@@ -20,7 +20,8 @@ fn code<T>(result: oxl_engine::Result<T>) -> (&'static str, String) {
 }
 
 /// A copy of the run at `original` under `copy`, its run id set to `run_id`
-/// and `edit` applied to its parsed datasets.json.
+/// (and its generation to one of that run, as the suite derives it) and
+/// `edit` applied to its parsed datasets.json.
 fn copy_run(
     original: &Path,
     copy: &Path,
@@ -32,6 +33,7 @@ fn copy_run(
     let mut json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     json["run_id"] = run_id.into();
+    json["generation"] = format!("{run_id}-g1").into();
     edit(&mut json);
     std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
     copy.to_path_buf()
@@ -1239,4 +1241,316 @@ fn companions_reach_a_second_source() {
         ),
         1
     );
+}
+
+/// DuckDB resolves `eventid` and `EventId` to one column, so a run that
+/// spells a column in another case is the same column, and its typing must
+/// agree (ruling R10) just as if it were spelled alike.
+#[test]
+fn typing_check_ignores_name_case() {
+    let (d, mut case) = setup();
+    let original = oxl_fixtures::two_hosts(&d.path().join("a"));
+    load_run(&mut case, &original, &analyst()).unwrap();
+    let respelt = copy_run(
+        &original,
+        &d.path().join("b"),
+        "20260104000000-dddd",
+        |json| {
+            let datasets = json["datasets"].as_array_mut().unwrap();
+            let evtx = datasets
+                .iter_mut()
+                .find(|ds| ds["view"] == "evtxtriage_events")
+                .unwrap();
+            let respell = |list: &mut serde_json::Value| {
+                for name in list.as_array_mut().unwrap() {
+                    if name == "EventId" {
+                        *name = "eventid".into();
+                    }
+                }
+            };
+            respell(&mut evtx["columns"]);
+            for file in evtx["files"].as_array_mut().unwrap() {
+                respell(&mut file["header"]);
+            }
+            // Left as text by this run.
+            evtx["effective_types"]
+                .as_object_mut()
+                .unwrap()
+                .remove("EventId")
+                .unwrap();
+        },
+    );
+    for host in ["WS01", "SRV01"] {
+        let csv = respelt
+            .join(format!("Processed-{host}-20260101000000"))
+            .join("EventLogs")
+            .join("evtx.csv");
+        let text = std::fs::read_to_string(&csv)
+            .unwrap()
+            .replacen(",EventId,", ",eventid,", 1);
+        std::fs::write(&csv, text).unwrap();
+    }
+    let (c, message) = code(load_run(&mut case, &respelt, &analyst()));
+    assert_eq!(c, "invalid", "{message}");
+    assert!(
+        message.contains("evtxtriage_events") && message.contains("EventId"),
+        "{message}"
+    );
+    assert_eq!(sources(&case).unwrap().len(), 1);
+    assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 11);
+}
+
+/// A later run that spells a column in another case but agrees on its
+/// typing loads into the same column, and its rows are the same rows: they
+/// hash under the catalog's spelling, so annotations follow them.
+#[test]
+fn a_respelt_column_still_matches_rows() {
+    let (d, mut case) = setup();
+    let original = oxl_fixtures::two_hosts(&d.path().join("a"));
+    load_run(&mut case, &original, &analyst()).unwrap();
+    let row = n(&case, SVCH0ST_WS01);
+    assert!(mark_suspicious(&mut case, &[row], &analyst()).unwrap()[0].done);
+    assert!(add_tag(&mut case, &[row], "seen", &analyst()).unwrap()[0].done);
+    add_note(&mut case, row, "looked at", &analyst()).unwrap();
+
+    let respelt = copy_run(
+        &original,
+        &d.path().join("b"),
+        "20260104000000-dddd",
+        |json| {
+            let pf = json["datasets"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|ds| ds["view"] == "petriage_timeline")
+                .unwrap();
+            let respell = |list: &mut serde_json::Value| {
+                for name in list.as_array_mut().unwrap() {
+                    if name == "ExecutableName" {
+                        *name = "executablename".into();
+                    }
+                }
+            };
+            respell(&mut pf["columns"]);
+            for file in pf["files"].as_array_mut().unwrap() {
+                respell(&mut file["header"]);
+            }
+        },
+    );
+    for host in ["WS01", "SRV01"] {
+        let csv = respelt
+            .join(format!("Processed-{host}-20260101000000"))
+            .join("Execution")
+            .join("pf.csv");
+        let text =
+            std::fs::read_to_string(&csv)
+                .unwrap()
+                .replacen("ExecutableName", "executablename", 1);
+        std::fs::write(&csv, text).unwrap();
+    }
+    let report = load_run(&mut case, &respelt, &analyst()).unwrap();
+    let pf = report
+        .superseded
+        .iter()
+        .find(|s| s.relation == "petriage_timeline" && s.host == "WS01")
+        .unwrap();
+    assert_eq!((pf.moved, pf.left_behind), (3, 0));
+    let now = n(&case, SVCH0ST_WS01);
+    assert_ne!(now, row);
+    for table in ["ox.row_mark", "ox.row_tag", "ox.note"] {
+        assert_eq!(
+            n(
+                &case,
+                &format!("select count(*) from {table} where row_id = {now}")
+            ),
+            1,
+            "{table}"
+        );
+    }
+    // One catalogued column, under its first spelling.
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.column_catalog \
+             where relation = 'petriage_timeline' and lower(name) = 'executablename'"
+        ),
+        1
+    );
+}
+
+/// A dataset whose files spell one column two ways (`ExecutableName` in
+/// WS01's file, `executablename` in SRV01's) has both names, catalogued
+/// apart. Each name the catalog has exactly keeps its own spelling in the
+/// hash, so the same rows in a later run still match.
+#[test]
+fn two_spellings_in_one_dataset_keep_their_own_hash_names() {
+    let (d, mut case) = setup();
+    let original = oxl_fixtures::two_hosts(&d.path().join("a"));
+    let both = copy_run(
+        &original,
+        &d.path().join("b"),
+        "20260101000000-aaaa",
+        |json| {
+            let pf = json["datasets"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|ds| ds["view"] == "petriage_timeline")
+                .unwrap();
+            pf["columns"]
+                .as_array_mut()
+                .unwrap()
+                .push("executablename".into());
+            for file in pf["files"].as_array_mut().unwrap() {
+                if file["host"] == "SRV01" {
+                    for name in file["header"].as_array_mut().unwrap() {
+                        if name == "ExecutableName" {
+                            *name = "executablename".into();
+                        }
+                    }
+                }
+            }
+        },
+    );
+    let srv = both
+        .join("Processed-SRV01-20260101000000")
+        .join("Execution")
+        .join("pf.csv");
+    let text =
+        std::fs::read_to_string(&srv)
+            .unwrap()
+            .replacen("ExecutableName", "executablename", 1);
+    std::fs::write(&srv, text).unwrap();
+    load_run(&mut case, &both, &analyst()).unwrap();
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.column_catalog \
+             where relation = 'petriage_timeline' and lower(name) = 'executablename'"
+        ),
+        2
+    );
+    let row = n(&case, SVCH0ST_WS01);
+    assert!(mark_suspicious(&mut case, &[row], &analyst()).unwrap()[0].done);
+
+    let again = copy_run(&both, &d.path().join("c"), "20260104000000-dddd", |_| {});
+    let report = load_run(&mut case, &again, &analyst()).unwrap();
+    let pf = report
+        .superseded
+        .iter()
+        .find(|s| s.relation == "petriage_timeline" && s.host == "WS01")
+        .unwrap();
+    assert_eq!((pf.moved, pf.left_behind), (1, 0));
+    let now = n(&case, SVCH0ST_WS01);
+    assert_ne!(now, row);
+    assert_eq!(
+        n(
+            &case,
+            &format!("select count(*) from ox.row_mark where row_id = {now}")
+        ),
+        1
+    );
+}
+
+/// A run whose dataset takes a loose file's relation name is refused for the
+/// name (`refused`), before its columns are compared with the file's, which
+/// would call the same run `invalid` for a typing it never shared.
+#[test]
+fn relation_kind_refusal_comes_first() {
+    let (d, mut case) = setup();
+    let p = d.path().join("pf.csv");
+    std::fs::write(
+        &p,
+        "RunTime,ExecutableName,RunCount\n2026-01-05 02:15:44,X.EXE,1\n",
+    )
+    .unwrap();
+    let options = FileOptions {
+        name: Some("petriage_timeline".into()),
+        host: None,
+    };
+    load_file(&mut case, &p, options, &analyst()).unwrap();
+    let run = oxl_fixtures::two_hosts(&d.path().join("a"));
+    let (c, message) = code(load_run(&mut case, &run, &analyst()));
+    assert_eq!(c, "refused", "{message}");
+    assert!(message.contains("petriage_timeline"), "{message}");
+    assert_eq!(sources(&case).unwrap().len(), 1);
+}
+
+/// A run of WS01 whose prefetch file has `extra` more rows than the
+/// two-host run's, each distinct.
+fn two_hosts_with_more_prefetch(dir: &Path, extra: usize) -> PathBuf {
+    let root = oxl_fixtures::two_hosts(dir);
+    let csv = root
+        .join("Processed-WS01-20260101000000")
+        .join("Execution")
+        .join("pf.csv");
+    let mut text = std::fs::read_to_string(&csv).unwrap();
+    for i in 0..extra {
+        text.push_str(&format!(
+            "2026-01-06T{:02}:{:02}:00.0000000Z,TOOL{i}.EXE,{i}\n",
+            i / 60,
+            i % 60
+        ));
+    }
+    std::fs::write(&csv, text).unwrap();
+    root
+}
+
+/// Found on the second real run's review: rebinding asked about each
+/// annotated row with statements of its own. It reads and writes the
+/// annotations a few statements at a time, so a supersession costs the same
+/// statements whether one row is annotated or two hundred.
+#[test]
+fn rebind_cost_does_not_grow_with_annotations() {
+    let cost = |annotated: usize| -> usize {
+        let (d, mut case) = setup();
+        let first = two_hosts_with_more_prefetch(&d.path().join("a"), 210);
+        load_run(&mut case, &first, &analyst()).unwrap();
+        let rows: Vec<i64> = (0..annotated)
+            .map(|i| {
+                n(
+                    &case,
+                    &format!(
+                        "select _ox_row from petriage_timeline where _triage_host = 'WS01' \
+                         order by _ox_row limit 1 offset {i}"
+                    ),
+                )
+            })
+            .collect();
+        assert!(mark_suspicious(&mut case, &rows, &analyst())
+            .unwrap()
+            .iter()
+            .all(|o| o.done));
+        assert!(add_tag(&mut case, &rows, "seen", &analyst())
+            .unwrap()
+            .iter()
+            .all(|o| o.done));
+        for row in &rows {
+            add_note(&mut case, *row, "looked at", &analyst()).unwrap();
+        }
+        let rerun = copy_run(&first, &d.path().join("b"), "20260104000000-dddd", |_| {});
+        let (report, ran) = case
+            .statements_during_mut(|c| load_run(c, &rerun, &analyst()).unwrap())
+            .unwrap();
+        let prefetch = report
+            .superseded
+            .iter()
+            .find(|s| s.relation == "petriage_timeline" && s.host == "WS01")
+            .unwrap();
+        assert_eq!(
+            (prefetch.moved, prefetch.left_behind),
+            (3 * annotated as u64, 0)
+        );
+        // Every annotation is on the rerun's rows now.
+        assert_eq!(
+            n(
+                &case,
+                "select count(*) from ox.row_mark m join petriage_timeline v \
+                 on v._ox_row = m.row_id"
+            ),
+            annotated as i64
+        );
+        ran.len()
+    };
+    assert_eq!(cost(1), cost(200));
 }

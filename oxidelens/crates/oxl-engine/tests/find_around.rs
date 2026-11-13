@@ -929,3 +929,42 @@ fn merged_rows_of_a_find_put_untimed_rows_last() {
         "Security · 4624 · Successful logon · svc_backup"
     );
 }
+
+/// `hosts_not_seen` says which hosts the search could have found the value
+/// on and did not. A host only an unsearched relation has (here an untimed
+/// file, which a `from`/`to` find leaves out) was never looked at.
+#[test]
+fn hosts_not_seen_covers_searched_relations_only() {
+    let (d, mut case) = loaded();
+    let p = d.path().join("users.csv");
+    std::fs::write(&p, "name,group\nsvc_backup,admins\n").unwrap();
+    let options = FileOptions {
+        name: None,
+        host: Some("SRV09".into()),
+    };
+    load_file(&mut case, &p, options, &analyst()).unwrap();
+
+    let mut q = req("svc_backup", FindMode::Exact);
+    q.from = Some("2026-01-05T00:00:00Z".into());
+    q.to = Some("2026-01-06T00:00:00Z".into());
+    let r = find(&case, &q, &mut |_, _| true).unwrap();
+    assert!(
+        !r.searched.contains(&"users_csv".to_string()),
+        "{:?}",
+        r.searched
+    );
+    assert!(
+        !r.hosts_not_seen.contains(&"SRV09".to_string()),
+        "{:?}",
+        r.hosts_not_seen
+    );
+    // Without a time span the file is searched, and SRV09 has the value.
+    let r = find(
+        &case,
+        &req("nobody-has-this", FindMode::Exact),
+        &mut |_, _| true,
+    )
+    .unwrap();
+    assert!(r.searched.contains(&"users_csv".to_string()));
+    assert!(r.hosts_not_seen.contains(&"SRV09".to_string()));
+}

@@ -301,3 +301,51 @@ fn a_filter_that_excludes_every_row_gives_an_empty_stack() {
         (0, 0, 0, false)
     );
 }
+
+/// A host cell that is empty is no host, as a group key's empty cell is no
+/// value: it does not count as one more host.
+#[test]
+fn stack_counts_an_empty_host_as_no_host() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::two_hosts(&d.path().join("a"));
+    let copy = d.path().join("b");
+    common::copy_tree(&run, &copy);
+    // The Hayabusa file a second time, as a host with an empty name.
+    let path = copy.join("duckdb").join("datasets.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let hayabusa = json["datasets"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|ds| ds["view"] == "ext_hayabusa_csv_timeline")
+        .unwrap();
+    let mut blank = hayabusa["files"][0].clone();
+    blank["host"] = "".into();
+    hayabusa["files"].as_array_mut().unwrap().push(blank);
+    std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+    let mut case = new_case(d.path());
+    load_run(&mut case, &copy, &analyst()).unwrap();
+    assert_eq!(
+        n(
+            &case,
+            "select count(distinct _triage_host) from ext_hayabusa_csv_timeline"
+        ),
+        2
+    );
+    let st = stack(
+        &case,
+        &q("ext_hayabusa_csv_timeline"),
+        &s(&["RuleTitle"]),
+        StackOrder::Rarest,
+        50,
+        0,
+    )
+    .unwrap();
+    assert_eq!(st.hosts_total, 1);
+    assert!(!st.rows.is_empty());
+    for row in &st.rows {
+        assert_eq!((row.count, row.hosts), (2, 1), "{row:?}");
+    }
+}

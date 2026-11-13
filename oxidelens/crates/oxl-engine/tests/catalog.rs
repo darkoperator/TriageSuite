@@ -337,13 +337,15 @@ fn a_later_load_moves_an_automatic_primary_time_to_the_listed_one() {
     }
 }
 
-/// A copy of the run at `from` under `to` with run id `run_id`.
+/// A copy of the run at `from` under `to` with run id `run_id`, and a
+/// generation of that run.
 fn oxl_fixtures_copy(from: &std::path::Path, to: &std::path::Path, run_id: &str) {
     common::copy_tree(from, to);
     let path = to.join("duckdb").join("datasets.json");
     let mut json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     json["run_id"] = run_id.into();
+    json["generation"] = format!("{run_id}-g1").into();
     std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 }
 

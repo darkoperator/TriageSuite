@@ -11,14 +11,14 @@
 
 use super::history::{record_all, Change};
 use super::{
-    check_batch, id_list, locate_rows, no_row, per_id_chunk, unwritable, write_rows, LocatedRow,
-    RowOutcome, Standing, IDS_PER_STATEMENT,
+    check_batch, id_list, locate_rows, no_row, per_id_chunk, unwritable, who_may_undo, write_rows,
+    LocatedRow, RowOutcome, Standing, IDS_PER_STATEMENT,
 };
 use crate::actor::Actor;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
-use crate::query::MarkState;
+use crate::query::{check_offset, read_mark, MarkState};
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params_from_iter, Connection};
@@ -27,6 +27,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MarkedRow {
     pub row_id: i64,
+    /// Empty only for a mark on a row id no source range covers, which a
+    /// case the engine wrote never holds (as `RowDetail::relation`).
     pub relation: String,
     /// `None` for a relation without a host column, or a row of a removed
     /// source, whose data is gone.
@@ -41,10 +43,10 @@ pub struct MarkedRow {
 
 /// The mark on a row, as stored.
 #[derive(Clone)]
-struct Mark {
-    mark: String,
-    marked_by: String,
-    marked_at: String,
+pub(super) struct Mark {
+    pub mark: String,
+    pub marked_by: String,
+    pub marked_at: String,
 }
 
 impl Mark {
@@ -59,11 +61,12 @@ impl Mark {
 /// Mark each of `rows` suspicious. An unknown or inactive row is not done.
 /// An unmarked row is marked. A row an agent marked is taken over by an
 /// analyst; a row an analyst marked stays theirs, done and unchanged. An
-/// agent never changes a marked row: not done, "already marked". `Invalid`
-/// for an empty list; `Refused` for an agent passing more than
-/// `AGENT_ROWS_PER_CALL` rows.
+/// agent never changes a marked row: not done, "already marked". A row id
+/// given more than once is one row, with one outcome, at its first place.
+/// `Invalid` for an empty list; `Refused` for an agent passing more than
+/// `AGENT_ROWS_PER_CALL` distinct rows.
 pub fn mark_suspicious(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<Vec<RowOutcome>> {
-    check_batch(rows, actor)?;
+    let rows = &check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
     let mut batch = MarkBatch::new(&tx, rows, actor, &at)?;
@@ -78,7 +81,7 @@ pub fn mark_suspicious(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<V
 /// may still be cleared: the mark it carries was left behind there. The
 /// whole-call checks are `mark_suspicious`'s.
 pub fn clear_suspicious(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<Vec<RowOutcome>> {
-    check_batch(rows, actor)?;
+    let rows = &check_batch(rows, actor)?;
     let at = now_iso();
     let tx = case.conn_mut().transaction()?;
     let mut batch = MarkBatch::new(&tx, rows, actor, &at)?;
@@ -88,10 +91,9 @@ pub fn clear_suspicious(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<
     Ok(out)
 }
 
-/// One call's mark change over its rows. It reads what it needs about them
-/// up front, decides each row in order against what it has decided so far
-/// (so a row named twice sees the first change), and writes every change
-/// at the end a few statements at a time.
+/// One call's mark change over its rows, each named once. It reads what it
+/// needs about them up front, decides each row in order, and writes every
+/// change at the end a few statements at a time.
 struct MarkBatch<'a> {
     conn: &'a Connection,
     actor: &'a Actor,
@@ -168,8 +170,9 @@ impl<'a> MarkBatch<'a> {
             return RowOutcome::refused(
                 row,
                 format!(
-                    "marked by {}; only an analyst can clear it",
-                    existing.marked_by
+                    "marked by {}; only {} can clear it",
+                    existing.marked_by,
+                    who_may_undo(&existing.marked_by)
                 ),
             );
         }
@@ -222,8 +225,8 @@ impl<'a> MarkBatch<'a> {
 }
 
 /// The mark on each of `rows` that has one: its earliest, should a row
-/// carry more than one.
-fn marks_on(conn: &Connection, rows: &[i64]) -> Result<HashMap<i64, Mark>> {
+/// carry more than one. Every reader of one row's mark goes through here.
+pub(super) fn marks_on(conn: &Connection, rows: &[i64]) -> Result<HashMap<i64, Mark>> {
     let mut out = HashMap::new();
     for chunk in rows.chunks(IDS_PER_STATEMENT) {
         let mut stmt = conn.prepare(&format!(
@@ -268,7 +271,8 @@ fn change<'a>(
 
 /// Up to `limit` marked rows from `offset`, every mark or only `by`'s, in
 /// the order they were marked. A row out of the view is listed, with
-/// `active` false. `Invalid` when `limit` is 0 or over `MAX_LIMIT`.
+/// `active` false. `Invalid` when `limit` is 0 or over `MAX_LIMIT`, or
+/// `offset` past `i64::MAX`.
 pub fn marks(
     case: &Case,
     by: Option<&Actor>,
@@ -276,6 +280,7 @@ pub fn marks(
     offset: u64,
 ) -> Result<Listing<MarkedRow>> {
     check_limit(limit)?;
+    check_offset(offset)?;
     let conn = case.conn();
     let mut params = Vec::new();
     let filter = match by {
@@ -301,23 +306,30 @@ pub fn marks(
     let located = locate_rows(conn, &ids)?;
     let mut out = Vec::with_capacity(stored.items.len());
     for (row_id, mark, marked_by, marked_at) in stored.items {
-        // Removing a source keeps its rows' ranges, so every mark locates.
-        let row = located.get(&row_id).ok_or_else(|| {
-            EngineError::Invalid(format!(
-                "the case holds a mark on row {row_id}, which no source ever loaded"
-            ))
+        let mark = read_mark(Some(mark))?.ok_or_else(|| {
+            EngineError::Internal(format!("the mark on row {row_id} read back as none"))
         })?;
-        let mark = MarkState::parse(&mark).ok_or_else(|| {
-            EngineError::Invalid(format!("the case holds an unknown mark {mark:?}"))
-        })?;
+        // Removing a source keeps its rows' ranges, so a mark the engine
+        // wrote always locates. One that does not (a case edited by hand)
+        // is listed as out of every view, as `row_detail` shows it, rather
+        // than failing the listing: its relation is empty and its host
+        // unknown.
+        let (relation, host, active) = match located.get(&row_id) {
+            Some(row) => (
+                row.relation.clone(),
+                row.host.clone(),
+                row.standing == Standing::Active,
+            ),
+            None => (String::new(), None, false),
+        };
         out.push(MarkedRow {
             row_id,
-            relation: row.relation.clone(),
-            host: row.host.clone(),
+            relation,
+            host,
             mark,
             marked_by,
             marked_at,
-            active: row.standing == Standing::Active,
+            active,
         });
     }
     Ok(Listing {

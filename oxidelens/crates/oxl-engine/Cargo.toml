@@ -14,6 +14,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 regex.workspace = true
+# The SQL lockdown's ATTACH probe names a file in a directory of its own.
+tempfile.workspace = true
 
 [dev-dependencies]
 # Integration tests only (files under tests/): oxl-fixtures depends on this

@@ -48,6 +48,7 @@ pub fn exit_code(e: &EngineError) -> i32 {
         EngineError::CaseLocked(_) => 5,
         EngineError::NeedsUpgrade { .. } => 6,
         EngineError::Db(_) | EngineError::Io(_) => 10,
+        EngineError::Internal(_) => 11,
     }
 }
 
@@ -85,5 +86,7 @@ mod tests {
     fn exit_codes() {
         assert_eq!(exit_code(&EngineError::Refused("x".into())), 4);
         assert_eq!(exit_code(&EngineError::NotFound("x".into())), 3);
+        let internal = EngineError::Internal("x".into());
+        assert_eq!((exit_code(&internal), internal.code()), (11, "internal"));
     }
 }

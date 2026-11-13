@@ -9,30 +9,32 @@
 
 use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::supersede::supersede;
-use super::{LoadReport, LoadThreads, LoadedRelation, RunOptions, SkippedDataset};
+use super::{fold_name, LoadReport, LoadThreads, LoadedRelation, RunOptions, SkippedDataset};
 use crate::actor::Actor;
 use crate::case::Case;
-use crate::catalog::{catalog_dataset, check_typing};
+use crate::catalog::{catalog_dataset, check_sql_type, check_typing, column_names};
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
 use duckdb::{params, Connection};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use triage_core::output::duckdb::inventory::{
     Dataset, DatasetFile, FileIdentity, Inventory, MetadataColumns, Status,
 };
 use triage_core::output::duckdb::render::render_sql;
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
-use triage_core::output::duckdb::types::SqlType;
 
 /// The schema the suite's views are rendered into during a load.
 const STAGE: &str = "ox_stage";
 
 /// Load the run whose output root is `out_root` into `case`.
 ///
-/// Refused when the run is already in the case (a removed run may be loaded
-/// again) or a dataset's view or its `raw_` view would take a name another
-/// relation uses (see `check_relation_names`); `Invalid` when the
+/// Refused when the run's output, by its generation, is already in the case
+/// (a removed run may be loaded again; another generation of the same run
+/// id loads, and supersedes as a later run does) or a dataset's view or its
+/// `raw_` view would take a name another relation uses (see
+/// `check_relation_names`, which comes before every other check of a
+/// dataset); `Invalid` when the
 /// inventory's status is not `ok`, when the inventory
 /// declares a SQL type the suite never writes, types a column differently
 /// from the case's catalog, or names a relation's metadata columns
@@ -113,7 +115,8 @@ pub(super) fn discard(conn: &Connection, source_id: Option<i64>) {
 pub(super) fn canonical_path(out_root: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(out_root).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            EngineError::NotFound(format!("no run output root at {}", out_root.display()))
+            // Both loaders come through here: a run's root, or a file.
+            EngineError::NotFound(format!("no file or folder at {}", out_root.display()))
         } else {
             e.into()
         }
@@ -239,12 +242,7 @@ fn check_inventory(inventory: &Inventory) -> Result<()> {
     // untrusted SQL text: only the spellings the suite writes get through.
     for dataset in &inventory.datasets {
         for (column, effective) in &dataset.effective_types {
-            if SqlType::from_sql(&effective.sql_type).is_none() {
-                return Err(EngineError::Invalid(format!(
-                    "{}: column {column:?} declares SQL type {:?}, which TriageSuite never writes",
-                    dataset.view, effective.sql_type
-                )));
-            }
+            check_sql_type(&dataset.view, column, &effective.sql_type)?;
         }
     }
     Ok(())
@@ -342,18 +340,30 @@ fn load_in(
 ) -> Result<LoadReport> {
     let (full, root, actor) = (load.inventory, load.root, load.actor);
     let inventory = &load.loaded();
+    // One writing of a run's output is named by its generation, which the
+    // suite makes new each time and derives from the run id. The run id
+    // alone is a stamp with no host in it, so two collections processed in
+    // the same millisecond share one. A run recorded without a generation,
+    // or one that has none, is matched on its run id instead.
+    let generation = Some(inventory.generation.as_str()).filter(|g| !g.is_empty());
     let present: i64 = conn.query_row(
-        "SELECT count(*) FROM ox.source WHERE run_id = ? AND NOT removed",
-        params![inventory.run_id],
+        "SELECT count(*) FROM ox.source WHERE kind = 'run' AND NOT removed \
+         AND (generation = ? \
+              OR ((generation IS NULL OR CAST(? AS VARCHAR) IS NULL) AND run_id = ?))",
+        params![generation, generation, inventory.run_id],
         |r| r.get(0),
     )?;
     if present > 0 {
         return Err(EngineError::Refused(format!(
-            "run {} is already in this case",
-            inventory.run_id
+            "run {} (generation {}) is already in this case",
+            inventory.run_id, inventory.generation
         )));
     }
+    // The name first: a dataset taking another relation's name is refused
+    // for that, before its columns are compared with a relation that is not
+    // its own.
     for dataset in inventory.datasets.iter().filter(|d| loads(d)) {
+        check_relation_names(conn, &dataset.view)?;
         check_metadata_columns(conn, dataset)?;
         check_typing(conn, dataset)?;
     }
@@ -470,8 +480,9 @@ fn check_metadata_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
     let Some(json) = recorded else {
         return Ok(());
     };
+    // The engine wrote this record from an inventory it had parsed.
     let ours: MetadataColumns = serde_json::from_str(&json).map_err(|e| {
-        EngineError::Invalid(format!(
+        EngineError::Internal(format!(
             "the case's inventory record for {} is unreadable: {e}",
             dataset.view
         ))
@@ -497,21 +508,24 @@ fn check_metadata_columns(conn: &Connection, dataset: &Dataset) -> Result<()> {
 /// Refuse dataset `view` when it, or the `raw_<view>` view it brings, would
 /// take a name the case's relations already use: a relation's own name or
 /// its `raw_` view's, compared without regard to case, as DuckDB resolves
-/// names. `rebuild_relations` would otherwise replace one view with the
-/// other without a word. The one allowed match is the dataset relation of
-/// exactly this name, which a later run of the same tool feeds. Datasets
-/// loaded earlier in the same run are relations by now and are checked too.
+/// names (`fold_name`, as the file loader compares them).
+/// `rebuild_relations` would otherwise replace one view with the other
+/// without a word. The one allowed match is the dataset relation of exactly
+/// this name, which a later run of the same tool feeds. It runs before a
+/// dataset's columns are checked, and again as each dataset loads, so that
+/// datasets loaded earlier in the same run, relations by then, are checked
+/// too.
 fn check_relation_names(conn: &Connection, view: &str) -> Result<()> {
     let existing: Vec<(String, String)> = conn
         .prepare("SELECT name, kind FROM ox.relation ORDER BY name")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
-    let ours = [view.to_lowercase(), format!("raw_{view}").to_lowercase()];
+    let ours = [fold_name(view), fold_name(&format!("raw_{view}"))];
     for (name, kind) in existing {
         if name == view && kind == "dataset" {
             continue;
         }
-        let theirs = [name.to_lowercase(), format!("raw_{name}").to_lowercase()];
+        let theirs = [fold_name(&name), fold_name(&format!("raw_{name}"))];
         if ours.iter().any(|o| theirs.contains(o)) {
             return Err(EngineError::Refused(format!(
                 "dataset {view} (and its view raw_{view}) would take a name the case's \
@@ -543,13 +557,43 @@ fn load_dataset(
     // Host and identity, then every column by name, each read as its text.
     // The run id and the output file are left out: they differ between two
     // runs that read the same event.
-    let mut columns: Vec<&String> = dataset.columns.iter().collect();
+    //
+    // A column the relation already catalogues under another case of the
+    // same name (`EventId`, this run's `eventid`) is one column, as DuckDB
+    // and `check_typing` take it, so it is hashed, and sorted, under the
+    // catalog's spelling: the same row then has the same hash in both runs,
+    // and supersession matches it. Only an unambiguous respelling is mapped:
+    // a name the catalog has exactly keeps its own spelling (a dataset whose
+    // files spell a column two ways has both names catalogued, and each must
+    // keep hashing as it did), and so does a name two or more catalogued
+    // names match without regard to case. A column the catalog lacks, and
+    // every column of a first load, is hashed under its own name as before.
+    let catalogued = column_names(conn, &dataset.view)?;
+    let mut by_fold: BTreeMap<String, Vec<&String>> = BTreeMap::new();
+    for name in &catalogued {
+        by_fold.entry(name.to_lowercase()).or_default().push(name);
+    }
+    let hashed_as = |name: &String| -> String {
+        if catalogued.contains(name) {
+            return name.clone();
+        }
+        match by_fold.get(&name.to_lowercase()).map(Vec::as_slice) {
+            Some([only]) => (*only).clone(),
+            _ => name.clone(),
+        }
+    };
+    let mut columns: Vec<(String, &String)> = dataset
+        .columns
+        .iter()
+        .map(|name| (hashed_as(name), name))
+        .collect();
     columns.sort();
     let hash_columns: Vec<HashColumn> = [&meta.host, &meta.identity]
         .into_iter()
+        .map(|name| (hashed_as(name), name))
         .chain(columns)
-        .map(|name| HashColumn {
-            name: name.clone(),
+        .map(|(hashed, name)| HashColumn {
+            name: hashed,
             text_expr: quote_ident(
                 dataset
                     .effective_types
@@ -712,9 +756,11 @@ fn record_inventory(conn: &Connection, source_id: i64, inventory: &Inventory) ->
     Ok(())
 }
 
+/// `value`, a part of an inventory that was parsed from JSON, as JSON again;
+/// failing that is a fault of the engine's, not of the inventory.
 fn to_json<T: serde::Serialize + ?Sized>(value: &T) -> Result<String> {
     serde_json::to_string(value)
-        .map_err(|e| EngineError::Invalid(format!("the inventory does not serialize: {e}")))
+        .map_err(|e| EngineError::Internal(format!("the inventory does not serialize: {e}")))
 }
 
 #[cfg(test)]

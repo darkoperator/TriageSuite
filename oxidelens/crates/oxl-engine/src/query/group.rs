@@ -2,9 +2,9 @@
 //! time spans, nested by further columns and expanded one level at a time.
 
 use super::page::clip_text;
-use super::{find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
+use super::{check_offset, find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
 use crate::case::Case;
-use crate::catalog::{self, ColumnInfo, TimeSemantics};
+use crate::catalog::{ColumnInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
 use crate::filter::{FilterNode, Leaf, Op};
 use crate::listing::{check_limit, fetch_limit, Listing};
@@ -41,7 +41,8 @@ pub struct GroupRow {
 /// Up to `limit` groups of `by[parent.len()]` from `offset`, among rows
 /// whose earlier `by` columns equal `parent`. Ordered by count descending,
 /// then key. `Invalid` for an empty `by`, more than four columns, a
-/// `parent` as long as `by`, or a `limit` of 0 or over `MAX_LIMIT`.
+/// `parent` as long as `by`, a `limit` of 0 or over `MAX_LIMIT`, or an
+/// `offset` past `i64::MAX`.
 pub fn groups(
     case: &Case,
     q: &GridQuery,
@@ -51,6 +52,7 @@ pub fn groups(
     offset: u64,
 ) -> Result<Listing<GroupRow>> {
     check_limit(limit)?;
+    check_offset(offset)?;
     if by.is_empty() || by.len() > MAX_BY || parent.len() >= by.len() {
         return Err(EngineError::Invalid(format!(
             "group by needs 1 to {MAX_BY} columns and a parent key shorter than that list \
@@ -60,10 +62,10 @@ pub fn groups(
         )));
     }
     let scope = scope(case, q)?;
-    let all = catalog::columns(case, &q.relation)?;
+    let all = &scope.all;
     let by_cols: Vec<&ColumnInfo> = by
         .iter()
-        .map(|name| find_column(&all, &scope.relation.name, name))
+        .map(|name| find_column(all, &scope.relation.name, name))
         .collect::<Result<_>>()?;
 
     let mut conditions = String::new();
@@ -77,7 +79,7 @@ pub fn groups(
             }
         }
     }
-    let (first, last) = first_last_sql(&scope.relation.primary_time, &all);
+    let (first, last) = first_last_sql(&scope.relation.primary_time, all);
     let sql = format!(
         "SELECT {key} AS ox_key, count(*), {first}, {last}, \
          count(*) FILTER (WHERE {marked}) \

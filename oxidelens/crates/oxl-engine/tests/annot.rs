@@ -245,12 +245,9 @@ fn one_mark_per_row_under_every_path() {
     let (_d, mut case) = loaded();
     let (analyst, agent) = (analyst(), agent());
     let r = logon(&case);
-    // The same row twice in one batch.
+    // The same row twice in one batch: one row, one outcome.
     let out = mark_suspicious(&mut case, &[r, r], &agent).unwrap();
-    assert_eq!(
-        out.iter().map(|o| o.done).collect::<Vec<_>>(),
-        [true, false]
-    );
+    assert_eq!(out.iter().map(|o| o.done).collect::<Vec<_>>(), [true]);
     assert_eq!(mark_rows(&case, r), 1);
     // A take-over replaces the owner, not adds a mark.
     mark_suspicious(&mut case, &[r, r], &analyst).unwrap();
@@ -834,4 +831,114 @@ fn marks_page() {
     } = marks(&case, None, 2, 2).unwrap();
     assert_eq!((rest.len(), more), (1, false));
     assert_eq!(marks(&case, None, 1001, 0).unwrap_err().code(), "invalid");
+}
+
+/// A row id named twice in one call is one row: one outcome, counted once
+/// against the agent's cap.
+#[test]
+fn duplicate_row_ids_count_once() {
+    let (_d, mut case) = loaded();
+    let r = logon(&case);
+    let out = mark_suspicious(&mut case, &[r, r], &agent()).unwrap();
+    assert_eq!(
+        out.iter().map(|o| (o.row_id, o.done)).collect::<Vec<_>>(),
+        [(r, true)]
+    );
+    let out = add_tag(&mut case, &[r, r, r], "ai:seen", &agent()).unwrap();
+    assert_eq!(out.len(), 1);
+
+    // 1,000 distinct ids and 500 repeats of them are 1,000 rows, the cap.
+    let distinct: Vec<i64> = (0..AGENT_ROWS_PER_CALL as i64).map(|i| -i - 1).collect();
+    let mut rows = distinct.clone();
+    rows.extend_from_slice(&distinct[..500]);
+    assert_eq!(rows.len(), 1_500);
+    let out = clear_suspicious(&mut case, &rows, &agent()).unwrap();
+    // First appearances, in the order given.
+    assert_eq!(out.iter().map(|o| o.row_id).collect::<Vec<_>>(), distinct);
+    let out = add_tag(&mut case, &rows, "ai:many", &agent()).unwrap();
+    assert_eq!(out.len(), AGENT_ROWS_PER_CALL);
+}
+
+#[test]
+fn bare_agent_prefix_is_invalid() {
+    let (_d, mut case) = loaded();
+    let r = logon(&case);
+    for bare in ["ai:", "AI:"] {
+        let e = add_tag(&mut case, &[r], bare, &agent()).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{e}");
+    }
+    assert_eq!(n(&case, "select count(*) from ox.row_tag"), 0);
+    assert!(add_tag(&mut case, &[r], "ai:x", &agent()).unwrap()[0].done);
+    // Removing is not refused on the name's account, so a bare prefix an
+    // earlier build let an agent add can still be taken off.
+    assert!(!remove_tag(&mut case, &[r], "ai:", &agent()).unwrap()[0].done);
+}
+
+/// The refusal says who owns the mark or tag, and that its owner may clear
+/// it: "only an analyst" was wrong when the owner is another agent.
+#[test]
+fn refusal_names_the_owner() {
+    let (_d, mut case) = loaded();
+    let r = logon(&case);
+    let (a, b) = (Actor::Agent("a".into()), Actor::Agent("b".into()));
+    assert!(mark_suspicious(&mut case, &[r], &a).unwrap()[0].done);
+    let refused = &clear_suspicious(&mut case, &[r], &b).unwrap()[0];
+    assert!(!refused.done);
+    let reason = refused.reason.as_deref().unwrap();
+    assert!(
+        reason.contains("agent:a") && reason.contains("only agent:a or an analyst"),
+        "{reason}"
+    );
+
+    assert!(add_tag(&mut case, &[r], "ai:x", &a).unwrap()[0].done);
+    let refused = &remove_tag(&mut case, &[r], "ai:x", &b).unwrap()[0];
+    assert!(!refused.done);
+    let reason = refused.reason.as_deref().unwrap();
+    assert!(
+        reason.contains("agent:a") && reason.contains("only agent:a or an analyst"),
+        "{reason}"
+    );
+
+    // An analyst's mark: only an analyst.
+    let other = id(
+        &case,
+        "select _ox_row from evtxtriage_events where EventId = 4625",
+    );
+    mark_suspicious(&mut case, &[other], &analyst()).unwrap();
+    let refused = &clear_suspicious(&mut case, &[other], &b).unwrap()[0];
+    let reason = refused.reason.as_deref().unwrap();
+    assert!(
+        reason.contains("analyst:tester") && reason.contains("only an analyst"),
+        "{reason}"
+    );
+}
+
+/// A mark whose row no source range covers (the case was edited by hand, or
+/// a range was lost) does not take the whole listing down with it.
+#[test]
+fn marks_listing_survives_an_unlocatable_mark() {
+    let (d, mut case) = loaded();
+    let r = logon(&case);
+    mark_suspicious(&mut case, &[r], &analyst()).unwrap();
+    let path = d.path().join("t.case.duckdb");
+    drop(case);
+    {
+        let conn = duckdb::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO ox.row_mark VALUES (999999, 'suspicious', 'analyst:tester', \
+             '2026-01-01T00:00:00.000000Z')",
+        )
+        .unwrap();
+    }
+    let case = Case::open(&path).unwrap();
+    let listed = marks(&case, None, 50, 0).unwrap().items;
+    assert_eq!(listed.len(), 2);
+    let orphan = listed.iter().find(|m| m.row_id == 999_999).unwrap();
+    assert!(!orphan.active);
+    assert_eq!(
+        (orphan.relation.as_str(), orphan.host.as_deref()),
+        ("", None)
+    );
+    let real = listed.iter().find(|m| m.row_id == r).unwrap();
+    assert!(real.active);
 }

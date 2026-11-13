@@ -1,8 +1,9 @@
 //! Pages of cells and row counts: what the grid shows.
 
-use super::{order_sql, scope, GridQuery, ROW_ALIAS};
+use super::{check_offset, order_sql, scope, GridQuery, ROW_ALIAS};
 use crate::case::Case;
 use crate::error::{EngineError, Result};
+use crate::filter::failed_sql;
 use crate::listing::check_limit;
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
@@ -64,7 +65,7 @@ pub struct Page {
 }
 
 /// Up to `limit` rows of `q` from `offset`, in `q`'s order. `Invalid` when
-/// `limit` is 0 or over `MAX_LIMIT`.
+/// `limit` is 0 or over `MAX_LIMIT`, or `offset` past `i64::MAX`.
 ///
 /// Two statements: the first orders the rows in scope and keeps the page's
 /// row ids, the second reads the cells and marks of those rows alone. Done
@@ -73,8 +74,9 @@ pub struct Page {
 /// page took.
 pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page> {
     check_limit(limit)?;
+    check_offset(offset)?;
     let scope = scope(case, q)?;
-    let order = order_sql(case, &scope, q)?;
+    let order = order_sql(&scope, q)?;
     let conn = case.conn();
 
     // Fetching one more than asked says whether the page is the last one.
@@ -110,10 +112,7 @@ pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page>
         let text = format!("{ROW_ALIAS}.{}", quote_ident(&c.text_column));
         select.push(format!("left(CAST({text} AS VARCHAR), {})", CELL_CAP + 1));
         select.push(match &c.typed_column {
-            Some(typed) => format!(
-                "({ROW_ALIAS}.{} IS NULL AND coalesce(CAST({text} AS VARCHAR), '') <> '')",
-                quote_ident(typed)
-            ),
+            Some(typed) => failed_sql(&text, &format!("{ROW_ALIAS}.{}", quote_ident(typed))),
             None => "FALSE".into(),
         });
     }
@@ -140,7 +139,7 @@ pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page>
     for id in &out.row_ids {
         // Both statements read the same rows of one connection's snapshot.
         let (mark, cells) = read.remove(id).ok_or_else(|| {
-            EngineError::Invalid(format!("row {id} was paged but could not be read back"))
+            EngineError::Internal(format!("row {id} was paged but could not be read back"))
         })?;
         out.marks.push(mark);
         out.cells.push(cells);
@@ -170,12 +169,13 @@ pub(super) fn mark_sql() -> String {
     )
 }
 
-/// The value `mark_sql` produced, decoded; `Invalid` for a mark the engine
-/// does not know.
+/// The value `mark_sql` produced, decoded; `Internal` for a mark the engine
+/// does not know, which only a damaged case holds.
 pub(crate) fn read_mark(text: Option<String>) -> Result<Option<MarkState>> {
     text.map(|text| {
-        MarkState::parse(&text)
-            .ok_or_else(|| EngineError::Invalid(format!("the case holds an unknown mark {text:?}")))
+        MarkState::parse(&text).ok_or_else(|| {
+            EngineError::Internal(format!("the case holds an unknown mark {text:?}"))
+        })
     })
     .transpose()
 }

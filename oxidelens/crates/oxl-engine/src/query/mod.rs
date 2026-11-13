@@ -78,6 +78,13 @@ pub struct SortKey {
 
 /// The rows a `GridQuery` selects, as SQL: `SELECT … FROM {from_sql} WHERE
 /// {where_sql}`, binding `params` in order. Every `?` is in `where_sql`.
+///
+/// `from_sql` must be the only FROM item: `where_sql` names columns
+/// unqualified, and the `_mark` filter's correlated subquery reads the one
+/// `_ox_row` in scope, so a table joined beside it would capture or shadow
+/// those names. A query that needs another table wraps the scope as a
+/// subquery (`SELECT … FROM (SELECT … FROM {from_sql} WHERE {where_sql})
+/// JOIN …`) instead.
 pub(crate) struct Scope {
     pub from_sql: String,
     pub where_sql: String,
@@ -85,7 +92,23 @@ pub(crate) struct Scope {
     /// The columns the query shows, in order: the ones it named, or every
     /// catalogued column.
     pub columns: Vec<ColumnInfo>,
+    /// Every catalogued column of the relation, in display order, shown or
+    /// not: what a sort, group or stack column is looked up in.
+    pub all: Vec<ColumnInfo>,
     pub relation: RelationInfo,
+}
+
+/// The offset rule every paged call shares: DuckDB's `OFFSET` is a signed
+/// 64-bit value, so an offset past `i64::MAX` is `Invalid` here rather than
+/// a conversion error from the statement that binds it.
+pub(crate) fn check_offset(offset: u64) -> Result<()> {
+    if i64::try_from(offset).is_err() {
+        return Err(EngineError::Invalid(format!(
+            "an offset is at most {}, not {offset}",
+            i64::MAX
+        )));
+    }
+    Ok(())
 }
 
 /// UTC text of a timestamp, six fractional digits (ruling R1), as a
@@ -276,6 +299,7 @@ pub(crate) fn scope_of(case: &Case, subject: &Subject, q: &GridQuery) -> Result<
         where_sql,
         params,
         columns,
+        all: all.clone(),
         relation,
     })
 }
@@ -285,9 +309,8 @@ pub(crate) fn scope_of(case: &Case, subject: &Subject, q: &GridQuery) -> Result<
 /// order is total. A typed column sorts by its typed value, any other by its
 /// text without regard to case; nulls sort last either way. A sort column
 /// need not be one the query shows. `NotFound` for one the relation lacks.
-pub(crate) fn order_sql(case: &Case, scope: &Scope, q: &GridQuery) -> Result<String> {
-    let all = catalog::columns(case, &scope.relation.name)?;
-    let all = all.as_slice();
+pub(crate) fn order_sql(scope: &Scope, q: &GridQuery) -> Result<String> {
+    let all = scope.all.as_slice();
     let keys: Vec<(ColumnInfo, bool)> = if q.sort.is_empty() {
         scope
             .relation

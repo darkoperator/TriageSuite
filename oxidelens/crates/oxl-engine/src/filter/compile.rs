@@ -102,6 +102,15 @@ pub(crate) fn null_safe(expr: &str) -> String {
     format!("COALESCE({expr}, FALSE)")
 }
 
+/// True where a typed column's text did not convert: the typed value
+/// (`typed`, SQL) is NULL while the text (`text`, SQL) is there and not
+/// empty. An empty cell, NULL or `''`, has not failed. The one predicate
+/// behind the grid's `failed` flag, the `conversion_failed` filter and the
+/// row detail's `failed`, so the three cannot disagree. Never NULL.
+pub(crate) fn failed_sql(text: &str, typed: &str) -> String {
+    format!("({typed} IS NULL AND coalesce(CAST({text} AS VARCHAR), '') <> '')")
+}
+
 /// Where a literal needle must appear in the text.
 #[derive(Clone, Copy)]
 pub(crate) enum LiteralMatch {
@@ -223,10 +232,7 @@ fn positive_sql(
                 .typed_column
                 .as_deref()
                 .ok_or_else(|| invalid(leaf, "conversion_failed needs a typed column"))?;
-            Ok(format!(
-                "({} IS NULL AND {text} IS NOT NULL AND {text} <> '')",
-                quote_ident(typed)
-            ))
+            Ok(failed_sql(&text, &quote_ident(typed)))
         }
         Op::Gt | Op::Gte | Op::Lt | Op::Lte => {
             let (lhs, rhs) = ordered_operand(leaf, &leaf.value, column, params)?;
@@ -252,10 +258,10 @@ fn positive_sql(
             Ok(format!("{lhs} BETWEEN {low} AND {high}"))
         }
         // Negated operators were turned positive by `leaf_sql`.
-        Op::Ne | Op::NotContains | Op::NotIn | Op::NotEmpty => Err(invalid(
-            leaf,
-            "internal: negated operator reached positive_sql",
-        )),
+        Op::Ne | Op::NotContains | Op::NotIn | Op::NotEmpty => Err(EngineError::Internal(format!(
+            "filter on \"{}\": a negated operator reached positive_sql",
+            leaf.column
+        ))),
     }
 }
 

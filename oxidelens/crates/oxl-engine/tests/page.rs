@@ -81,6 +81,140 @@ fn every_paged_call_refuses_a_limit_of_0_or_over_the_maximum() {
     }
 }
 
+/// DuckDB's OFFSET is a signed 64-bit value: an offset past it was a raw
+/// conversion error, code `engine`. It is the caller's input, so `invalid`.
+#[test]
+fn offset_past_i64_is_invalid() {
+    let (_d, case) = loaded();
+    let r = n(&case, "select min(_ox_row) from evtxtriage_events");
+    let by = vec!["Channel".to_string()];
+    let around = oxl_engine::MergedSource::Around {
+        host: "WS01".into(),
+        at: "2026-01-05T02:15:00Z".into(),
+        window_seconds: 300,
+    };
+    for offset in [u64::MAX, i64::MAX as u64 + 1] {
+        let calls: [(&str, (&'static str, String)); 8] = [
+            ("page", code(page(&case, &events(), 50, offset))),
+            (
+                "groups",
+                code(oxl_engine::groups(&case, &events(), &by, &[], 50, offset)),
+            ),
+            (
+                "stack",
+                code(oxl_engine::stack(
+                    &case,
+                    &events(),
+                    &by,
+                    oxl_engine::StackOrder::Rarest,
+                    50,
+                    offset,
+                )),
+            ),
+            ("marks", code(oxl_engine::marks(&case, None, 50, offset))),
+            (
+                "history",
+                code(oxl_engine::history(&case, None, 50, offset)),
+            ),
+            (
+                "merged_rows",
+                code(oxl_engine::merged_rows(&case, &around, 50, offset)),
+            ),
+            ("tags", code(oxl_engine::tags(&case, 50, offset))),
+            ("notes", code(oxl_engine::notes(&case, r, 50, offset))),
+        ];
+        for (name, (c, m)) in calls {
+            assert_eq!(c, "invalid", "{name} with offset {offset}: {m}");
+        }
+    }
+    // The largest offset DuckDB takes is fine, and past every row.
+    let p = page(&case, &events(), 50, i64::MAX as u64).unwrap();
+    assert!(p.row_ids.is_empty() && !p.truncated);
+}
+
+/// The grid's `failed` flag, the `conversion_failed` filter and the row
+/// detail's `failed` are one predicate: a typed column's text that is there
+/// and did not convert. An empty cell, NULL or `''`, has not failed.
+#[test]
+fn failed_flag_filter_and_detail_agree() {
+    let d = tempfile::tempdir().unwrap();
+    let mut case = new_case(d.path());
+    let p = d.path().join("times.csv");
+    std::fs::write(
+        &p,
+        "t,k\n2026-01-05 02:14:00,set\n,null\n\"\",empty\nnot-a-time,bad\n",
+    )
+    .unwrap();
+    load_file(&mut case, &p, FileOptions::default(), &analyst()).unwrap();
+    oxl_engine::declare_type(
+        &mut case,
+        "times_csv",
+        "t",
+        oxl_engine::SqlType::Timestamp,
+        Some(oxl_engine::TimeSemantics::Unknown),
+        &analyst(),
+    )
+    .unwrap();
+    // DuckDB reads a quoted empty field as NULL too, so the `''` cell is
+    // written in directly, as a source that does write one would leave it.
+    let path = case.path().to_path_buf();
+    drop(case);
+    {
+        let conn = duckdb::Connection::open(&path).unwrap();
+        conn.execute_batch("UPDATE src_1.times_csv SET t = '' WHERE k = 'empty'")
+            .unwrap();
+    }
+    let case = oxl_engine::Case::open(&path).unwrap();
+    // The three kinds of cell are really there.
+    assert_eq!(
+        n(&case, "select count(*) from times_csv where t is null"),
+        1
+    );
+    assert_eq!(n(&case, "select count(*) from times_csv where t = ''"), 1);
+
+    let all = GridQuery {
+        relation: "times_csv".into(),
+        ..Default::default()
+    };
+    let grid = page(&case, &all, 50, 0).unwrap();
+    let t = grid.columns.iter().position(|c| c == "t").unwrap();
+    let k = grid.columns.iter().position(|c| c == "k").unwrap();
+    let flagged: Vec<(i64, String)> = grid
+        .row_ids
+        .iter()
+        .zip(&grid.cells)
+        .filter(|(_, cells)| cells[t].failed)
+        .map(|(id, cells)| (*id, cells[k].text.clone().unwrap()))
+        .collect();
+    let failing = GridQuery {
+        filter: Some(parse_filter(r#"{"column":"t","op":"conversion_failed"}"#).unwrap()),
+        ..all.clone()
+    };
+    let filtered = page(&case, &failing, 50, 0).unwrap().row_ids;
+    let detailed: Vec<i64> = grid
+        .row_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            let detail = oxl_engine::row_detail(&case, *id).unwrap();
+            detail
+                .fields
+                .iter()
+                .find(|(name, _)| name == "t")
+                .unwrap()
+                .1
+                .failed
+        })
+        .collect();
+    assert_eq!(
+        flagged.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(),
+        ["bad"]
+    );
+    let ids: Vec<i64> = flagged.iter().map(|(id, _)| *id).collect();
+    assert_eq!(filtered, ids);
+    assert_eq!(detailed, ids);
+}
+
 #[test]
 fn the_default_page_is_time_ordered_and_shows_full_precision_text() {
     let (_d, case) = loaded();

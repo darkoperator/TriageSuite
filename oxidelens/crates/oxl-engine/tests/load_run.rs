@@ -195,6 +195,7 @@ fn an_earlier_per_channel_load_stays_until_its_source_is_removed() {
     let mut json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     json["run_id"] = "20260108000000-gggg".into();
+    json["generation"] = "20260108000000-gggg-g1".into();
     std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
     load_run(&mut case, &later, &analyst()).unwrap();
     assert_eq!(n(&case, "select count(*) from evtxtriage_events"), 8);
@@ -223,6 +224,7 @@ fn a_left_out_copy_does_not_bind_a_later_load() {
     let mut json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     json["run_id"] = "20260109000000-hhhh".into();
+    json["generation"] = "20260109000000-hhhh-g1".into();
     for ds in json["datasets"].as_array_mut().unwrap() {
         if ds["dataset_id"] == "Individual/Security" {
             ds["metadata_columns"]["host"] = "_triage_host_1".into();
@@ -465,6 +467,53 @@ fn the_same_run_twice_is_refused() {
     assert!(message.contains("already in this case"), "{message}");
     assert_eq!(sources(&case).unwrap().len(), 1);
     assert_two_hosts_counts(&case);
+}
+
+/// A run id is a stamp with no host in it, so two collections processed in
+/// the same millisecond share one; the generation is what names one
+/// writing of a run's output. The same generation twice is the same run.
+#[test]
+fn same_run_id_new_generation_loads() {
+    let d = tempfile::tempdir().unwrap();
+    let first = oxl_fixtures::two_hosts(&d.path().join("a"));
+    let second = edited_copy(&d.path().join("b"), |json| {
+        assert_eq!(json["run_id"], "20260101000000-aaaa");
+        json["generation"] = "20260101000000-aaaa-g2".into();
+    });
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_run(&mut case, &first, &analyst()).unwrap();
+    load_run(&mut case, &second, &analyst()).unwrap();
+    assert_eq!(sources(&case).unwrap().len(), 2);
+    // The second superseded the first, host by host.
+    assert_two_hosts_counts(&case);
+
+    let (c, message) = code(load_run(&mut case, &second, &analyst()));
+    assert_eq!(c, "refused", "{message}");
+    assert!(message.contains("already in this case"), "{message}");
+    assert_eq!(sources(&case).unwrap().len(), 2);
+}
+
+/// The first WS01 row of `evtxtriage_events`' hash, pinned. Supersession
+/// matches rows by this hash across runs and across builds, so if this
+/// changes (a DuckDB upgrade that writes `to_json` differently, a change to
+/// `row_hash_sql` or to the columns hashed), every existing case's rows stop
+/// matching the next run's, and annotations no longer follow them.
+#[test]
+fn row_hash_is_pinned() {
+    let (_d, case) = loaded();
+    // The fixture's first WS01 event: the failed logon at 02:13:58.
+    let row = n(
+        &case,
+        "SELECT _ox_row FROM evtxtriage_events WHERE _triage_host = 'WS01' \
+         AND TimeCreated__text = '2026-01-05T02:13:58.2040000Z'",
+    );
+    let hash = oxl_engine::row_detail(&case, row).unwrap().hash.unwrap();
+    // If this changes, every case's supersession matching changes with it:
+    // rows hashed by an earlier build no longer match a later run's rows.
+    assert_eq!(
+        hash,
+        "b9cceffeb2ed30795c0dcba551add768b9f0bf06b3ab9b5e24ab3c3fb1eb689c"
+    );
 }
 
 /// Load `fw.csv` under the relation name `name`.

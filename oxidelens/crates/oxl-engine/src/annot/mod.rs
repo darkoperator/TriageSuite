@@ -28,7 +28,7 @@ use crate::actor::Actor;
 use crate::error::{EngineError, Result};
 use duckdb::types::Value as SqlValue;
 use duckdb::{params_from_iter, Connection};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// The most row ids an agent may pass to one mark or tag call.
@@ -70,19 +70,33 @@ impl RowOutcome {
     }
 }
 
-/// The whole-call checks every batch makes: at least one row, and no more
-/// than `AGENT_ROWS_PER_CALL` from an agent.
-fn check_batch(rows: &[i64], actor: &Actor) -> Result<()> {
+/// The rows a batch works on: `rows` with each id kept once, at its first
+/// appearance, so a row named twice gets one outcome and counts once. The
+/// whole-call checks are made on them: at least one row, and no more than
+/// `AGENT_ROWS_PER_CALL` from an agent.
+fn check_batch(rows: &[i64], actor: &Actor) -> Result<Vec<i64>> {
     if rows.is_empty() {
         return Err(EngineError::Invalid("no row ids were given".to_string()));
     }
+    let mut seen = HashSet::with_capacity(rows.len());
+    let rows: Vec<i64> = rows.iter().copied().filter(|r| seen.insert(*r)).collect();
     if actor.is_agent() && rows.len() > AGENT_ROWS_PER_CALL {
         return Err(EngineError::Refused(format!(
             "an agent may change at most {AGENT_ROWS_PER_CALL} rows per call, not {}",
             rows.len()
         )));
     }
-    Ok(())
+    Ok(rows)
+}
+
+/// Who may undo what `owner` (an actor label) marked or tagged, as a
+/// refusal says it: an agent's, that agent or an analyst; anyone else's,
+/// an analyst.
+fn who_may_undo(owner: &str) -> String {
+    match Actor::parse(owner) {
+        Ok(actor) if actor.is_agent() => format!("{owner} or an analyst"),
+        _ => "an analyst".to_string(),
+    }
 }
 
 /// The source, relation and schema-qualified table holding row `row_id`;
@@ -93,11 +107,11 @@ pub(crate) fn locate(conn: &Connection, row_id: i64) -> Result<Option<(i64, Stri
 
 /// The most ids one statement names. A batch has no limit of its own (an
 /// analyst's has none); its ids are asked about this many at a time.
-const IDS_PER_STATEMENT: usize = 2_048;
+pub(crate) const IDS_PER_STATEMENT: usize = 2_048;
 
 /// `ids` as the text of a SQL list. They are integers, so the text is
 /// safe to put into a statement as it is.
-fn id_list(ids: &[i64]) -> String {
+pub(crate) fn id_list(ids: &[i64]) -> String {
     ids.iter()
         .map(i64::to_string)
         .collect::<Vec<_>>()
@@ -111,8 +125,8 @@ const ROWS_PER_STATEMENT: usize = 512;
 /// `placeholder` (one row's `(?, ...)`) once per row of the chunk, and the
 /// chunk's values are its parameters, in order. A batch decides every row
 /// first and then writes them this way, so its cost does not grow by a
-/// statement per row.
-fn write_rows(
+/// statement per row. Supersession's rebinding writes the same way.
+pub(crate) fn write_rows(
     conn: &Connection,
     sql: &str,
     placeholder: &str,

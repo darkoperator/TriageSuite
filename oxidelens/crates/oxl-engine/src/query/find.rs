@@ -82,7 +82,10 @@ pub struct FindResult {
     pub searched: Vec<String>,
     /// The searched relations without a hit.
     pub no_hit: Vec<String>,
-    /// Case hosts in scope that no hit came from, sorted.
+    /// Hosts of the searched relations (narrowed to the request's hosts)
+    /// that no hit came from, sorted. A host only a relation left out of
+    /// the search has (by time span or host, or not reached before a
+    /// cancel) is not listed: it was never looked at.
     pub hosts_not_seen: Vec<String>,
     /// The progress callback stopped the search before every relation was.
     pub cancelled: bool,
@@ -126,18 +129,32 @@ pub fn find(
     out.cancelled = !finished;
     // `subjects` is sorted by name and each relation's hits by column and
     // host, so the hits are already in their documented order.
-    let seen: BTreeSet<&str> = out.hits.iter().filter_map(|h| h.host.as_deref()).collect();
-    let case_hosts: BTreeSet<&str> = subjects
+    out.hosts_not_seen = hosts_not_seen(&targets, &out.searched, &req.hosts, &out.hits);
+    Ok(out)
+}
+
+/// The hosts the search looked at and found nothing on: those of the
+/// relations it searched (`searched`, so a relation it left out, by time
+/// span or host, or never reached after a cancel, adds none), narrowed to
+/// `wanted` when that is not empty, less the hosts a hit came from. Sorted.
+fn hosts_not_seen(
+    targets: &[Target],
+    searched: &[String],
+    wanted: &[String],
+    hits: &[FindHit],
+) -> Vec<String> {
+    let seen: BTreeSet<&str> = hits.iter().filter_map(|h| h.host.as_deref()).collect();
+    let looked_at: BTreeSet<&str> = targets
         .iter()
-        .flat_map(|s| s.relation.hosts.iter().map(String::as_str))
+        .filter(|t| searched.contains(&t.scope.relation.name))
+        .flat_map(|t| t.scope.relation.hosts.iter().map(String::as_str))
         .collect();
-    out.hosts_not_seen = case_hosts
+    looked_at
         .into_iter()
-        .filter(|h| req.hosts.is_empty() || req.hosts.iter().any(|r| r == h))
+        .filter(|h| wanted.is_empty() || wanted.iter().any(|w| w == h))
         .filter(|h| !seen.contains(h))
         .map(str::to_string)
-        .collect();
-    Ok(out)
+        .collect()
 }
 
 /// `req` with its hosts as the case spells them (`resolve_hosts`).
@@ -343,7 +360,7 @@ fn relation_hits(conn: &Connection, req: &FindRequest, target: &Target) -> Resul
             .ok()
             .and_then(|i| target.searched.get(i))
             .ok_or_else(|| {
-                EngineError::Invalid(format!("find produced an unknown cell index {index}"))
+                EngineError::Internal(format!("find produced an unknown cell index {index}"))
             })?;
         out.push(FindHit {
             relation: scope.relation.name.clone(),

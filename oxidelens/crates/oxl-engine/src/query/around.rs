@@ -18,7 +18,8 @@ use super::find::{cells_sql, resolved, targets, FindRequest};
 use super::group::{as_count, primary_time_semantics, typed_primary_time};
 use super::page::{mark_sql, read_mark};
 use super::{
-    resolve_hosts, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT, ROW_ALIAS,
+    check_offset, resolve_hosts, scope_of, subjects, GridQuery, MarkState, Scope, ISO_FORMAT,
+    ROW_ALIAS,
 };
 use crate::annot::locate;
 use crate::case::Case;
@@ -174,8 +175,8 @@ const FALLBACK_VALUES: usize = 4;
 
 /// Up to `limit` rows of `source` from `offset`, across every relation it
 /// covers: time ascending, untimed last, then relation name, then row id.
-/// `Invalid` when `limit` is 0 or over `MAX_LIMIT`, or for what `find` or
-/// `around` would refuse.
+/// `Invalid` when `limit` is 0 or over `MAX_LIMIT`, `offset` is past
+/// `i64::MAX`, or for what `find` or `around` would refuse.
 pub fn merged_rows(
     case: &Case,
     source: &MergedSource,
@@ -183,6 +184,7 @@ pub fn merged_rows(
     offset: u64,
 ) -> Result<Listing<MergedRow>> {
     check_limit(limit)?;
+    check_offset(offset)?;
     let mut parts = Vec::new();
     let mut params = Vec::new();
     // The scope of each part, by its relation's name.
@@ -266,7 +268,7 @@ pub fn merged_rows(
         .map(|(row_id, relation, time)| {
             let scope = scopes.get(&relation);
             let (host, summary, mark) = shown.remove(&row_id).ok_or_else(|| {
-                EngineError::Invalid(format!(
+                EngineError::Internal(format!(
                     "row {row_id} of {relation} was listed but could not be read back"
                 ))
             })?;

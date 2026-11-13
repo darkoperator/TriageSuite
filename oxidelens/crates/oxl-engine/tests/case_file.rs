@@ -313,6 +313,63 @@ fn a_newer_format_needs_upgrade() {
     }
 }
 
+/// A case that breaks an invariant the engine relies on is not the caller's
+/// mistake: no change to the input fixes it. It has its own code,
+/// `internal`, so a caller can tell "fix what you asked" (`invalid`) from
+/// "the case or the engine is broken".
+#[test]
+fn internal_faults_have_their_own_code() {
+    use oxl_engine::{columns, marks, page, relations, GridQuery};
+    let d = tempfile::tempdir().unwrap();
+    let analyst = Actor::Analyst("tester".into());
+    let p = d.path().join("c.case.duckdb");
+    let mut case = Case::create(&p, "IR-1", &analyst).unwrap();
+    let fw = oxl_fixtures::loose_fw_csv(d.path());
+    load_file(&mut case, &fw, FileOptions::default(), &analyst).unwrap();
+    let row = case.scalar_i64("SELECT min(_ox_row) FROM fw_csv").unwrap();
+    drop(case);
+    let corrupt = |sql: &str| {
+        let conn = duckdb::Connection::open(&p).unwrap();
+        conn.execute_batch(sql).unwrap();
+    };
+    let all = GridQuery {
+        relation: "fw_csv".into(),
+        ..Default::default()
+    };
+
+    corrupt("UPDATE ox.column_catalog SET origin = 'bogus' WHERE name = 'time'");
+    let case = Case::open(&p).unwrap();
+    assert_eq!(code(columns(&case, "fw_csv")), "internal");
+    drop(case);
+    corrupt("UPDATE ox.column_catalog SET origin = 'sniffed' WHERE name = 'time'");
+
+    corrupt("UPDATE ox.column_catalog SET role = 'bogus' WHERE name = 'time'");
+    let case = Case::open(&p).unwrap();
+    assert_eq!(code(columns(&case, "fw_csv")), "internal");
+    drop(case);
+    corrupt("UPDATE ox.column_catalog SET role = 'data' WHERE name = 'time'");
+
+    corrupt("UPDATE ox.relation SET kind = 'bogus'");
+    let case = Case::open(&p).unwrap();
+    assert_eq!(code(relations(&case)), "internal");
+    drop(case);
+    corrupt("UPDATE ox.relation SET kind = 'file'");
+
+    // A mark the engine never writes.
+    corrupt(&format!(
+        "INSERT INTO ox.row_mark VALUES ({row}, 'bogus', 'analyst:tester', \
+         '2026-01-01T00:00:00.000000Z')"
+    ));
+    let case = Case::open(&p).unwrap();
+    assert_eq!(code(page(&case, &all, 50, 0)), "internal");
+    assert_eq!(code(marks(&case, None, 50, 0)), "internal");
+    drop(case);
+
+    // And an input mistake is still `invalid`.
+    let case = Case::open(&p).unwrap();
+    assert_eq!(code(page(&case, &all, 0, 0)), "invalid");
+}
+
 #[test]
 fn a_duckdb_file_that_is_not_a_case_is_invalid() {
     let d = tempfile::tempdir().unwrap();

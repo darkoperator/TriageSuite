@@ -17,8 +17,11 @@
 use super::stage::{host_column, source_schema};
 use super::Superseded;
 use crate::actor::Actor;
+use crate::annot::{id_list, write_rows, IDS_PER_STATEMENT};
 use crate::error::{EngineError, Result};
+use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection};
+use std::collections::{BTreeSet, HashMap};
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// The annotation tables; each points at a loaded row by its `row_id`.
@@ -237,6 +240,13 @@ fn note_entry(note: (i64, bool), from_row: i64, to_row: Option<i64>) -> serde_js
 /// its row and is listed, but is not counted. An annotation stays where it
 /// is, and is left behind, when its row has no counterpart, or when the
 /// counterpart already has a mark (for a mark) or the same tag (for a tag).
+///
+/// The annotations are read and written set-wise: the pairs, then the
+/// marks, tags and notes of every row involved, a statement each (per
+/// `IDS_PER_STATEMENT` rows), then one write per kind (per
+/// `write_rows` chunk). So the cost does not grow by a statement per
+/// annotated row. The pairs map each old row to at most one new row, in
+/// another table, so what was read up front stays true while deciding.
 pub(super) fn rebind(
     conn: &Connection,
     from_source: i64,
@@ -245,7 +255,9 @@ pub(super) fn rebind(
     host: &str,
 ) -> Result<Rebound> {
     let host_column = quote_ident(&host_column(conn, relation)?.ok_or_else(|| {
-        EngineError::Invalid(format!(
+        // A host's rows came from that host column; without one the case
+        // contradicts itself.
+        EngineError::Internal(format!(
             "{relation} has rows for host {host} but no host column"
         ))
     })?);
@@ -278,90 +290,160 @@ pub(super) fn rebind(
         moves: Vec::new(),
         stayed: Vec::new(),
     };
+    if pairs.is_empty() {
+        return Ok(out);
+    }
+
+    // What every row involved carries, read a few statements at a time.
+    let old_rows: Vec<i64> = pairs.iter().map(|(old, _)| *old).collect();
+    let mut rows = old_rows.clone();
+    rows.extend(pairs.iter().filter_map(|(_, new)| *new));
+    let mut marks: HashMap<i64, u64> = HashMap::new();
+    for (row, n) in read_by_row(
+        conn,
+        "SELECT row_id, count(*) FROM ox.row_mark WHERE row_id IN ({ids}) GROUP BY row_id",
+        &rows,
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    )? {
+        marks.insert(row, u64::try_from(n).unwrap_or_default());
+    }
+    let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
+    for (row, tag) in read_by_row(
+        conn,
+        "SELECT row_id, tag FROM ox.row_tag WHERE row_id IN ({ids}) ORDER BY row_id, tag",
+        &rows,
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+    )? {
+        tags.entry(row).or_default().push(tag);
+    }
+    // `(id, deleted)` of every note on an old row, deleted ones included.
+    let mut notes: HashMap<i64, Vec<(i64, bool)>> = HashMap::new();
+    for (row, id, deleted) in read_by_row(
+        conn,
+        "SELECT row_id, id, deleted FROM ox.note WHERE row_id IN ({ids}) ORDER BY row_id, id",
+        &old_rows,
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, bool>(2)?,
+            ))
+        },
+    )? {
+        notes.entry(row).or_default().push((id, deleted));
+    }
+
+    let none = Vec::new();
+    let mut mark_moves: Vec<Vec<SqlValue>> = Vec::new();
+    let mut tag_moves: BTreeSet<(i64, String, i64)> = BTreeSet::new();
+    let mut note_moves: Vec<Vec<SqlValue>> = Vec::new();
     for (old_row, new_row) in pairs {
-        let marks = count(conn, "ox.row_mark", old_row, "")?;
-        let tags = tags_on(conn, old_row)?;
-        let notes = notes_on(conn, old_row)?;
-        let live = len(notes.iter().filter(|(_, deleted)| !deleted));
+        let n_marks = marks.get(&old_row).copied().unwrap_or(0);
+        let old_tags = tags.get(&old_row).unwrap_or(&none);
+        let old_notes = notes.get(&old_row).map_or(&[][..], Vec::as_slice);
+        let live = len(old_notes.iter().filter(|(_, deleted)| !deleted));
         let Some(new_row) = new_row else {
-            out.left_behind += marks + len(tags.iter()) + live;
-            if marks > 0 {
+            out.left_behind += n_marks + len(old_tags.iter()) + live;
+            if n_marks > 0 {
                 out.stayed.push(entry("row_mark", old_row, None));
             }
             out.stayed
-                .extend(tags.iter().map(|t| tag_entry(t, old_row, None)));
+                .extend(old_tags.iter().map(|t| tag_entry(t, old_row, None)));
             out.stayed
-                .extend(notes.iter().map(|n| note_entry(*n, old_row, None)));
+                .extend(old_notes.iter().map(|n| note_entry(*n, old_row, None)));
             continue;
         };
         // A row carries at most one mark: one the target already has (an
         // earlier run's, left behind when a later run lacked the row)
         // stands, and the incoming one stays where it is.
-        if marks > 0 {
-            if count(conn, "ox.row_mark", new_row, "")? > 0 {
-                out.left_behind += marks;
+        if n_marks > 0 {
+            if marks.get(&new_row).copied().unwrap_or(0) > 0 {
+                out.left_behind += n_marks;
                 out.stayed.push(entry("row_mark", old_row, None));
             } else {
-                conn.execute(
-                    "UPDATE ox.row_mark SET row_id = ? WHERE row_id = ?",
-                    params![new_row, old_row],
-                )?;
-                out.moved += marks;
+                mark_moves.push(vec![SqlValue::BigInt(old_row), SqlValue::BigInt(new_row)]);
+                out.moved += n_marks;
                 out.moves.push(entry("row_mark", old_row, Some(new_row)));
             }
         }
         // Likewise a tag the target already carries is not doubled.
-        let present = tags_on(conn, new_row)?;
-        for tag in tags {
-            if present.contains(&tag) {
+        let present = tags.get(&new_row).unwrap_or(&none);
+        for tag in old_tags {
+            if present.contains(tag) {
                 out.left_behind += 1;
-                out.stayed.push(tag_entry(&tag, old_row, None));
+                out.stayed.push(tag_entry(tag, old_row, None));
             } else {
-                conn.execute(
-                    "UPDATE ox.row_tag SET row_id = ? WHERE row_id = ? AND tag = ?",
-                    params![new_row, old_row, tag],
-                )?;
+                tag_moves.insert((old_row, tag.clone(), new_row));
                 out.moved += 1;
-                out.moves.push(tag_entry(&tag, old_row, Some(new_row)));
+                out.moves.push(tag_entry(tag, old_row, Some(new_row)));
             }
         }
         // Notes always move, deleted ones too; only live ones are counted.
-        conn.execute(
-            "UPDATE ox.note SET row_id = ? WHERE row_id = ?",
-            params![new_row, old_row],
-        )?;
+        if !old_notes.is_empty() {
+            note_moves.push(vec![SqlValue::BigInt(old_row), SqlValue::BigInt(new_row)]);
+        }
         out.moved += live;
-        out.moves
-            .extend(notes.iter().map(|n| note_entry(*n, old_row, Some(new_row))));
+        out.moves.extend(
+            old_notes
+                .iter()
+                .map(|n| note_entry(*n, old_row, Some(new_row))),
+        );
     }
+
+    const PAIR: &str = "(CAST(? AS BIGINT), CAST(? AS BIGINT))";
+    write_rows(
+        conn,
+        "UPDATE ox.row_mark AS m SET row_id = v.to_row \
+         FROM (VALUES {values}) AS v(from_row, to_row) WHERE m.row_id = v.from_row",
+        PAIR,
+        &mark_moves,
+    )?;
+    let tag_moves: Vec<Vec<SqlValue>> = tag_moves
+        .into_iter()
+        .map(|(old, tag, new)| {
+            vec![
+                SqlValue::BigInt(old),
+                SqlValue::Text(tag),
+                SqlValue::BigInt(new),
+            ]
+        })
+        .collect();
+    write_rows(
+        conn,
+        "UPDATE ox.row_tag AS t SET row_id = v.to_row \
+         FROM (VALUES {values}) AS v(from_row, tag, to_row) \
+         WHERE t.row_id = v.from_row AND t.tag = v.tag",
+        "(CAST(? AS BIGINT), CAST(? AS VARCHAR), CAST(? AS BIGINT))",
+        &tag_moves,
+    )?;
+    write_rows(
+        conn,
+        "UPDATE ox.note AS n SET row_id = v.to_row \
+         FROM (VALUES {values}) AS v(from_row, to_row) WHERE n.row_id = v.from_row",
+        PAIR,
+        &note_moves,
+    )?;
     Ok(out)
 }
 
-/// The rows of annotation table `table` on `row`, with `extra` added to the
-/// WHERE clause.
-fn count(conn: &Connection, table: &str, row: i64, extra: &str) -> Result<u64> {
-    let n: i64 = conn.query_row(
-        &format!("SELECT count(*) FROM {table} WHERE row_id = ?{extra}"),
-        params![row],
-        |r| r.get(0),
-    )?;
-    Ok(u64::try_from(n).unwrap_or_default())
-}
-
-/// The tags on `row`.
-fn tags_on(conn: &Connection, row: i64) -> Result<Vec<String>> {
-    Ok(conn
-        .prepare("SELECT tag FROM ox.row_tag WHERE row_id = ? ORDER BY tag")?
-        .query_map(params![row], |r| r.get(0))?
-        .collect::<std::result::Result<_, _>>()?)
-}
-
-/// `(id, deleted)` of every note on `row`, deleted ones included.
-fn notes_on(conn: &Connection, row: i64) -> Result<Vec<(i64, bool)>> {
-    Ok(conn
-        .prepare("SELECT id, deleted FROM ox.note WHERE row_id = ? ORDER BY id")?
-        .query_map(params![row], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<std::result::Result<_, _>>()?)
+/// What `sql` returns over `ids`, read `IDS_PER_STATEMENT` ids per
+/// statement: its `{ids}` becomes each chunk as a SQL list. No statement
+/// runs for no ids.
+fn read_by_row<T>(
+    conn: &Connection,
+    sql: &str,
+    ids: &[i64],
+    row: impl Fn(&duckdb::Row<'_>) -> duckdb::Result<T>,
+) -> Result<Vec<T>> {
+    let mut out = Vec::new();
+    for chunk in ids.chunks(IDS_PER_STATEMENT) {
+        let mut stmt = conn.prepare(&sql.replace("{ids}", &id_list(chunk)))?;
+        let rows = stmt.query_map([], &row)?;
+        for r in rows {
+            out.push(r?);
+        }
+    }
+    Ok(out)
 }
 
 fn len<T>(items: impl Iterator<Item = T>) -> u64 {

@@ -462,13 +462,14 @@ fn row_ids_can_come_from_a_file() {
         .iter()
         .map(|o| o["row_id"].as_i64().unwrap())
         .collect();
-    assert_eq!(ids, [r, 999_999_999, r]);
+    // A row named twice is one row, with one outcome.
+    assert_eq!(ids, [r, 999_999_999]);
     assert_eq!(
         (v["data"]["done"].clone(), v["data"]["not_done"].clone()),
-        (json!(2), json!(1))
+        (json!(1), json!(1))
     );
     let (c, v) = ox(&["--case", p, "tag", "add", "--rows", &at, "--tag", "batch"]);
-    assert_eq!((c, v["data"]["done"].clone()), (0, json!(2)), "{v}");
+    assert_eq!((c, v["data"]["done"].clone()), (0, json!(1)), "{v}");
 
     // A file is held to the same rule as the list: a stray comma is a typo.
     for bad in ["1,,2", "1\n\nx", "1.5", "-1"] {

@@ -6,11 +6,13 @@
 //! removed source opens too, with no fields: its data is gone, but the
 //! mark, tags and notes left on it are what an analyst needs to see.
 
+use super::marks::marks_on;
 use super::notes::{notes_on, Note};
 use super::{find_row, no_row, LocatedRow, Standing};
 use crate::case::Case;
 use crate::catalog::{self, physical_columns, ColumnRole};
 use crate::error::{EngineError, Result};
+use crate::filter::failed_sql;
 use crate::load::stage::{host_column, source_schema};
 use crate::query::{read_mark, Cell, MarkState};
 use duckdb::{params, Connection};
@@ -157,16 +159,10 @@ pub fn row_detail(case: &Case, row_id: i64) -> Result<RowDetail> {
         return Err(EngineError::NotFound(no_row(row_id)));
     }
 
-    let (mark, marked_by) = conn
-        .prepare(
-            "SELECT mark, marked_by FROM ox.row_mark WHERE row_id = ? ORDER BY marked_at LIMIT 1",
-        )?
-        .query_map(params![row_id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?
-        .next()
-        .transpose()?
-        .map_or((None, None), |(mark, by)| (Some(mark), Some(by)));
+    // The mark exactly as a mark or clear call reads it.
+    let (mark, marked_by) = marks_on(conn, &[row_id])?
+        .remove(&row_id)
+        .map_or((None, None), |m| (Some(m.mark), Some(m.marked_by)));
     let tags: Vec<String> = conn
         .prepare("SELECT tag FROM ox.row_tag WHERE row_id = ? ORDER BY tag")?
         .query_map(params![row_id], |r| r.get(0))?
@@ -230,10 +226,7 @@ fn read_data(case: &Case, row: &LocatedRow) -> Result<RowData> {
             "CAST(NULL AS VARCHAR)".into()
         };
         select.push(match c.typed_column.as_deref().filter(|t| has(t)) {
-            Some(typed) => format!(
-                "({} IS NULL AND coalesce({text}, '') <> '')",
-                quote_ident(typed)
-            ),
+            Some(typed) => failed_sql(&text, &quote_ident(typed)),
             None => "FALSE".into(),
         });
         select.push(text);

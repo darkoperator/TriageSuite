@@ -142,8 +142,10 @@ impl Case {
                     |r| r.get(0),
                 )
                 .map_err(|e| match e {
+                    // Opening checked the format; a case the engine made
+                    // has every key.
                     duckdb::Error::QueryReturnedNoRows => {
-                        EngineError::Invalid(format!("the case has no {key} in ox.meta"))
+                        EngineError::Internal(format!("the case has no {key} in ox.meta"))
                     }
                     other => other.into(),
                 })

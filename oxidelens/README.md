@@ -69,8 +69,10 @@ of letters, digits, `.`, `_`, `-`). Without it, the actor is the operating
 system user as an analyst. The actor is recorded on every change. The engine
 enforces what each may do, and the CLI adds no rules of its own:
 
-- An agent may mark or tag at most 1,000 rows per call (more is refused).
-- An agent's tags must start `ai:`; an analyst's must not.
+- An agent may mark or tag at most 1,000 rows per call (more is refused). A
+  row id given twice in one call is one row, with one outcome.
+- An agent's tags must start `ai:` and have at least one character after it;
+  an analyst's must not start `ai:`.
 - An agent never changes a mark that exists, clears only marks it set,
   removes only tags it applied and deletes only notes it wrote.
 - An agent cannot declare a column's type, choose a relation's primary time
@@ -238,8 +240,9 @@ process exit codes:
 | 3 | `not_found` | a relation, row, note or source does not exist |
 | 4 | `refused` | a rule forbids it for this actor or in this state of the case (an agent doing what only an analyst may, a source already loaded, a colliding relation name, a removal that needs `--confirm-orphans`) |
 | 5 | `case_locked` | another process is changing the case, or this command would change it while another process has it open |
-| 6 | `needs_upgrade` | the case file is a newer or older format |
-| 10 | `engine`, `io` | an internal failure |
+| 6 | `needs_upgrade` | the case file is a newer format than this build reads (an older or unknown format is `invalid`) |
+| 10 | `engine`, `io` | DuckDB or the file system failed |
+| 11 | `internal` | the case or DuckDB broke an invariant the engine relies on (a value the engine never writes, a row it listed and could not read back, a lockdown that did not hold); nothing in the command fixes it |
 
 Any number of commands that only read the case run at once. A command that
 changes it (`load`, `source remove`, `mark set` and `clear`, `tag add` and
@@ -322,6 +325,16 @@ A mistake in the SELECT comes back `invalid` with DuckDB's reason. So does a
 view of the case that no longer binds, which only a damaged case has: the
 reason then names a table you never wrote, and the other commands report the
 same damage as `engine`.
+
+Three limits of the lockdown. The 2 GiB memory limit is per DuckDB instance,
+and each `query` call opens its own, so calls running at once can together use
+more (and DuckDB does not track every allocation). The checks above read your
+SELECT's text; a view stored in the case runs as stored, behind only the
+locked instance. The engine writes every view of a case it made, so the trust
+boundary is the case file: open only your own, or ones from people you trust.
+And a timestamp in a result column is shown as UTC text
+(`YYYY-MM-DDTHH:MM:SS.ffffffZ`), but one nested inside a STRUCT, LIST or MAP
+is shown as DuckDB writes it.
 
 What stays reachable beyond the case's own tables and views is DuckDB's own
 system views and settings: views such as `duckdb_databases` (by bare

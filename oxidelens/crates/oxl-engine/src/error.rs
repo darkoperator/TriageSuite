@@ -26,6 +26,11 @@ pub enum EngineError {
     CaseLocked(PathBuf),
     #[error("the case file is format {found}; this build reads format {expected}")]
     NeedsUpgrade { found: u32, expected: u32 },
+    /// The case or DuckDB broke an invariant the engine relies on: a value
+    /// the engine never writes, a row it listed and could not read back, a
+    /// lockdown that did not hold. Nothing the caller changes fixes it.
+    #[error("internal: {0}")]
+    Internal(String),
     #[error("engine: {0}")]
     Db(#[from] duckdb::Error),
     #[error("io: {0}")]
@@ -41,6 +46,7 @@ impl EngineError {
             EngineError::Refused(_) => "refused",
             EngineError::CaseLocked(_) => "case_locked",
             EngineError::NeedsUpgrade { .. } => "needs_upgrade",
+            EngineError::Internal(_) => "internal",
             EngineError::Db(_) => "engine",
             EngineError::Io(_) => "io",
         }
