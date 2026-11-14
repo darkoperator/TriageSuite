@@ -329,14 +329,7 @@ impl SettingsStore {
     /// Check `settings`, write them, and make them current. On a failed
     /// write the current settings and the file are both unchanged.
     pub fn save(&self, settings: &Settings) -> Result<Settings, CmdError> {
-        let bytes = settings.file_bytes()?;
-        let mut current = self.lock();
-        self.write(&bytes)?;
-        *current = settings.clone();
-        // The analyst has now chosen settings over the defaults that
-        // replaced the damaged file.
-        *self.damaged.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        Ok(settings.clone())
+        self.commit(true, |s| *s = settings.clone())
     }
 
     /// `save`, but with the stored `recent` list in place of the one in
@@ -345,26 +338,41 @@ impl SettingsStore {
     /// window that was in flight when a case opened cannot put back an older
     /// list. The stored list is read under the same lock the save holds.
     pub fn save_keeping_recent(&self, settings: &Settings) -> Result<Settings, CmdError> {
-        let mut current = self.lock();
-        let next = Settings {
-            recent: current.recent.clone(),
-            ..settings.clone()
-        };
-        let bytes = next.file_bytes()?;
-        self.write(&bytes)?;
-        *current = next.clone();
-        *self.damaged.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        Ok(next)
+        self.commit(true, |s| {
+            let recent = std::mem::take(&mut s.recent);
+            *s = Settings {
+                recent,
+                ..settings.clone()
+            };
+        })
     }
 
-    /// Change the current settings with `change` and save the result.
+    /// Change the current settings with `change` and save the result. A
+    /// backend change (a case opened, the recent list cleared), so a damaged
+    /// file reported at load stays reported.
     pub fn update(&self, change: impl FnOnce(&mut Settings)) -> Result<Settings, CmdError> {
+        self.commit(false, change)
+    }
+
+    /// The one write path: under the lock, apply `change` to the current
+    /// settings, check and write the result, then make it current. On any
+    /// error the current settings and the file are both unchanged.
+    /// `analyst_chose` clears the damaged-file notice: the analyst has now
+    /// chosen settings over the defaults that replaced the damaged file.
+    fn commit(
+        &self,
+        analyst_chose: bool,
+        change: impl FnOnce(&mut Settings),
+    ) -> Result<Settings, CmdError> {
         let mut current = self.lock();
         let mut next = current.clone();
         change(&mut next);
         let bytes = next.file_bytes()?;
         self.write(&bytes)?;
         *current = next.clone();
+        if analyst_chose {
+            *self.damaged.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        }
         Ok(next)
     }
 
@@ -380,19 +388,21 @@ impl SettingsStore {
             "{SETTINGS_FILE}.{}.{n}.partial",
             std::process::id()
         ));
+        // create_new: a file (or link) already at the partial's name is never
+        // followed or truncated, and, as it is not this save's, never removed.
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)
+            .map_err(io)?;
         let written = (|| {
-            // create_new: a file (or link) already at the partial's name is
-            // never followed or truncated.
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&partial)?;
             f.write_all(text)?;
             f.sync_all()?;
             drop(f);
             std::fs::rename(&partial, dir.join(SETTINGS_FILE))
         })();
         if written.is_err() {
+            // Only the file this save created.
             let _ = std::fs::remove_file(&partial);
         }
         written.map_err(io)
@@ -608,6 +618,57 @@ mod tests {
         assert!(matches!(store.update(|c| *c = s.clone()), Err(e) if e.code == "invalid"));
         assert!(files(d.path()).is_empty(), "{:?}", files(d.path()));
         assert!(store.get() == Settings::default());
+    }
+
+    #[test]
+    fn a_file_at_the_partial_name_is_left_alone() {
+        // The first save's partial is `settings.json.<pid>.0.partial`. A file
+        // already there makes `create_new` fail; that file is not the save's
+        // to remove.
+        let d = tempfile::tempdir().unwrap();
+        let (store, _) = SettingsStore::load(d.path());
+        let squatter = d
+            .path()
+            .join(format!("{SETTINGS_FILE}.{}.0.partial", std::process::id()));
+        std::fs::write(&squatter, b"not ours").unwrap();
+
+        assert_eq!(store.save(&Settings::default()).unwrap_err().code, "io");
+        assert_eq!(std::fs::read(&squatter).unwrap(), b"not ours");
+        assert!(!d.path().join(SETTINGS_FILE).exists());
+
+        // The next save takes the next name and succeeds.
+        store.save(&Settings::default()).unwrap();
+        assert_eq!(std::fs::read(&squatter).unwrap(), b"not ours");
+    }
+
+    #[test]
+    fn whole_settings_saves_keep_the_backends_recent_list() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join(SETTINGS_FILE), b"{not json").unwrap();
+        let (store, damaged) = SettingsStore::load(d.path());
+        assert!(damaged.is_some());
+
+        // A backend change leaves the damaged notice up; the analyst has not
+        // chosen anything yet.
+        store
+            .update(|s| s.add_recent("C:\\cases\\one.duckdb"))
+            .unwrap();
+        assert!(store.damaged().is_some());
+
+        // The window's save carries an older list; the stored one stays, and
+        // the notice goes.
+        let window = Settings {
+            font_size: 14,
+            recent: vec!["C:\\cases\\old.duckdb".into()],
+            ..Settings::default()
+        };
+        let saved = store.save_keeping_recent(&window).unwrap();
+        assert_eq!(saved.recent, vec!["C:\\cases\\one.duckdb".to_string()]);
+        assert_eq!(saved.font_size, 14);
+        assert_eq!(store.get(), saved);
+        assert_eq!(store.damaged(), None);
+        let (again, _) = SettingsStore::load(d.path());
+        assert_eq!(again.get(), saved);
     }
 
     #[test]
