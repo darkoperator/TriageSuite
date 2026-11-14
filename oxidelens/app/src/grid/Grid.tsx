@@ -11,7 +11,8 @@ import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
 import {
-  columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowOffset, isCmdError, newQueryId, viewSave,
+  columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowOffset, gridRowPositions, isCmdError, newQueryId,
+  queryCancel, viewSave,
 } from "../api";
 import { pickCsvSavePath } from "../dialogs";
 import ApplyWarnings, { type ViewNotice } from "../views/ApplyWarnings";
@@ -52,9 +53,11 @@ import {
   bestFitWidth, fetchedColumns, hide, materialise, moveColumn, resolve, setWidth, setWidths, show, showAll, togglePin,
 } from "./layout";
 import { measureText } from "./measure";
-import { BLOCK_ROWS, blockOf } from "./blocks";
+import { BLOCK_ROWS, MAX_BLOCKS, blockOf } from "./blocks";
 import { filterFromChips, newRule, rulesStatus } from "./ruleClasses";
-import { MAX_COPY_ROWS, contains, emptySelection, indices, selectOnly, selectRange, size, toggle, type Selection } from "./selection";
+import {
+  MAX_COPY_ROWS, contains, emptySelection, fromPositions, indices, selectOnly, selectRange, size, toggle, type Selection,
+} from "./selection";
 import SearchBox from "./SearchBox";
 import { stableKey, useGridData } from "./useGridData";
 import { useMatches } from "./useMatches";
@@ -349,25 +352,83 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   }, [relation, tab.id, generation, reportError]);
 
   // A write to the case (a mark, a load, a zone) re-reads the rows; filters and scroll stay. The selection, its anchor
-  // and the focused cell are row offsets, and a load or a supersede can put other rows at the same offsets, so they are
-  // cleared with the re-read: Copy rows can never take rows the analyst did not pick. (The row detail is kept: it holds
-  // a row id.) A change to the saved views alone re-reads no rows and keeps them.
+  // and the focused cell are row offsets, and a load or a supersede can put other rows at the same offsets, so the
+  // selection is kept by row id instead (ruling S10): its ids (resolved by an action, or read from the rows in memory
+  // before they are dropped) go to `grid_row_positions`, and the selection is rebuilt from where those rows are now;
+  // a row the new answer leaves out drops out. Until the answer comes nothing is selected, and a selection whose rows
+  // are not all known by id (some in blocks never read) is cleared: Copy rows can never take rows the analyst did not
+  // pick. The focused cell is cleared. (The row detail is kept: it holds a row id.) A change to the saved views alone
+  // re-reads no rows and keeps them.
   const treeRefresh = tree.refresh;
   const seenGeneration = useRef(change.generation);
   // Rises with every re-read of the rows; the histogram strip re-reads with it.
   const [dataVersion, setDataVersion] = useState(0);
+  const selectionRef = useRef(selection);
+  const shownStateRef = useRef(shownState);
+  useEffect(() => {
+    selectionRef.current = selection;
+    shownStateRef.current = shownState;
+  });
+  /** The rebuild in flight: its query id, and the one selection its answer may replace. */
+  const rebuild = useRef<{ queryId: string; waiting: Selection } | null>(null);
+  const cancelRebuild = useCallback(() => {
+    const r = rebuild.current;
+    rebuild.current = null;
+    if (r) queryCancel([r.queryId]).catch(() => {});
+  }, []);
+  // A new pick, a state change or the tab closing ends a rebuild: its answer could only undo what the analyst did since.
+  useEffect(() => {
+    if (rebuild.current && rebuild.current.waiting !== selection) cancelRebuild();
+  }, [selection, cancelRebuild]);
+  useEffect(() => cancelRebuild, [cancelRebuild]);
   useEffect(() => {
     if (change.generation === seenGeneration.current) return;
     seenGeneration.current = change.generation;
     if (change.kinds.some((k) => k !== "views")) {
-      setSelection(emptySelection);
+      const sel = selectionRef.current;
+      // The rows in memory still belong to the state before the write: read the ids there, before `refresh` drops them.
+      const known = (): number[] | null => {
+        if (size(sel) > BLOCK_ROWS * MAX_BLOCKS) return null;
+        const ids: number[] = [];
+        for (const i of indices(sel)) {
+          const row = rowAt(i);
+          if (!row) return null;
+          ids.push(row.id);
+        }
+        return ids;
+      };
+      const ids = sel.ids ?? known();
+      const anchorId = sel.anchor === null ? null : (rowAt(sel.anchor)?.id ?? null);
+      cancelRebuild();
+      if (ids !== null && ids.length > 0) {
+        const waiting: Selection = { ranges: [], anchor: null, ids };
+        const key = stableKey(stateRef.current);
+        const queryId = newQueryId();
+        rebuild.current = { queryId, waiting };
+        setSelection(waiting);
+        gridRowPositions(shownStateRef.current, ids, `tab:${tab.id}:selection`, queryId).then(
+          (positions) => {
+            if (rebuild.current?.queryId !== queryId) return;
+            rebuild.current = null;
+            if (stableKey(stateRef.current) !== key) return;
+            setSelection((s) => (s === waiting ? fromPositions(positions, anchorId) : s));
+          },
+          (e: unknown) => {
+            if (rebuild.current?.queryId !== queryId) return;
+            rebuild.current = null;
+            if (!(isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case"))) reportError(e);
+          },
+        );
+      } else {
+        setSelection(emptySelection);
+      }
       setFocus(null);
       setMenu(null);
       setDataVersion((v) => v + 1);
       refresh();
       treeRefresh();
     }
-  }, [change, refresh, treeRefresh]);
+  }, [change, refresh, treeRefresh, rowAt, cancelRebuild, tab.id, reportError]);
 
   // ---- virtual rows -----------------------------------------------------------------------------------------------
   const rowHeight = rowHeightFor(settings.font_size);

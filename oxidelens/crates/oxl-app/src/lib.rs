@@ -59,6 +59,8 @@ handlers![
     [cmd::grid::commands] grid_matches,
     [cmd::grid::commands] grid_match_count,
     [cmd::grid::commands] grid_row_offset,
+    [cmd::grid::commands] grid_row_ids,
+    [cmd::grid::commands] grid_row_positions,
     [cmd::grid::commands] grid_export,
     [cmd::grid::commands] date_range_chip,
     [cmd::grid::commands] default_colour_rules,

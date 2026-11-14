@@ -1,5 +1,6 @@
 //! The grid's commands: its page, counts, groups, histogram, a column's
-//! values, the empty columns, the find positions, and the chips and colour
+//! values, the empty columns, the find positions, the selection's row ids
+//! and their places after a re-read, and the chips and colour
 //! rules the window builds. Each takes the grid's whole `GridState` and is
 //! a read under the window's query id and slot; the CSV export is also a
 //! job (`grid_export`).
@@ -140,6 +141,30 @@ pub fn grid_row_offset(
     row_id: i64,
 ) -> Result<Option<u64>, CmdError> {
     at.read(state, |c| oxl_engine::row_offset(c, grid, row_id))
+}
+
+/// The row ids at the inclusive index `ranges` of what `grid` shows, in its
+/// order (`row_ids_at`): what an action on the selection acts on. At most
+/// `MAX_ACTION_ROWS` indexes, or `invalid` naming the count.
+pub fn grid_row_ids(
+    state: &AppState,
+    at: At<'_>,
+    grid: &GridState,
+    ranges: &[(u64, u64)],
+) -> Result<Vec<i64>, CmdError> {
+    at.read(state, |c| oxl_engine::row_ids_at(c, grid, ranges))
+}
+
+/// Each of `ids` with its index in what `grid` shows, or `None` when it is no
+/// longer there (`row_positions`): what the selection is rebuilt from after a
+/// re-read.
+pub fn grid_row_positions(
+    state: &AppState,
+    at: At<'_>,
+    grid: &GridState,
+    ids: &[i64],
+) -> Result<Vec<(i64, Option<u64>)>, CmdError> {
+    at.read(state, |c| oxl_engine::row_positions(c, grid, ids))
 }
 
 /// Write what `grid` shows to `path` as CSV (`export_csv`), as a job: the
@@ -357,6 +382,28 @@ pub mod commands {
         row_id: i64,
     ) -> Result<Option<u64>, CmdError> {
         super::grid_row_offset(&app, At::new(&query_id, &slot), &state, row_id)
+    }
+
+    #[tauri::command(async)]
+    pub fn grid_row_ids(
+        app: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+        state: GridState,
+        ranges: Vec<(u64, u64)>,
+    ) -> Result<Vec<i64>, CmdError> {
+        super::grid_row_ids(&app, At::new(&query_id, &slot), &state, &ranges)
+    }
+
+    #[tauri::command(async)]
+    pub fn grid_row_positions(
+        app: State<'_, AppState>,
+        query_id: String,
+        slot: String,
+        state: GridState,
+        ids: Vec<i64>,
+    ) -> Result<Vec<(i64, Option<u64>)>, CmdError> {
+        super::grid_row_positions(&app, At::new(&query_id, &slot), &state, &ids)
     }
 
     #[tauri::command(async)]

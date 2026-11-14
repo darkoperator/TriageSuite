@@ -111,6 +111,8 @@ fn sample(arg: &str, dir: &Path) -> Value {
         "after" | "contains" | "zoneTimes" | "from" | "to" => Value::Null,
         "backward" => json!(false),
         "windows" => json!([60]),
+        "ranges" => json!([[0, 1]]),
+        "ids" => json!([1]),
         "source" => json!({ "around": { "host": "WS01", "at": "2026-01-05T02:14:00Z",
                                         "window_seconds": 60 } }),
         "kind" => json!("view"),

@@ -7,6 +7,11 @@
 //! wrote, converted by `zone::render_utc_text` with its fraction kept as
 //! written. Only a `utc` timestamp column is converted; an `unknown` or
 //! `local` one is shown as written, never guessed.
+//!
+//! It also turns a selection, which the grid holds as index ranges in the
+//! state's order, into row ids (`row_ids_at`), and row ids back into indexes
+//! after the case changed (`row_positions`), so an action names the rows the
+//! analyst picked and the selection survives a re-read.
 
 use super::rules::{check_rules, compile_rule, rule_columns, ColourRule};
 use super::{GridState, SearchMode};
@@ -16,8 +21,8 @@ use crate::error::{EngineError, Result};
 use crate::filter::{failed_sql, null_safe};
 use crate::listing::check_limit;
 use crate::query::{
-    check_offset, check_zone, clip_text, mark_sql, order_sql, read_mark, scope, search_fragment,
-    MarkState, CELL_CAP, ISO_FORMAT, ROW_ALIAS,
+    as_count, check_offset, check_zone, clip_text, mark_sql, order_sql, read_mark, scope,
+    search_fragment, MarkState, Scope, CELL_CAP, ISO_FORMAT, ROW_ALIAS,
 };
 use crate::search::SearchOptions;
 use duckdb::params_from_iter;
@@ -309,4 +314,151 @@ pub fn page_view(
 pub(super) fn render_time(text: Option<&str>, typed: &str, zone: &str) -> Option<zone::Rendered> {
     text.and_then(|t| zone::render_utc_text(t, zone))
         .or_else(|| zone::render_utc_text(typed, zone))
+}
+
+/// The most rows one action (a mark, a tag, a note, an attach) takes, and so
+/// the most a selection is resolved to ids for (ruling S10).
+pub const MAX_ACTION_ROWS: usize = 10_000;
+
+/// The row ids at the inclusive index `ranges` of `state`'s order (the
+/// numbering `page_view` uses), in that order, each once however the ranges
+/// overlap. An index past the last row names nothing.
+///
+/// `Invalid` for a bad state, a range whose end is before its start or past
+/// `i64::MAX`, or ranges that cover more than `MAX_ACTION_ROWS` indexes (the
+/// message names the count), whatever the result holds.
+pub fn row_ids_at(case: &Case, state: &GridState, ranges: &[(u64, u64)]) -> Result<Vec<i64>> {
+    let ranges = merge_ranges(ranges)?;
+    let selected: u128 = ranges.iter().map(|(a, b)| u128::from(b - a) + 1).sum();
+    check_action_rows(selected)?;
+    if ranges.is_empty() {
+        return Ok(Vec::new());
+    }
+    let q = state.query()?;
+    let scope = scope(case, &q)?;
+    let order = order_sql(&scope, &q)?;
+    // The merged ranges are disjoint, so a row falls in at most one. The
+    // bounds are bound as two lists, one `?` per bound, never interpolated.
+    let marks = vec!["?"; ranges.len()].join(", ");
+    let sql = format!(
+        "SELECT n.ox_id FROM ({}) AS n \
+         JOIN (SELECT unnest([{marks}]) AS lo, unnest([{marks}]) AS hi) AS b \
+           ON n.ox_pos BETWEEN b.lo AND b.hi \
+         ORDER BY n.ox_pos",
+        numbered_sql(&scope, &order),
+    );
+    // The scope's `?`s come first in the text, then the starts, the ends.
+    let mut params = scope.params;
+    // `merge_ranges` checked every bound against `i64::MAX`.
+    let bound = |v: u64| SqlValue::BigInt(i64::try_from(v).unwrap_or(i64::MAX));
+    params.extend(ranges.iter().map(|(a, _)| bound(*a)));
+    params.extend(ranges.iter().map(|(_, b)| bound(*b)));
+    let ids = case
+        .conn()
+        .prepare(&sql)?
+        .query_map(params_from_iter(params), |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(ids)
+}
+
+/// Each of `ids`, in the order given, with its index in `state`'s order (as
+/// `row_offset` gives it), or `None` when the state leaves it out or no row
+/// has it. What the grid rebuilds its selection from after a re-read.
+///
+/// `Invalid` for a bad state or more than `MAX_ACTION_ROWS` ids.
+pub fn row_positions(
+    case: &Case,
+    state: &GridState,
+    ids: &[i64],
+) -> Result<Vec<(i64, Option<u64>)>> {
+    check_action_rows(ids.len() as u128)?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let q = state.query()?;
+    let scope = scope(case, &q)?;
+    let order = order_sql(&scope, &q)?;
+    let sql = format!(
+        "SELECT u.id, n.ox_pos FROM (SELECT unnest([{}]) AS id) AS u \
+         JOIN ({}) AS n ON n.ox_id = u.id",
+        vec!["?"; ids.len()].join(", "),
+        numbered_sql(&scope, &order),
+    );
+    // The ids' `?`s come first in the text, then the scope's.
+    let mut params: Vec<SqlValue> = ids.iter().map(|id| SqlValue::BigInt(*id)).collect();
+    params.extend(scope.params);
+    let found: HashMap<i64, i64> = case
+        .conn()
+        .prepare(&sql)?
+        .query_map(params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(ids
+        .iter()
+        .map(|id| (*id, found.get(id).map(|p| as_count(*p))))
+        .collect())
+}
+
+/// Every row in `scope` with its index in the grid's order (`ox_pos`) and
+/// its id (`ox_id`), binding the scope's parameters: the numbering
+/// `row_offset` and `matches` use.
+fn numbered_sql(scope: &Scope, order: &str) -> String {
+    format!(
+        "SELECT row_number() OVER (ORDER BY {order}) - 1 AS ox_pos, \
+                {ROW_ALIAS}._ox_row AS ox_id \
+         FROM {} WHERE {}",
+        scope.from_sql, scope.where_sql
+    )
+}
+
+/// `ranges` sorted and merged where they overlap or touch. `Invalid` for a
+/// range whose end is before its start, or a bound past `i64::MAX`.
+fn merge_ranges(ranges: &[(u64, u64)]) -> Result<Vec<(u64, u64)>> {
+    let mut sorted = Vec::with_capacity(ranges.len());
+    for &(a, b) in ranges {
+        check_offset(a)?;
+        check_offset(b)?;
+        if b < a {
+            return Err(EngineError::Invalid(format!(
+                "a selected range ends before it starts ({a} to {b})"
+            )));
+        }
+        sorted.push((a, b));
+    }
+    sorted.sort_unstable();
+    let mut out: Vec<(u64, u64)> = Vec::with_capacity(sorted.len());
+    for (a, b) in sorted {
+        match out.last_mut() {
+            // Both bounds are at most i64::MAX, so `+ 1` cannot overflow.
+            Some(last) if a <= last.1 + 1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    Ok(out)
+}
+
+/// `Invalid` when an action would take more than `MAX_ACTION_ROWS` rows,
+/// naming how many it would take (ruling S10).
+fn check_action_rows(n: u128) -> Result<()> {
+    if n > MAX_ACTION_ROWS as u128 {
+        return Err(EngineError::Invalid(format!(
+            "select at most {} rows (you have {})",
+            with_commas(MAX_ACTION_ROWS as u128),
+            with_commas(n)
+        )));
+    }
+    Ok(())
+}
+
+/// `n` with a comma between each group of three digits, as the window
+/// writes counts.
+fn with_commas(n: u128) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    out
 }

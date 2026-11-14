@@ -612,6 +612,27 @@ const handlers: Handlers = {
       const at = sel.rows.indexOf(index);
       return index >= 0 && index < sel.rel.rows.length && at >= 0 ? at : null;
     }),
+  grid_row_ids: (a) =>
+    read(a.slot, a.queryId, () => {
+      // As the engine: ranges merged where they overlap, counted before anything is read, refused past 10,000.
+      const merged: Array<[number, number]> = [];
+      for (const [from, to] of [...a.ranges].sort((x, y) => x[0] - y[0])) {
+        if (to < from) fail("invalid", `a selected range ends before it starts (${from} to ${to})`);
+        const last = merged[merged.length - 1];
+        if (last && from <= last[1] + 1) last[1] = Math.max(last[1], to);
+        else merged.push([from, to]);
+      }
+      const asked = merged.reduce((n, [from, to]) => n + (to - from + 1), 0);
+      if (asked > 10_000) fail("invalid", `select at most 10,000 rows (you have ${asked.toLocaleString("en-US")})`);
+      const sel = select(a.state);
+      return merged.flatMap(([from, to]) => sel.rows.slice(from, to + 1).map((r) => rowIdOf(sel.rel, r)));
+    }),
+  grid_row_positions: (a) =>
+    read(a.slot, a.queryId, () => {
+      const sel = select(a.state);
+      const at = new Map(sel.rows.map((r, i) => [rowIdOf(sel.rel, r), i]));
+      return a.ids.map((id): [number, number | null] => [id, at.get(id) ?? null]);
+    }),
   grid_export: async (a) => {
     const rows = await read(a.slot, a.queryId, () => select(a.state).rows.length);
     mockEmit("job-started", { kind: "export", label: a.path.split(/[\\/]/).pop() ?? a.path });

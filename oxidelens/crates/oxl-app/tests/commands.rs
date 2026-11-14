@@ -392,6 +392,24 @@ fn grid_row_offset_answers_the_rows_place_or_none() {
 }
 
 #[test]
+fn grid_row_ids_and_positions_turn_a_selection_into_ids_and_back() {
+    let l = loaded();
+    let state = grid(EVENTS);
+    let page = g::grid_page(&l.state, at("t1:sel"), &state, 20, 0, &utc()).unwrap();
+    let ids = g::grid_row_ids(&l.state, at("t1:selection"), &state, &[(3, 5)]).unwrap();
+    assert_eq!(ids, page.row_ids[3..=5].to_vec());
+    let back = g::grid_row_positions(&l.state, at("t1:selection"), &state, &[ids[1], -1]).unwrap();
+    assert_eq!(back, vec![(ids[1], Some(4)), (-1, None)]);
+    // More than 10,000 rows is refused with the count.
+    let err = g::grid_row_ids(&l.state, at("t1:selection"), &state, &[(0, 10_000)]).unwrap_err();
+    assert_eq!(err.code, "invalid");
+    assert_eq!(
+        err.message,
+        "invalid: select at most 10,000 rows (you have 10,001)"
+    );
+}
+
+#[test]
 fn grid_export_is_a_job_that_writes_the_file() {
     let l = loaded();
     let out = l.dir.path().join("events.csv");

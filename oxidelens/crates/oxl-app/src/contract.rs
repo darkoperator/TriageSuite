@@ -65,6 +65,8 @@ pub const COMMANDS: &[&str] = &[
     "grid_matches",
     "grid_match_count",
     "grid_row_offset",
+    "grid_row_ids",
+    "grid_row_positions",
     "grid_export",
     "date_range_chip",
     "default_colour_rules",
@@ -257,6 +259,14 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         read!(
             c,
             grid_row_offset(state: GridState, rowId: i64) -> Option<u64>
+        ),
+        read!(
+            c,
+            grid_row_ids(state: GridState, ranges: Vec<(u64, u64)>) -> Vec<i64>
+        ),
+        read!(
+            c,
+            grid_row_positions(state: GridState, ids: Vec<i64>) -> Vec<(i64, Option<u64>)>
         ),
         read!(
             c,

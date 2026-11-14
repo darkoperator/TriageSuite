@@ -380,40 +380,129 @@ describe("grid", () => {
     });
   });
 
-  it("a_case_change_that_rereads_the_rows_clears_the_selection_so_copy_takes_nothing_stale", async () => {
+  it("selection_survives_case_changed_by_id", async () => {
     const { user, status, ctx, rerender } = await mount();
-    await user.click(cellOf(rowOf(2), "Channel"));
+    await user.click(cellOf(rowOf(3), "Channel"));
     await user.keyboard("{Shift>}");
     await user.click(cellOf(rowOf(5), "Channel"));
     await user.keyboard("{/Shift}");
-    await waitFor(() => expect(statusText(status)).toContain(" · 4 selected · "));
-    // A load moves rows: from now on the same offsets hold other evidence.
+    await waitFor(() => expect(statusText(status)).toContain(" · 3 selected · "));
+    const before = (await mockCall("grid_page", { ...callsOf("grid_page").at(-1)!.args, queryId: "t", slot: "t" })) as GridPage;
+    const [kept, gone, moved] = before.row_ids.slice(3, 6);
+    const record = (i: number) => {
+      const at = before.columns.findIndex((c) => c.name === "RecordId");
+      return before.cells[i][at]!.text;
+    };
+    // The write takes the middle row out of the answer: the rows after it move up one.
     overrideCommand("grid_page", async (args) => {
       const page = (await mockCall("grid_page", args)) as GridPage;
-      const i = page.columns.findIndex((c) => c.name === "RecordId");
-      page.cells = page.cells.map((row) => row.map((cell, k) => (k === i ? { ...cell!, text: `moved-${cell?.text}` } : cell)));
-      return page;
+      const k = page.row_ids.indexOf(gone);
+      if (k < 0) return page;
+      const drop = <T,>(xs: T[]) => xs.filter((_, i) => i !== k);
+      return {
+        ...page, row_ids: drop(page.row_ids), marks: drop(page.marks), cells: drop(page.cells), row_rule: drop(page.row_rule),
+        search_hits: drop(page.search_hits),
+      };
     });
+    overrideCommand("grid_row_positions", async (args) => {
+      const answer = (await mockCall("grid_row_positions", args)) as Array<[number, number | null]>;
+      const at = before.row_ids.indexOf(gone);
+      return answer.map(([id, pos]) => [id, id === gone || pos === null ? null : pos > at ? pos - 1 : pos]);
+    });
+    rerender(
+      <ShellCtx.Provider value={{ ...ctx, change: { generation: 1, kinds: ["marks"] } }}>
+        <Grid tab={events} active scrollOffset={0} onScroll={() => {}} />
+      </ShellCtx.Provider>,
+    );
+    // The selection is rebuilt from the ids the grid held, through the engine, never from the old offsets.
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    const asked = callsOf("grid_row_positions")[0].args as { ids: number[]; slot: string; state: GridState };
+    expect(asked.ids).toEqual([kept, gone, moved]);
+    expect(asked.slot).toBe("tab:dataset:mock_events:selection");
+    expect(asked.state.relation).toBe("mock_events");
+    // (Waited for on the rows: `statusText` renders, and a render inside `waitFor` wakes it again.)
+    const selectedRows = () => dataRows().filter((r) => r.getAttribute("aria-selected") === "true");
+    await waitFor(() => expect(selectedRows().map((r) => r.getAttribute("data-row-index"))).toEqual(["3", "4"]));
+    await waitFor(() => expect(cellOf(rowOf(4), "RecordId").textContent).toBe(record(5)));
+    expect(statusText(status)).toContain(" · 2 selected · ");
+    const selected = selectedRows();
+    expect(selected.map((r) => cellOf(r, "RecordId").textContent)).toEqual([record(3), record(5)]);
+    // Copy rows takes exactly those two rows.
+    screen.getByRole("grid").focus();
+    await user.keyboard("{Control>}{Shift>}c{/Shift}{/Control}");
+    await waitFor(() => expect(copy.writeClipboard).toHaveBeenCalledTimes(1));
+    const lines = vi.mocked(copy.writeClipboard).mock.calls[0][0].split("\n");
+    expect(lines).toHaveLength(3);
+    // Shift-click extends from the anchor, which moved with its row (index 3 still).
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(6), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(statusText(status)).toContain(" · 4 selected · "));
+  });
+
+  it("a_late_selection_rebuild_is_not_drawn_and_is_cancelled", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    await user.click(cellOf(rowOf(2), "Channel"));
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(4), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(statusText(status)).toContain(" · 3 selected · "));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("grid_row_positions", async (args) => {
+      await gate;
+      return mockCall("grid_row_positions", args);
+    });
+    rerender(
+      <ShellCtx.Provider value={{ ...ctx, change: { generation: 1, kinds: ["marks"] } }}>
+        <Grid tab={events} active scrollOffset={0} onScroll={() => {}} />
+      </ShellCtx.Provider>,
+    );
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    // While the rebuild is out, no row is selected: the old offsets may name other rows now.
+    expect(dataRows().filter((r) => r.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    // The analyst picks another row before the answer comes: the pick stands and the rebuild is cancelled.
+    await waitFor(() => expect(cellOf(rowOf(7), "Channel").textContent).not.toBe(""));
+    await user.click(cellOf(rowOf(7), "Channel"));
+    const id = (callsOf("grid_row_positions")[0].args as { queryId: string }).queryId;
+    await waitFor(() => expect(callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds)).toContain(id));
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(dataRows().filter((r) => r.getAttribute("aria-selected") === "true").map((r) => r.getAttribute("data-row-index"))).toEqual(["7"]);
+    expect(statusText(status)).toContain(" · 1 selected · ");
+  });
+
+  it("a_selection_not_all_in_memory_is_cleared_by_a_reread", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    await user.click(cellOf(rowOf(10), "Channel"));
+    await scrollToRow(1500);
+    await waitFor(() => expect(rowOf(1500)).toBeTruthy());
+    await waitFor(() => expect(cellOf(rowOf(1500), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(1500), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(statusText(status)).toContain(" · 1,491 selected · "));
     rerender(
       <ShellCtx.Provider value={{ ...ctx, change: { generation: 1, kinds: ["sources"] } }}>
         <Grid tab={events} active scrollOffset={0} onScroll={() => {}} />
       </ShellCtx.Provider>,
     );
-    await waitFor(() => expect(cellOf(rowOf(2), "RecordId").textContent).toMatch(/^moved-/));
-    // Nothing the analyst picked survives onto the moved rows: no row is selected, the status says so, and Copy rows
-    // (Ctrl+Shift+C, or the cell menu) copies nothing.
-    expect(dataRows().filter((r) => r.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    // Rows in blocks never read have no id here, and after the write their offsets may name other rows: nothing
+    // survives, Copy rows copies nothing, and shift-click has no anchor left to extend from.
     await waitFor(() => expect(statusText(status)).toContain(" · 0 selected · "));
+    expect(callsOf("grid_row_positions")).toHaveLength(0);
     screen.getByRole("grid").focus();
     await user.keyboard("{Control>}{Shift>}c{/Shift}{/Control}");
     await act(() => new Promise((r) => setTimeout(r, 100)));
     expect(copy.writeClipboard).not.toHaveBeenCalled();
-    // Shift-click has no anchor left to extend from: it selects the one row clicked.
+    await waitFor(() => expect(cellOf(rowOf(1500), "Channel").textContent).not.toBe(""), { timeout: 5000 });
     await user.keyboard("{Shift>}");
-    await user.click(cellOf(rowOf(7), "Channel"));
+    await user.click(cellOf(rowOf(1500), "Channel"));
     await user.keyboard("{/Shift}");
     await waitFor(() => expect(statusText(status)).toContain(" · 1 selected · "));
-  });
+  }, 30_000);
 
   it("a_views_only_case_change_keeps_the_selection", async () => {
     const { user, status, ctx, rerender } = await mount();

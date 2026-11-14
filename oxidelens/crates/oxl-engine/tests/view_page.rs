@@ -5,9 +5,10 @@ mod common;
 
 use common::{analyst, loaded};
 use oxl_engine::{
-    default_colour_rules, load_file, page_view, parse_filter, Case, ColourRule, EngineError,
-    FileOptions, GridPage, GridState, PageOptions, RuleColour, RuleScope, SearchMode, SearchState,
-    SqlType, TimeSemantics, MAX_RULES,
+    default_colour_rules, load_file, mark_suspicious, page_view, parse_filter, row_ids_at,
+    row_positions, Case, Chip, ChipOrigin, ColourRule, EngineError, FileOptions, GridPage,
+    GridState, PageOptions, RuleColour, RuleScope, SearchMode, SearchState, SortKey, SqlType,
+    TimeSemantics, MAX_ACTION_ROWS, MAX_RULES,
 };
 use oxl_fixtures::loose_fw_csv;
 
@@ -469,4 +470,131 @@ fn an_empty_page_has_empty_lists() {
     assert!(p.search_hits.is_empty() && p.marks.is_empty());
     assert_eq!(p.rule_columns.len(), 1);
     assert!(!p.truncated);
+}
+
+fn sorted_by_event_id(descending: bool) -> GridState {
+    GridState {
+        sort: vec![SortKey {
+            column: "EventId".into(),
+            descending,
+        }],
+        ..state(EVENTS)
+    }
+}
+
+fn no_mark_chip() -> Chip {
+    Chip {
+        id: "unmarked".into(),
+        label: "no mark".into(),
+        enabled: true,
+        origin: ChipOrigin::FilterRow,
+        filter: parse_filter(r#"{"column":"_mark","op":"eq","value":"none"}"#).unwrap(),
+    }
+}
+
+#[test]
+fn row_ids_follow_the_sort() {
+    let (_d, case) = loaded();
+    for descending in [false, true] {
+        let st = sorted_by_event_id(descending);
+        let shown = whole(&case, &st, &opts("UTC", Vec::new())).row_ids;
+        assert!(shown.len() > 6);
+        // Two ranges, given out of order, answer in the grid's order.
+        let ids = row_ids_at(&case, &st, &[(4, 4), (1, 2)]).unwrap();
+        assert_eq!(ids, vec![shown[1], shown[2], shown[4]]);
+        // A range running past the last row answers the rows there are.
+        let last = shown.len() as u64 - 1;
+        let tail = row_ids_at(&case, &st, &[(last, last + 50)]).unwrap();
+        assert_eq!(tail, vec![shown[shown.len() - 1]]);
+    }
+    // Ranges that overlap name each row once.
+    let st = state(EVENTS);
+    let shown = whole(&case, &st, &opts("UTC", Vec::new())).row_ids;
+    let ids = row_ids_at(&case, &st, &[(0, 2), (1, 3)]).unwrap();
+    assert_eq!(ids, shown[..4].to_vec());
+    // A range whose end is before its start is refused, not reversed.
+    assert!(matches!(
+        row_ids_at(&case, &st, &[(3, 1)]),
+        Err(EngineError::Invalid(_))
+    ));
+}
+
+#[test]
+fn ten_thousand_and_one_rows_are_refused() {
+    let (_d, case) = loaded();
+    let st = state(EVENTS);
+    assert_eq!(MAX_ACTION_ROWS, 10_000);
+    // Ten thousand is allowed, however few rows the relation has.
+    let all = row_ids_at(&case, &st, &[(0, 9_999)]).unwrap();
+    assert_eq!(all, whole(&case, &st, &opts("UTC", Vec::new())).row_ids);
+    // One more is refused, and the message names the count; the selection is
+    // counted once however its ranges overlap.
+    for ranges in [vec![(0, 10_000)], vec![(0, 5_000), (5_001, 10_000)]] {
+        match row_ids_at(&case, &st, &ranges) {
+            Err(EngineError::Invalid(m)) => {
+                assert_eq!(m, "select at most 10,000 rows (you have 10,001)");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+    assert!(row_ids_at(&case, &st, &[(0, 5_000), (0, 9_999)]).is_ok());
+    // A range past i64::MAX is refused as an offset is.
+    assert!(matches!(
+        row_ids_at(&case, &st, &[(u64::MAX, u64::MAX)]),
+        Err(EngineError::Invalid(_))
+    ));
+    // As many ids are the most `row_positions` takes.
+    let ids: Vec<i64> = (0..=10_000).collect();
+    match row_positions(&case, &st, &ids) {
+        Err(EngineError::Invalid(m)) => {
+            assert_eq!(m, "select at most 10,000 rows (you have 10,001)");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[test]
+fn positions_of_ids_after_a_change() {
+    let (_d, mut case) = loaded();
+    let st = state(EVENTS);
+    let unmarked = GridState {
+        chips: vec![no_mark_chip()],
+        ..state(EVENTS)
+    };
+    let shown = whole(&case, &st, &opts("UTC", Vec::new())).row_ids;
+    let ids = vec![shown[2], shown[3], shown[4]];
+    assert_eq!(
+        row_positions(&case, &unmarked, &ids).unwrap(),
+        vec![
+            (shown[2], Some(2)),
+            (shown[3], Some(3)),
+            (shown[4], Some(4))
+        ]
+    );
+
+    assert!(mark_suspicious(&mut case, &[shown[3]], &analyst()).unwrap()[0].done);
+
+    // The mark moves no row: each keeps its index.
+    assert_eq!(
+        row_positions(&case, &st, &ids).unwrap(),
+        vec![
+            (shown[2], Some(2)),
+            (shown[3], Some(3)),
+            (shown[4], Some(4))
+        ]
+    );
+    // Under a filter that now leaves the marked row out, it has no place and
+    // the rows after it close up; the answer keeps the ids' order, an id no
+    // row has included.
+    let asked = vec![shown[4], shown[3], -1, shown[2]];
+    assert_eq!(
+        row_positions(&case, &unmarked, &asked).unwrap(),
+        vec![
+            (shown[4], Some(3)),
+            (shown[3], None),
+            (-1, None),
+            (shown[2], Some(2)),
+        ]
+    );
+    assert!(row_positions(&case, &st, &[]).unwrap().is_empty());
 }

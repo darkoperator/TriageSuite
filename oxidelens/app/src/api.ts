@@ -177,6 +177,12 @@ export const gridMatchCount = (state: GridState, slot: string, queryId = newQuer
 /** The row's place in what `state` shows (its offset in the state's order), or null when `state` leaves it out. */
 export const gridRowOffset = (state: GridState, rowId: number, slot: string, queryId = newQueryId()) =>
   call<CommandResult["grid_row_offset"]>("grid_row_offset", { queryId, slot, state, rowId } satisfies Args<"grid_row_offset">);
+/** The row ids at the inclusive index ranges of `state`'s order, in that order; at most 10,000 rows, else `invalid`. */
+export const gridRowIds = (state: GridState, ranges: Array<[number, number]>, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["grid_row_ids"]>("grid_row_ids", { queryId, slot, state, ranges } satisfies Args<"grid_row_ids">);
+/** Each id with its index in `state`'s order now, or null when `state` no longer shows it. */
+export const gridRowPositions = (state: GridState, ids: number[], slot: string, queryId = newQueryId()) =>
+  call<CommandResult["grid_row_positions"]>("grid_row_positions", { queryId, slot, state, ids } satisfies Args<"grid_row_positions">);
 export const gridExport = (
   state: GridState, path: string, zoneTimes: string | null, slot: string, queryId = newQueryId(),
 ) => call<CommandResult["grid_export"]>("grid_export", { queryId, slot, state, path, zoneTimes } satisfies Args<"grid_export">);

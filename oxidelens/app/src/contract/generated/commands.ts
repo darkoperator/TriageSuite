@@ -60,6 +60,8 @@ export const COMMANDS = [
   "grid_matches",
   "grid_match_count",
   "grid_row_offset",
+  "grid_row_ids",
+  "grid_row_positions",
   "grid_export",
   "date_range_chip",
   "default_colour_rules",
@@ -110,6 +112,8 @@ export type CommandArgs = {
   grid_matches: { queryId: string; slot: string; state: GridState; from?: number | null; backward: boolean; limit: number };
   grid_match_count: { queryId: string; slot: string; state: GridState };
   grid_row_offset: { queryId: string; slot: string; state: GridState; rowId: number };
+  grid_row_ids: { queryId: string; slot: string; state: GridState; ranges: Array<[number, number]> };
+  grid_row_positions: { queryId: string; slot: string; state: GridState; ids: Array<number> };
   grid_export: { queryId: string; slot: string; state: GridState; path: string; zoneTimes?: string | null };
   date_range_chip: { queryId: string; slot: string; relation: string; column: string; from?: string | null; to?: string | null; zone: string };
   default_colour_rules: { queryId: string; slot: string; relation: string };
@@ -157,6 +161,8 @@ export type CommandResult = {
   grid_matches: Listing<MatchPos>;
   grid_match_count: number;
   grid_row_offset: number | null;
+  grid_row_ids: Array<number>;
+  grid_row_positions: Array<[number, number | null]>;
   grid_export: ExportReport;
   date_range_chip: Chip;
   default_colour_rules: Array<ColourRule>;

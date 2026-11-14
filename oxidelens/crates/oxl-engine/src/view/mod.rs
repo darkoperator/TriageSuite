@@ -26,7 +26,10 @@ mod values;
 pub use export::{
     check_export_target, create_export_partial, export_csv, export_csv_guarded, ExportReport,
 };
-pub use page::{page_view, ColumnMeta, GridCell, GridPage, PageOptions};
+pub use page::{
+    page_view, row_ids_at, row_positions, ColumnMeta, GridCell, GridPage, PageOptions,
+    MAX_ACTION_ROWS,
+};
 pub use row::{
     around_totals, cell_value, merged_view, row_view, CellValue, FieldView, MergedView, Provenance,
     RowView, WindowTotal, MAX_PIVOT_WINDOWS, MAX_WINDOW_SECONDS,
