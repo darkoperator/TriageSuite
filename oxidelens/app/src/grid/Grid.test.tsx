@@ -151,11 +151,11 @@ describe("grid", () => {
 
   it("a_focused_sort_header_sorts_on_enter_and_space", async () => {
     const { user } = await mount();
-    await user.tab(); // the grid's first stop is the header row
     const cells = screen.getAllByRole("columnheader").filter((h) => h.querySelector(".col-name"));
-    cells[0].focus();
-    expect(cells[0]).toHaveFocus();
     const first = cells[0].querySelector(".col-name")!.textContent!;
+    // Tab only: the header row is reached by keyboard, with no programmatic focus.
+    for (let i = 0; i < 60 && document.activeElement !== cells[0]; i++) await user.tab();
+    expect(document.activeElement).toBe(cells[0]);
     await user.keyboard("{Enter}");
     await waitFor(() => expect(lastState().sort).toEqual([{ column: first, descending: false }]));
     await user.keyboard(" ");

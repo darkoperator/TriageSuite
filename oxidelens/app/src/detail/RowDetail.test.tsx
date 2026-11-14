@@ -398,17 +398,21 @@ describe("row detail", () => {
     await screen.findByTestId("detail-row");
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
+    const oldText = field("Computer").textContent;
     overrideCommand("row_view", async (args: Args) => {
       await gate;
-      return mockCall<RowView>("row_view", args);
+      const v = await mockCall<RowView>("row_view", args);
+      setField(v, "Computer", "WS99-RE-READ");
+      return v;
     });
     m.rerender(await caseSummary("t"), 1, 1); // case-changed: a new generation, the same row
     await settle(50);
     expect(screen.getByTestId("detail-row")).toHaveTextContent("1"); // the old detail stays up
+    expect(field("Computer").textContent).toBe(oldText);
+    expect(oldText).not.toContain("WS99-RE-READ");
     expect(screen.queryByText(/Loading row/)).toBeNull();
     release();
-    await settle(50);
-    expect(screen.getByTestId("detail-row")).toHaveTextContent("1");
+    await waitFor(() => expect(field("Computer").textContent).toContain("WS99-RE-READ")); // the new answer replaces it
     expect(callsOf("row_view")).toHaveLength(2);
   });
 
