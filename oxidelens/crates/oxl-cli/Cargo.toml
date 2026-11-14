@@ -24,6 +24,8 @@ libc.workspace = true
 
 [dev-dependencies]
 oxl-fixtures.workspace = true
+# To write a case the engine never would (a newer format) in a test.
+duckdb.workspace = true
 assert_cmd.workspace = true
 tempfile.workspace = true
 

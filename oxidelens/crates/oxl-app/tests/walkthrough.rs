@@ -467,7 +467,7 @@ fn walk(state: &Arc<AppState>, case_path: &Path, export: &Path, plan: &Plan<'_>)
         reopened.display_zone, plan.zone,
         "the zone is kept with the case"
     );
-    assert_eq!(reopened.format, 2);
+    assert_eq!(reopened.format, 3);
     seen.reopened_zone = reopened.display_zone.clone();
     let offered = views::views_matching(state, at("views"), 50, 0).unwrap();
     let entry = offered
@@ -567,7 +567,7 @@ fn the_walkthrough_on_two_hosts() {
     let case_path = scratch.path().join("walk.case.duckdb");
 
     let summary = case::case_new(&state, &case_path, "WS01 triage").unwrap();
-    assert_eq!((summary.format, summary.display_zone.as_str()), (2, "UTC"));
+    assert_eq!((summary.format, summary.display_zone.as_str()), (3, "UTC"));
     let report = load::load_run(&state, &run).unwrap();
     assert_eq!(report.relations.len(), 3);
     events.clear();

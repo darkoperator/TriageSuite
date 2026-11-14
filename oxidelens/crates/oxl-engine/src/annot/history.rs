@@ -11,8 +11,9 @@ use crate::query::check_offset;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
 
-/// Every target kind a history row names (ruling R2).
-const TARGET_KINDS: [&str; 7] = [
+/// Every target kind a history row names (ruling R2), as the comment on
+/// `ox.history.target_kind` lists them.
+const TARGET_KINDS: [&str; 13] = [
     "source",
     "relation",
     "row_mark",
@@ -20,6 +21,12 @@ const TARGET_KINDS: [&str; 7] = [
     "note",
     "case",
     "saved_view",
+    "entry",
+    "evidence",
+    "host",
+    "account",
+    "ioc",
+    "link",
 ];
 
 #[derive(Debug, Clone, serde::Serialize)]

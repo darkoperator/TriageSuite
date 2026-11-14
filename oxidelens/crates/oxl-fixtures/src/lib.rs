@@ -133,7 +133,45 @@ fn petriage_timeline(files: Vec<FileSpec<'_>>) -> DatasetSpec<'_> {
 /// file that is nowhere (`C:\gone\nowhere.csv`), and a same-named session in
 /// `Processed-SRV01-…/Sessions/` naming SRV01's prefetch and event files.
 pub fn two_hosts(dir: &Path) -> PathBuf {
-    let root = two_hosts_tree(dir);
+    let root = two_hosts_tree(dir, EVTX_HEADER, EVTX_WS01, EVTX_SRV01);
+    write_two_hosts_sessions(&root);
+    root
+}
+
+/// WS01's Security logons appended to [`two_hosts`]'s events: a 4624 for
+/// `Target: ACME\jdoe` with `LogonType 10` from `203.0.113.7`, a 4625 for
+/// the same account with `LogonType 3`, and a 4624 whose `PayloadData1` is
+/// `Target: -` (no account to parse). The event files gain a
+/// `PayloadData2` column, where EvtxTriage writes the logon type, blank on
+/// every other row; `evtxtriage_events` has 14 rows (WS01 11, SRV01 3), and
+/// everything else, run id and sessions included, is `two_hosts`'s.
+pub fn two_hosts_logons(dir: &Path) -> PathBuf {
+    let header = format!("{EVTX_HEADER},PayloadData2");
+    let security = r"C:\Windows\System32\winevt\Logs\Security.evtx";
+    let blank_last =
+        |rows: &[&str]| -> Vec<String> { rows.iter().map(|row| format!("{row},")).collect() };
+    let mut ws01 = blank_last(EVTX_WS01);
+    ws01.extend([
+        format!(
+            r"2026-01-05T02:40:00.0000000Z,4624,Security,WS01,jdoe,203.0.113.7,Successful logon,Target: ACME\jdoe,{security},LogonType 10"
+        ),
+        format!(
+            r"2026-01-05T02:41:00.0000000Z,4625,Security,WS01,jdoe,,Failed logon,Target: ACME\jdoe,{security},LogonType 3"
+        ),
+        format!(
+            r"2026-01-05T02:42:00.0000000Z,4624,Security,WS01,,,Successful logon,Target: -,{security},LogonType 3"
+        ),
+    ]);
+    let srv01 = blank_last(EVTX_SRV01);
+    let ws01: Vec<&str> = ws01.iter().map(String::as_str).collect();
+    let srv01: Vec<&str> = srv01.iter().map(String::as_str).collect();
+    let root = two_hosts_tree(dir, &header, &ws01, &srv01);
+    write_two_hosts_sessions(&root);
+    root
+}
+
+/// The sessions of [`two_hosts`], written into its tree at `root`.
+fn write_two_hosts_sessions(root: &Path) {
     let ws = "Processed-WS01-20260101000000";
     let srv = "Processed-SRV01-20260101000000";
     let absolute = |relative: &str| -> String {
@@ -160,7 +198,6 @@ pub fn two_hosts(dir: &Path) -> PathBuf {
             &absolute(&format!("{srv}/EventLogs/evtx.csv")),
         ],
     );
-    root
 }
 
 /// [`two_hosts`] with the `run_manifest.json` the orchestrator writes at the
@@ -472,8 +509,15 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// The two-host run's CSVs and inventory, without its session.
-fn two_hosts_tree(dir: &Path) -> PathBuf {
+/// The two-host run's CSVs and inventory, without its session, with the
+/// event files written under `evtx_header` from `evtx_ws01` and
+/// `evtx_srv01`.
+fn two_hosts_tree(
+    dir: &Path,
+    evtx_header: &str,
+    evtx_ws01: &[&str],
+    evtx_srv01: &[&str],
+) -> PathBuf {
     let ws = "Processed-WS01-20260101000000";
     let srv = "Processed-SRV01-20260101000000";
     let evtx_ws = format!("{ws}/EventLogs/evtx.csv");
@@ -489,14 +533,14 @@ fn two_hosts_tree(dir: &Path) -> PathBuf {
                 FileSpec {
                     host: "WS01",
                     path: &evtx_ws,
-                    header: EVTX_HEADER,
-                    rows: EVTX_WS01,
+                    header: evtx_header,
+                    rows: evtx_ws01,
                 },
                 FileSpec {
                     host: "SRV01",
                     path: &evtx_srv,
-                    header: EVTX_HEADER,
-                    rows: EVTX_SRV01,
+                    header: evtx_header,
+                    rows: evtx_srv01,
                 },
             ]),
             petriage_timeline(vec![
@@ -543,6 +587,36 @@ pub fn rerun_ws01_prefetch(dir: &Path) -> PathBuf {
             host: "WS01",
             path: "Processed-WS01-20260102000000/Execution/pf.csv",
             header: PF_HEADER,
+            rows: &rows,
+        }])],
+    )
+}
+
+/// A later run of WS01 holding only `evtxtriage_events`: [`two_hosts`]'s
+/// eight WS01 rows, byte for byte, except the Sysmon process creation of
+/// `rclone.exe`, whose `MapDescription` reads `Process creation (edited)`.
+/// So a row attached as evidence from the first run finds its identical
+/// row here by hash, and the `rclone.exe` row finds none. Run id
+/// `20260108000000-gggg`.
+pub fn rerun_ws01_events(dir: &Path) -> PathBuf {
+    let rows: Vec<String> = EVTX_WS01
+        .iter()
+        .map(|row| {
+            if row.contains(",Process creation,rclone.exe,") {
+                row.replace(",Process creation,", ",Process creation (edited),")
+            } else {
+                (*row).to_string()
+            }
+        })
+        .collect();
+    let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+    write_run(
+        &dir.join("run-20260108000000-gggg"),
+        "20260108000000-gggg",
+        vec![evtx_events(vec![FileSpec {
+            host: "WS01",
+            path: "Processed-WS01-20260108000000/EventLogs/evtx.csv",
+            header: EVTX_HEADER,
             rows: &rows,
         }])],
     )
@@ -848,6 +922,32 @@ pub fn loose_fw_csv(dir: &Path) -> PathBuf {
     let path = dir.join("fw.csv");
     std::fs::write(&path, FW_CSV).expect("write fw.csv");
     path
+}
+
+/// A loose file, `notes.csv`, whose one time column gives no UTC instant:
+/// header `When,What`, a row at `2026-01-05 10:00:00` (no zone, so the
+/// column is `?tz`) and a row with a blank time. Returns the file's path.
+pub fn untimed_file(dir: &Path) -> PathBuf {
+    let path = dir.join("notes.csv");
+    std::fs::write(&path, "When,What\n2026-01-05 10:00:00,disk wiped\n,blank\n")
+        .expect("write notes.csv");
+    path
+}
+
+/// The 5,000-character value of [`hostile_record_values`].
+static LONG_VALUE: [u8; 5_000] = [b'A'; 5_000];
+
+/// Text that must stay inert wherever a record, an entry or an IOC value is
+/// shown or exported: a spreadsheet formula, HTML, a right-to-left override,
+/// a 5,000-character value, and Markdown's table and code delimiters.
+pub fn hostile_record_values() -> Vec<&'static str> {
+    vec![
+        "=HYPERLINK(\"http://x\")",
+        "<img src=x onerror=1>",
+        "invoice\u{202E}fdp.exe",
+        std::str::from_utf8(&LONG_VALUE).expect("ASCII is UTF-8"),
+        "a | b `c` d",
+    ]
 }
 
 /// A run whose one dataset, `rbtriage_main`, is a header and no rows. Run

@@ -22,7 +22,7 @@ use super::rules::check_rules;
 use super::{shown, Chip, ColourRule, GridState, SearchState};
 use crate::actor::Actor;
 use crate::annot::{record, Change};
-use crate::case::{Case, CASE_FORMAT};
+use crate::case::{Case, CASE_FORMAT, FORMAT_2};
 use crate::catalog;
 use crate::error::{EngineError, Result};
 use crate::filter::{FilterNode, MARK_COLUMN};
@@ -311,7 +311,7 @@ pub fn views(
 ) -> Result<ViewListing<SavedView>> {
     check_limit(limit)?;
     check_offset(offset)?;
-    if case.format() < CASE_FORMAT {
+    if case.format() < FORMAT_2 {
         return Ok(ViewListing::new(
             Listing::from_fetched(Vec::new(), limit),
             Vec::new(),
@@ -353,7 +353,7 @@ pub struct MatchingView {
 pub fn views_matching(case: &Case, limit: u32, offset: u64) -> Result<ViewListing<MatchingView>> {
     check_limit(limit)?;
     check_offset(offset)?;
-    if case.format() < CASE_FORMAT {
+    if case.format() < FORMAT_2 {
         return Ok(ViewListing::new(
             Listing::from_fetched(Vec::new(), limit),
             Vec::new(),
@@ -897,7 +897,7 @@ fn read_view(conn: &Connection, id: i64) -> Result<(SavedView, bool)> {
 /// View `id` if it is there and not deleted. `NotFound` otherwise, and on a
 /// format-1 case, which has none.
 fn live_view(case: &Case, id: i64) -> Result<SavedView> {
-    if case.format() < CASE_FORMAT {
+    if case.format() < FORMAT_2 {
         return Err(no_view(id));
     }
     match read_view(case.conn(), id)? {

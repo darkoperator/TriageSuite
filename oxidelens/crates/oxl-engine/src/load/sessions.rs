@@ -17,7 +17,7 @@
 //! `MAX_SESSION_BYTES`, past the first `MAX_SESSION_FILES`, or not a
 //! session is left out and named, with why, in the load's history row.
 
-use crate::case::{Case, CASE_FORMAT};
+use crate::case::{Case, FORMAT_2};
 use crate::error::{EngineError, Result};
 use duckdb::{params, Connection};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
@@ -671,13 +671,19 @@ pub(crate) fn store_sessions(
     Ok(())
 }
 
-/// For an upgrade from format 1, in its transaction: the sessions of each
-/// run still in the case, read again from where the run was loaded from.
-/// Best effort: a run that moved, or whose session files cannot be read,
-/// gets none or fewer, and that is no failure.
+/// For an upgrade to format 3, in its transaction: the sessions of each
+/// run still in the case that has none, read again from where the run was
+/// loaded from. A run with sessions keeps exactly the rows it has. Best
+/// effort: a run that moved, or whose session files cannot be read, gets
+/// none or fewer, and that is no failure.
 pub(crate) fn backfill_sessions(conn: &Connection) -> Result<()> {
     let runs: Vec<(i64, String)> = conn
-        .prepare("SELECT id, path FROM ox.source WHERE kind = 'run' AND NOT removed ORDER BY id")?
+        .prepare(
+            "SELECT s.id, s.path FROM ox.source s \
+             WHERE s.kind = 'run' AND NOT s.removed \
+               AND NOT EXISTS (SELECT 1 FROM ox.run_session rs WHERE rs.source_id = s.id) \
+             ORDER BY s.id",
+        )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
     for (id, path) in runs {
@@ -691,7 +697,7 @@ pub(crate) fn backfill_sessions(conn: &Connection) -> Result<()> {
 /// empty, offers none), sorted by source,
 /// then name. Empty for a format-1 case, which keeps no sessions.
 pub fn sessions(case: &Case) -> Result<Vec<Session>> {
-    if case.format() < CASE_FORMAT {
+    if case.format() < FORMAT_2 {
         return Ok(Vec::new());
     }
     let conn = case.conn();

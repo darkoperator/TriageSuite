@@ -123,7 +123,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "history",
-        "Every change made to the case, newest first: history [--kind source|relation|row_mark|row_tag|note|case|saved_view] [--limit N] [--offset N]",
+        "Every change made to the case, newest first: history [--kind source|relation|row_mark|row_tag|note|case|saved_view|entry|evidence|host|account|ioc|link] [--limit N] [--offset N]",
     ),
     (
         "query",

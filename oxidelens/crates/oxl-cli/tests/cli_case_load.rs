@@ -34,7 +34,7 @@ fn case_new_info_and_load_run() {
     let (code, v) = ox(&["--case", p, "case", "info"]);
     assert_eq!(
         (code, v["ok"].as_bool(), v["data"]["format"].as_u64()),
-        (0, Some(true), Some(2))
+        (0, Some(true), Some(3))
     );
     assert_eq!(inner(&v["data"]["untrusted"])["name"], "IR-1");
     let (code, v) = ox(&["--case", p, "load", "run", &run]);
@@ -215,6 +215,33 @@ fn errors_use_the_envelope_and_exit_codes() {
     assert_eq!((code, v["error"]["code"].as_str()), (2, Some("invalid")));
 }
 
+/// A case written by a newer build is refused with `needs_upgrade`, exit
+/// 6, and a message saying it is of a newer format, by a read and by a
+/// command that would change it.
+#[test]
+fn a_format_3_case_refuses_older_binaries_politely() {
+    let (_d, p, run) = setup();
+    assert_eq!(ox(&["case", "new", &p, "--name", "IR-1"]).0, 0);
+    {
+        let conn = duckdb::Connection::open(&p).unwrap();
+        conn.execute("UPDATE ox.meta SET value = '4' WHERE key = 'format'", [])
+            .unwrap();
+    }
+    for args in [
+        vec!["--case", p.as_str(), "case", "info"],
+        vec!["--case", p.as_str(), "load", "run", run.as_str()],
+    ] {
+        let (code, v) = ox(&args);
+        assert_eq!(code, 6, "{args:?}: {v}");
+        assert_eq!(v["error"]["code"], "needs_upgrade");
+        let message = inner(&v["error"]["untrusted"])["message"].clone();
+        assert!(
+            message.as_str().unwrap().contains("newer format"),
+            "{message}"
+        );
+    }
+}
+
 #[test]
 fn a_locked_case_reports_case_locked() {
     let (_d, p, _run) = setup();
@@ -271,7 +298,7 @@ fn capabilities_needs_no_case_and_lists_limits() {
     let (code, v) = ox(&["capabilities"]);
     assert_eq!(code, 0);
     assert_eq!(v["data"]["limits"]["rows_max"], 1000);
-    assert_eq!(v["data"]["case_format"], 2);
+    assert_eq!(v["data"]["case_format"], 3);
     assert!(!v["data"]["commands"].as_array().unwrap().is_empty());
     assert!(v["data"]["untrusted_wrapper"]
         .as_str()

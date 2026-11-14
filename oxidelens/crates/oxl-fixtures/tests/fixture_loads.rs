@@ -128,3 +128,153 @@ fn the_fixtures_coexist_in_one_directory() {
     let case = oxl_fixtures::new_case(d.path());
     assert_eq!(case.info().unwrap().name, "T");
 }
+
+/// A logon row: `EventId`, `Computer`, `PayloadData1`, `PayloadData2`,
+/// `RemoteHost`.
+type Logon = (i64, String, String, Option<String>, Option<String>);
+
+/// The logon rows of `two_hosts_logons` are WS01's, in `Security`, with the
+/// account in `PayloadData1` and the logon type in `PayloadData2`; the rest
+/// of the run is `two_hosts`'s, which itself is unchanged.
+#[test]
+fn the_logons_run_adds_three_security_rows_to_ws01() {
+    let d = tempfile::tempdir().unwrap();
+    let plain = views(&oxl_fixtures::two_hosts(&d.path().join("a")));
+    let root = oxl_fixtures::two_hosts_logons(&d.path().join("b"));
+    assert_eq!(inventory(&root).run_id, "20260101000000-aaaa");
+    let conn = views(&root);
+    assert_eq!(count(&plain, "select count(*) from evtxtriage_events"), 11);
+    assert_eq!(count(&conn, "select count(*) from evtxtriage_events"), 14);
+    assert_eq!(
+        count(
+            &conn,
+            "select count(*) from evtxtriage_events where _triage_host = 'WS01'"
+        ),
+        11
+    );
+    for table in ["petriage_timeline", "ext_hayabusa_csv_timeline"] {
+        let sql = format!("select count(*) from {table}");
+        assert_eq!(count(&conn, &sql), count(&plain, &sql), "{table}");
+    }
+    let logons: Vec<Logon> = conn
+        .prepare(
+            "select EventId, Computer, PayloadData1, PayloadData2, RemoteHost \
+             from evtxtriage_events where PayloadData2 is not null \
+             order by TimeCreated",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        logons,
+        [
+            (
+                4624,
+                "WS01".to_string(),
+                r"Target: ACME\jdoe".to_string(),
+                Some("LogonType 10".to_string()),
+                Some("203.0.113.7".to_string())
+            ),
+            (
+                4625,
+                "WS01".to_string(),
+                r"Target: ACME\jdoe".to_string(),
+                Some("LogonType 3".to_string()),
+                None
+            ),
+            (
+                4624,
+                "WS01".to_string(),
+                "Target: -".to_string(),
+                Some("LogonType 3".to_string()),
+                None
+            ),
+        ]
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "select count(*) from evtxtriage_events \
+             where Channel = 'Security' and _triage_host = 'WS01' and PayloadData2 is not null"
+        ),
+        3
+    );
+}
+
+/// The later WS01 event run holds WS01's eight rows, one of them with its
+/// `MapDescription` changed: seven rows match `two_hosts`'s exactly.
+#[test]
+fn the_event_rerun_changes_one_ws01_row() {
+    let d = tempfile::tempdir().unwrap();
+    let root = oxl_fixtures::rerun_ws01_events(d.path());
+    let inv = inventory(&root);
+    assert_eq!(inv.run_id, "20260108000000-gggg");
+    assert_eq!(inv.datasets.len(), 1);
+    let conn = views(&root);
+    assert_eq!(count(&conn, "select count(*) from evtxtriage_events"), 8);
+    assert_eq!(
+        count(
+            &conn,
+            "select count(*) from evtxtriage_events where _triage_host <> 'WS01'"
+        ),
+        0
+    );
+    let old = oxl_fixtures::two_hosts(&d.path().join("old"));
+    conn.execute_batch(&format!(
+        "ATTACH ':memory:' AS old; CREATE TABLE old.e AS SELECT * FROM read_csv('{}', all_varchar = true);",
+        old.join("Processed-WS01-20260101000000")
+            .join("EventLogs")
+            .join("evtx.csv")
+            .display()
+            .to_string()
+            .replace('\'', "''")
+    ))
+    .unwrap();
+    let same = "select count(*) from evtxtriage_events n join old.e o \
+                on n.TimeCreated__text is not distinct from o.TimeCreated \
+               and n.MapDescription = o.MapDescription \
+               and n.PayloadData1 = o.PayloadData1 \
+               and n.EventId__text = o.EventId";
+    // The two byte-identical audit-log rows match each other twice over.
+    assert_eq!(count(&conn, same), 9);
+    assert_eq!(
+        count(
+            &conn,
+            "select count(*) from evtxtriage_events where MapDescription = 'Process creation (edited)'"
+        ),
+        1
+    );
+}
+
+#[test]
+fn the_untimed_file_has_a_zoneless_time_and_a_blank_one() {
+    let d = tempfile::tempdir().unwrap();
+    let path = oxl_fixtures::untimed_file(d.path());
+    assert_eq!(path.file_name().unwrap(), "notes.csv");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "When,What\n2026-01-05 10:00:00,disk wiped\n,blank\n"
+    );
+}
+
+#[test]
+fn the_hostile_values_cover_review_focus_3() {
+    let values = oxl_fixtures::hostile_record_values();
+    for needle in [
+        "=HYPERLINK(\"http://x\")",
+        "<img src=x onerror=1>",
+        "\u{202E}",
+        "|",
+        "`",
+    ] {
+        assert!(
+            values.iter().any(|v| v.contains(needle)),
+            "no value holds {needle:?}"
+        );
+    }
+    assert!(values.iter().any(|v| v.chars().count() == 5_000));
+}

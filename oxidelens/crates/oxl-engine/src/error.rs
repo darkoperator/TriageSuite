@@ -24,7 +24,10 @@ pub enum EngineError {
     Refused(String),
     #[error("the case file {} is open in another process", .0.display())]
     CaseLocked(PathBuf),
-    #[error("the case file is format {found}; this build reads format {expected}")]
+    #[error(
+        "the case file is format {found}, a newer format than this build reads (format \
+         {expected} and older); open it with a newer OxideLens"
+    )]
     NeedsUpgrade { found: u32, expected: u32 },
     /// The case or DuckDB broke an invariant the engine relies on: a value
     /// the engine never writes, a row it listed and could not read back, a

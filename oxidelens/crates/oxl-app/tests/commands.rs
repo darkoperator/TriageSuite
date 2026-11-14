@@ -60,7 +60,7 @@ fn case_new_answers_the_summary() {
     let (events, state) = state();
     let summary = case::case_new(&state, &d.path().join("new.duckdb"), "WS01 triage").unwrap();
     assert_eq!(summary.name, "WS01 triage");
-    assert_eq!(summary.format, 2);
+    assert_eq!(summary.format, 3);
     assert_eq!(summary.display_zone, "UTC");
     assert!(summary.relations.is_empty() && summary.sources.is_empty());
     assert_eq!(summary.case_id.len(), 32);

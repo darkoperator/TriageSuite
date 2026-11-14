@@ -126,8 +126,8 @@ pub enum Command {
     Column(ColumnCmd),
     /// List the changes made to the case, newest first.
     History {
-        /// Only this kind of target: source, relation, row_mark, row_tag, note, case or
-        /// saved_view.
+        /// Only this kind of target: source, relation, row_mark, row_tag, note, case,
+        /// saved_view, entry, evidence, host, account, ioc or link.
         #[arg(long)]
         kind: Option<String>,
         #[command(flatten)]

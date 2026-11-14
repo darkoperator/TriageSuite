@@ -293,10 +293,12 @@ the app accepted is never one the next start refuses as too large. A file that c
 window hears `settings-damaged`, and every settings reply names the damaged
 file until a save succeeds.
 
-**Opening a case from step 1** (format 1) upgrades it in place to format 2 in
-one transaction, with a `case_upgrade` history row; every source, relation,
-mark, tag and note is unchanged. A command that opens a case read-only (every
-CLI read) reads a format-1 case as it is.
+**Opening a case from step 1 or step 2** (format 1 or 2) upgrades it in place
+to format 3, `1 → 2 → 3` in one transaction, with a `case_upgrade` history row
+per step; every source, relation, mark, tag, note and saved view is
+unchanged, and a run whose sessions were lost by an earlier upgrade has them
+read again. A command that opens a case read-only (every CLI read) reads an
+older case as it is.
 
 ## The debug-only MCP bridge
 

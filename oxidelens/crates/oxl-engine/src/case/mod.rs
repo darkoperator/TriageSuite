@@ -5,10 +5,11 @@
 //! newer build is refused rather than read, because reading a format this
 //! build does not know is how annotations get silently misread.
 //!
-//! Format 1 is step 1's. Opened to change it, a format-1 case is upgraded
-//! in place to format 2, in one transaction (`upgrade_from_1`); opened
-//! read-only, it is read as it is, and every reader of a format-2 table
-//! answers that table's default (`Case::format` tells them apart).
+//! Format 1 is step 1's, format 2 step 2's. Opened to change it, an older
+//! case is upgraded in place to format 3, `1 → 2 → 3` in one transaction
+//! (`upgrade_to_current`); opened read-only, it is read as it is, and every
+//! reader of a table a later format added answers that table's default
+//! (`Case::format` tells them apart).
 
 mod settings;
 
@@ -23,17 +24,25 @@ use std::sync::Arc;
 use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
 
 /// The case file format this build writes. It reads this one and every
-/// earlier one (format 1).
-pub const CASE_FORMAT: u32 = 2;
+/// earlier one (formats 1 and 2).
+pub const CASE_FORMAT: u32 = 3;
 
 /// The oldest case file format this build reads.
 const OLDEST_FORMAT: u32 = 1;
 
-/// The DDL for a new case, format 2.
+/// The format that added saved views, run sessions, the case's settings
+/// and its id. A reader of those answers their default on an older case
+/// opened read-only.
+pub(crate) const FORMAT_2: u32 = 2;
+
+/// The DDL for a new case, format 3.
 const SCHEMA: &str = include_str!("schema.sql");
 
 /// The DDL that brings a format-1 case to format 2.
-const UPGRADE: &str = include_str!("upgrade.sql");
+const UPGRADE_1_2: &str = include_str!("upgrade_1_2.sql");
+
+/// The DDL that brings a format-2 case to format 3.
+const UPGRADE_2_3: &str = include_str!("upgrade_2_3.sql");
 
 /// The suffix a case file must carry, so that a case is recognisable as a
 /// DuckDB database and `create` cannot be pointed at an unrelated file.
@@ -132,6 +141,35 @@ impl Case {
         )
     }
 
+    /// A new case at `path` as step 2 made one, format 2, and left open at
+    /// format 2 to change: step 1's DDL, then `upgrade_1_2.sql` (which the
+    /// upgrade tests prove makes what step 2's `schema.sql` made), the
+    /// meta facts and a case id, and nothing of format 3. Only the upgrade
+    /// tests make one, to have a step 2 case to load and then upgrade; the
+    /// binary that wrote format 2 is gone. Built only with feature
+    /// `test-support`, as `create_at_format_1` is.
+    #[cfg(feature = "test-support")]
+    pub fn create_at_format_2(path: &Path, name: &str, actor: &Actor) -> Result<Case> {
+        const SCHEMA_V1: &str = include_str!("../../tests/fixtures/schema_v1.sql");
+        check_new_path(path)?;
+        Case::create_with(
+            path,
+            |conn| {
+                let tx = conn.transaction()?;
+                tx.execute_batch(SCHEMA_V1)?;
+                tx.execute_batch(UPGRADE_1_2)?;
+                write_meta(&tx, name, FORMAT_2, actor)?;
+                tx.execute(
+                    "INSERT INTO ox.meta (key, value) VALUES ('case_id', ?)",
+                    params![new_case_id()?],
+                )?;
+                tx.commit()?;
+                Ok(())
+            },
+            FORMAT_2,
+        )
+    }
+
     fn create_with(
         path: &Path,
         make: impl FnOnce(&mut Connection) -> Result<()>,
@@ -160,12 +198,13 @@ impl Case {
     /// process alone: `CaseLocked` when any other process has it open, and
     /// for any other process until this one lets go.
     ///
-    /// A format-1 case is upgraded to format 2 first, in place and in one
-    /// transaction: the format-2 tables, a new `case_id`, the sessions of
-    /// each run still in the case (read again from where the run is, best
-    /// effort), and a `case_upgrade` history row. When any of it fails,
-    /// none of it is kept, the file is still format 1, and the error is
-    /// returned.
+    /// An older case is upgraded to format 3 first, in place and in one
+    /// transaction (`upgrade_to_current`): each step's tables, a new
+    /// `case_id` for a format-1 case, the sessions of each run still in the
+    /// case that has none (read again from where the run is, best effort),
+    /// and a `case_upgrade` history row per step. When any of it fails,
+    /// none of it is kept, the file is at the format it had, and the error
+    /// is returned.
     pub fn open(path: &Path) -> Result<Case> {
         Case::open_as(path, AccessMode::ReadWrite, true)
     }
@@ -173,8 +212,8 @@ impl Case {
     /// Open an existing case file for reading only, which is how any number
     /// of processes may have it open at once. `CaseLocked` only while a
     /// process has it open to change it. A call that changes the case fails
-    /// on a case opened this way. A format-1 case is read as it is: what
-    /// format 2 added reads as its default (`format` says which it is).
+    /// on a case opened this way. An older case is read as it is: what a
+    /// later format added reads as its default (`format` says which it is).
     pub fn open_read_only(path: &Path) -> Result<Case> {
         Case::open_as(path, AccessMode::ReadOnly, false)
     }
@@ -188,8 +227,8 @@ impl Case {
         }
         let mut conn = connect(path, mode)?;
         let mut format = check_format(&conn, path)?;
-        if upgrade && format == OLDEST_FORMAT {
-            upgrade_from_1(&mut conn)?;
+        if upgrade && format < CASE_FORMAT {
+            upgrade_to_current(&mut conn, format)?;
             format = CASE_FORMAT;
         }
         Ok(Case {
@@ -222,8 +261,8 @@ impl Case {
         self.conn.interrupt_handle()
     }
 
-    /// The case file's format: `CASE_FORMAT`, except for a format-1 case
-    /// opened read-only, which is 1.
+    /// The case file's format: `CASE_FORMAT`, except for an older case
+    /// opened read-only, which keeps its own.
     pub fn format(&self) -> u32 {
         self.format
     }
@@ -232,7 +271,7 @@ impl Case {
     /// created (or upgraded) and fixed from then on; empty for a format-1
     /// case opened read-only, which has none.
     pub fn case_id(&self) -> Result<String> {
-        if self.format < CASE_FORMAT {
+        if self.format < FORMAT_2 {
             return Ok(String::new());
         }
         let id: Option<String> = self
@@ -532,46 +571,87 @@ fn is_case_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Bring the format-1 case on `conn` to format 2, all in one transaction:
-/// the format-2 tables (`upgrade.sql`), a new `case_id`, each run's
-/// sessions read again from where the run is (best effort: a run that moved
-/// or whose sessions cannot be read has none), the format, and a
-/// `case_upgrade` history row. Any failure rolls all of it back.
+/// Bring the case on `conn`, at format `from`, to `CASE_FORMAT` in one
+/// transaction, a step at a time: `upgrade_from_1`, then `upgrade_from_2`.
+/// Any failure rolls all of it back, so the file is left at `from`.
 ///
-/// Opening takes no actor, so the history row names the analyst the
+/// Opening takes no actor, so the history rows name the analyst the
 /// operating system user stands for, as the CLI's default actor does.
-fn upgrade_from_1(conn: &mut Connection) -> Result<()> {
+fn upgrade_to_current(conn: &mut Connection, from: u32) -> Result<()> {
+    let user = std::env::var(if cfg!(windows) { "USERNAME" } else { "USER" }).unwrap_or_default();
+    let by = Actor::from_os_user(&user).label();
     let tx = conn.transaction()?;
-    tx.execute_batch(UPGRADE)?;
-    let id = new_case_id()?;
-    tx.execute(
+    let mut format = from;
+    if format == OLDEST_FORMAT {
+        upgrade_from_1(&tx, &by)?;
+        format = FORMAT_2;
+    }
+    if format == FORMAT_2 {
+        upgrade_from_2(&tx, &by)?;
+        format = CASE_FORMAT;
+    }
+    if format != CASE_FORMAT {
+        return Err(EngineError::Internal(format!(
+            "no upgrade from case format {from} to {CASE_FORMAT}"
+        )));
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// The `1 → 2` step, in the caller's transaction: the format-2 tables
+/// (`upgrade_1_2.sql`), a new `case_id`, the format, and a `case_upgrade`
+/// history row. The runs' sessions are left to `upgrade_from_2`, which
+/// always follows in the same transaction and reads them for every run
+/// that has none.
+fn upgrade_from_1(conn: &Connection, by: &str) -> Result<()> {
+    conn.execute_batch(UPGRADE_1_2)?;
+    conn.execute(
         "INSERT INTO ox.meta (key, value) VALUES ('case_id', ?)",
-        params![id],
+        params![new_case_id()?],
     )?;
-    crate::load::backfill_sessions(&tx)?;
-    let changed = tx.execute(
+    finish_step(conn, OLDEST_FORMAT, FORMAT_2, by)
+}
+
+/// The `2 → 3` step, in the caller's transaction: the case records' tables
+/// and the `ox.row_state` view (`upgrade_2_3.sql`), the sessions of each
+/// run that has none, read again from where the run is (cases upgraded to
+/// format 2 before `9a0dd89` lost theirs), the format, and a
+/// `case_upgrade` history row.
+fn upgrade_from_2(conn: &Connection, by: &str) -> Result<()> {
+    conn.execute_batch(UPGRADE_2_3)?;
+    crate::load::backfill_sessions(conn)?;
+    finish_step(conn, FORMAT_2, CASE_FORMAT, by)
+}
+
+/// End an upgrade step: the format moves from `from` to `to`, and a
+/// `case_upgrade` history row by `by`, on the case's id, says so.
+fn finish_step(conn: &Connection, from: u32, to: u32, by: &str) -> Result<()> {
+    let changed = conn.execute(
         "UPDATE ox.meta SET value = ? WHERE key = 'format' AND value = ?",
-        params![CASE_FORMAT.to_string(), OLDEST_FORMAT.to_string()],
+        params![to.to_string(), from.to_string()],
     )?;
     if changed != 1 {
         return Err(EngineError::Internal(format!(
             "the case's format changed while it was upgraded ({changed} rows)"
         )));
     }
-    let user = std::env::var(if cfg!(windows) { "USERNAME" } else { "USER" }).unwrap_or_default();
-    tx.execute(
+    let id: String =
+        conn.query_row("SELECT value FROM ox.meta WHERE key = 'case_id'", [], |r| {
+            r.get(0)
+        })?;
+    conn.execute(
         "INSERT INTO ox.history \
          (id, \"at\", \"by\", target_kind, target_id, action, before_json, after_json) \
          VALUES (nextval('ox.history_seq'), ?, ?, 'case', ?, 'case_upgrade', ?, ?)",
         params![
             now_iso(),
-            Actor::from_os_user(&user).label(),
+            by,
             id,
-            serde_json::json!({ "format": OLDEST_FORMAT }).to_string(),
-            serde_json::json!({ "format": CASE_FORMAT }).to_string()
+            serde_json::json!({ "format": from }).to_string(),
+            serde_json::json!({ "format": to }).to_string()
         ],
     )?;
-    tx.commit()?;
     Ok(())
 }
 

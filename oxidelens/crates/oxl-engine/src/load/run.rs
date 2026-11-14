@@ -12,7 +12,7 @@ use super::stage::{materialize, rebuild_relations, source_schema, HashColumn};
 use super::supersede::supersede;
 use super::{fold_name, LoadReport, LoadThreads, LoadedRelation, RunOptions, SkippedDataset};
 use crate::actor::Actor;
-use crate::case::{Case, CASE_FORMAT};
+use crate::case::{Case, FORMAT_2};
 use crate::catalog::{catalog_dataset, check_sql_type, check_typing, column_names};
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
@@ -83,7 +83,7 @@ pub fn load_run_with(
     let skipped = copies(&inventory, options);
     // Read before the transaction: files, not the case. A format-1 case
     // (only the upgrade tests load into one) has nowhere to keep them.
-    let sessions = (case.format() >= CASE_FORMAT).then(|| read_sessions(&root));
+    let sessions = (case.format() >= FORMAT_2).then(|| read_sessions(&root));
     let load = Load {
         inventory: &inventory,
         skipped,

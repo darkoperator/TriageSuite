@@ -2964,6 +2964,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "duckdb",
  "getrandom 0.3.4",
  "libc",
  "oxl-engine",

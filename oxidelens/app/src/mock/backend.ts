@@ -202,7 +202,7 @@ function summary(): CaseSummary {
   const c = theCase();
   const template = fx.caseSummary();
   return {
-    path: c.path, name: c.name, case_id: MOCK_CASE_ID, format: 2, display_zone: c.displayZone,
+    path: c.path, name: c.name, case_id: MOCK_CASE_ID, format: 3, display_zone: c.displayZone,
     hosts: ["SRV01", "WS01"], relations: relations().map((r) => r.info), sources: template.sources,
     mark_counts: { suspicious: c.marks.size },
   };

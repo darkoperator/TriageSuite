@@ -2,8 +2,9 @@
 -- same transaction as the rest of the upgrade (see case/mod.rs), so a
 -- failure anywhere leaves the file at format 1.
 --
--- It must make exactly what schema.sql makes for a new case beyond format 1;
--- tests/case_upgrade.rs compares the two catalogs, comments included.
+-- With upgrade_2_3.sql after it, it must make exactly what schema.sql
+-- makes for a new case beyond format 1; tests/case_upgrade.rs compares the
+-- catalogs, comments included.
 
 CREATE SEQUENCE ox.view_seq START 1;
 

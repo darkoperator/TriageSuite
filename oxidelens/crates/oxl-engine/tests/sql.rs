@@ -475,12 +475,16 @@ fn describe_lists_relations_and_case_tables_with_comments() {
     assert!(d.iter().all(|t| !t.schema.starts_with("src_")));
     assert_eq!(describe(&path, Some("petriage_timeline")).unwrap().len(), 1);
 
-    // Every format-2 case table is there, and the views are views.
-    assert_eq!(d.iter().filter(|t| t.schema == "ox").count(), 17);
-    assert!(d
+    // Every format-3 case table is there, and the views are views.
+    let ox_kinds: Vec<(&str, &str)> = d
         .iter()
         .filter(|t| t.schema == "ox")
-        .all(|t| t.kind == "table"));
+        .map(|t| (t.name.as_str(), t.kind.as_str()))
+        .collect();
+    assert_eq!(ox_kinds.len(), 26, "{ox_kinds:?}");
+    assert!(ox_kinds
+        .iter()
+        .all(|&(name, kind)| kind == if name == "row_state" { "view" } else { "table" }));
     let events = d
         .iter()
         .find(|t| t.schema == "main" && t.name == "evtxtriage_events")

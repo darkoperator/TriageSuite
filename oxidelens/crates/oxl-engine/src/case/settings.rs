@@ -2,7 +2,7 @@
 //! the IANA time zone the case's UTC times are shown in. Storage and export
 //! stay UTC whatever it is.
 
-use super::{Case, CASE_FORMAT};
+use super::{Case, CASE_FORMAT, FORMAT_2};
 use crate::actor::Actor;
 use crate::annot::{record, Change};
 use crate::error::{EngineError, Result};
@@ -23,7 +23,7 @@ const SHOWN_MAX: usize = 64;
 /// format-1 case, which has no settings. `Internal` when the case holds a
 /// zone this build does not know, which the engine never writes.
 pub fn display_zone(case: &Case) -> Result<String> {
-    if case.format() < CASE_FORMAT {
+    if case.format() < FORMAT_2 {
         return Ok(DEFAULT_ZONE.to_string());
     }
     let stored: Option<String> = case
