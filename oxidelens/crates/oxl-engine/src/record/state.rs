@@ -3,8 +3,9 @@
 //! `ox.row_state` holds one row per marked row: `malicious` when the row is
 //! evidence on a live entry an analyst created or reviewed, else
 //! `agent_malicious` when it is evidence only on live unreviewed agent
-//! entries, else `suspicious` from `ox.row_mark`. Every query that reads a
-//! mark (a page, the `_mark` filter, a group key, the Values tab, the
+//! entries, else the mark `ox.row_mark` stores (`suspicious`; any other
+//! value is a damaged case, which `read_mark` reports as `Internal`).
+//! Every query that reads a mark (a page, the `_mark` filter, a group key, the Values tab, the
 //! histogram's and a stack's marked counts, the merged list, the counts,
 //! the marks listing, the row detail) reads it through `marks_relation`, so
 //! they cannot disagree. Writers read who holds a row through `holders`,
@@ -21,20 +22,19 @@ use std::collections::HashMap;
 const ROW_STATE: &str = "ox.row_state";
 
 /// What stands in for `ox.row_state` in a case opened read-only below
-/// format 3, which has neither the view nor any entry: its suspicious
-/// marks, in the view's columns.
-const SUSPICIOUS_ONLY: &str =
-    "(SELECT row_id, mark, marked_by AS \"by\" FROM ox.row_mark WHERE mark = 'suspicious')";
+/// format 3, which has neither the view nor any entry: its stored marks,
+/// in the view's columns, passed through as the view passes them.
+const STORED_ONLY: &str = "(SELECT row_id, mark, marked_by AS \"by\" FROM ox.row_mark)";
 
 /// SQL naming the relation of marks to read in `case`, to place after
 /// `FROM` with an alias: columns `row_id`, `mark` and `"by"`, one row per
-/// marked row. `ox.row_state`, or for a case below format 3 its suspicious
+/// marked row. `ox.row_state`, or for a case below format 3 its stored
 /// marks alone.
 pub(crate) fn marks_relation(case: &Case) -> &'static str {
     if has_records(case) {
         ROW_STATE
     } else {
-        SUSPICIOUS_ONLY
+        STORED_ONLY
     }
 }
 
@@ -103,17 +103,4 @@ pub(crate) fn holders(conn: &Connection, rows: &[i64]) -> Result<HashMap<i64, Ho
             (row, holder)
         })
         .collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::query::MARK_SUSPICIOUS;
-    use triage_core::output::duckdb::sql::quote_literal;
-
-    /// The stand-in keeps exactly what the view takes from `ox.row_mark`.
-    #[test]
-    fn the_stand_in_reads_the_suspicious_spelling() {
-        assert!(SUSPICIOUS_ONLY.contains(&format!("mark = {}", quote_literal(MARK_SUSPICIOUS))));
-    }
 }

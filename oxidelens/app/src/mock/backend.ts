@@ -118,6 +118,11 @@ export function resetMock(): void {
   latencyMs = 25;
 }
 
+/** Replace the open case's marks (tests only: the mock has no mark command yet). */
+export function setMockMarks(marks: ReadonlyArray<readonly [number, MarkState]>): void {
+  theCase().marks = new Map(marks);
+}
+
 // ----------------------------------------------------------------------------------------------------------- events
 
 /** The mock's event bus: `api.ts`'s `onCaseChanged` and `onJob` listen here under `__OXL_MOCK__`. */
@@ -742,9 +747,16 @@ const handlers: Handlers = {
             },
             display_time: shown(rel.columns[timeIx], row[timeIx]),
           });
-          if (out.length >= a.offset + a.limit + 1) break;
         }
       }
+      // The engine's order over the whole list, then the page: time ascending (every mock time is UTC text of one
+      // width, so text order is time order), untimed last, then relation, then row id.
+      out.sort((x, y) => {
+        const [tx, ty] = [x.row.time, y.row.time];
+        if (tx !== ty) return tx === null ? 1 : ty === null ? -1 : tx < ty ? -1 : 1;
+        if (x.row.relation !== y.row.relation) return x.row.relation < y.row.relation ? -1 : 1;
+        return x.row.row_id - y.row.row_id;
+      });
       return { items: out.slice(a.offset, a.offset + a.limit), truncated: out.length > a.offset + a.limit };
     }),
 

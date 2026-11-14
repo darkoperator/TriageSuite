@@ -212,11 +212,13 @@ SELECT row_id,
        CASE WHEN analysts THEN analyst_by ELSE agent_by END AS "by"
 FROM evidence_state
 UNION ALL
-SELECT m.row_id, 'suspicious' AS mark, m.marked_by AS "by"
+-- The stored mark as it is, not a constant: the engine writes only
+-- suspicious, so any other value is a damaged case, which the readers
+-- report instead of showing the row unmarked.
+SELECT m.row_id, m.mark, m.marked_by AS "by"
 FROM ox.row_mark AS m
-WHERE m.mark = 'suspicious'
-  AND NOT EXISTS (SELECT 1 FROM evidence_state AS s WHERE s.row_id = m.row_id);
-COMMENT ON VIEW ox.row_state IS 'One row per marked row: malicious when it is evidence on a live entry an analyst created or reviewed; else agent_malicious when it is evidence only on live unreviewed agent entries; else suspicious from ox.row_mark.';
+WHERE NOT EXISTS (SELECT 1 FROM evidence_state AS s WHERE s.row_id = m.row_id);
+COMMENT ON VIEW ox.row_state IS 'One row per marked row: malicious when it is evidence on a live entry an analyst created or reviewed; else agent_malicious when it is evidence only on live unreviewed agent entries; else the stored mark from ox.row_mark (suspicious; any other value is a damaged case).';
 COMMENT ON COLUMN ox.row_state.row_id IS 'The marked row''s _ox_row.';
 COMMENT ON COLUMN ox.row_state.mark IS 'malicious, agent_malicious or suspicious.';
 COMMENT ON COLUMN ox.row_state."by" IS 'Who the mark is from (actor label): the creator of the lowest-numbered entry that gives it, or the setter of the suspicious mark.';

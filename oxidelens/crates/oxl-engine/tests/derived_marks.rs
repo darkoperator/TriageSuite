@@ -7,8 +7,8 @@ mod common;
 
 use common::{agent, analyst, loaded, n};
 use oxl_engine::{
-    clear_suspicious, count, groups, histogram, load_run, mark_counts, mark_suspicious, marks,
-    merged_rows, page, page_view, parse_filter, promote_rows, relations, row_detail,
+    clear_suspicious, count, detach_row, groups, histogram, load_run, mark_counts, mark_suspicious,
+    marks, merged_rows, page, page_view, parse_filter, promote_rows, relations, row_detail,
     set_entry_status, values, Actor, Case, EntryStatus, GridQuery, GridState, MarkState,
     MergedSource, PageOptions, ValueOrder,
 };
@@ -548,6 +548,59 @@ fn a_case_below_format_3_reads_its_suspicious_marks() {
             .iter()
             .map(|r| r.row_id)
             .collect::<Vec<_>>(),
+        [row]
+    );
+}
+
+/// An analyst's S on an Agent: malicious row is allowed and stored under the
+/// derived mark; once the agent's evidence is detached the row shows the
+/// analyst's Suspicious mark. An agent's S on that row is refused.
+#[test]
+fn an_analysts_s_on_an_agent_malicious_row_is_kept_under_it() {
+    let (_d, mut case) = loaded();
+    let row = n(&case, SHARE_SRV01);
+    let entry = promote(&mut case, row, &agent());
+    assert_eq!(
+        row_detail(&case, row).unwrap().mark,
+        Some(MarkState::AgentMalicious)
+    );
+
+    let refused = &mark_suspicious(&mut case, &[row], &agent()).unwrap()[0];
+    assert!(!refused.done, "{refused:?}");
+    assert!(
+        refused
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains(&format!("E-{entry}")),
+        "{refused:?}"
+    );
+
+    let done = &mark_suspicious(&mut case, &[row], &analyst()).unwrap()[0];
+    assert!(done.done, "{done:?}");
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.row_mark where row_id = {row} \
+                 and mark = 'suspicious' and marked_by = 'analyst:tester'"
+            )
+        ),
+        1
+    );
+    // Still Agent: malicious while the agent's entry holds it.
+    let detail = row_detail(&case, row).unwrap();
+    assert_eq!(detail.mark, Some(MarkState::AgentMalicious));
+    assert_eq!(detail.marked_by.as_deref(), Some("agent:claude"));
+
+    detach_row(&mut case, entry, row, &agent()).unwrap();
+    let detail = row_detail(&case, row).unwrap();
+    assert_eq!(detail.mark, Some(MarkState::Suspicious));
+    assert_eq!(detail.marked_by.as_deref(), Some("analyst:tester"));
+    assert_eq!(
+        page(&case, &with_mark(EVENTS, "eq", "suspicious"), 10, 0)
+            .unwrap()
+            .row_ids,
         [row]
     );
 }

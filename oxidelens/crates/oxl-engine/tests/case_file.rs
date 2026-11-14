@@ -355,17 +355,18 @@ fn internal_faults_have_their_own_code() {
     drop(case);
     corrupt("UPDATE ox.relation SET kind = 'file'");
 
-    // A mark the engine never writes is no mark: every reader reads
-    // `ox.row_state`, which takes only `suspicious` from `ox.row_mark`
-    // (ruling S2), so the row reads unmarked rather than failing.
+    // A mark the engine never writes. `ox.row_state` passes a stored mark
+    // through as it is, so every reader that decodes it says the case is
+    // damaged rather than showing the row unmarked.
     corrupt(&format!(
         "INSERT INTO ox.row_mark VALUES ({row}, 'bogus', 'analyst:tester', \
          '2026-01-01T00:00:00.000000Z')"
     ));
     let case = Case::open(&p).unwrap();
-    let shown = page(&case, &all, 50, 0).unwrap();
-    assert!(shown.marks.iter().all(Option::is_none), "{:?}", shown.marks);
-    assert!(marks(&case, None, 50, 0).unwrap().items.is_empty());
+    assert_eq!(code(page(&case, &all, 50, 0)), "internal");
+    assert_eq!(code(marks(&case, None, 50, 0)), "internal");
+    assert_eq!(code(oxl_engine::mark_counts(&case)), "internal");
+    assert_eq!(code(oxl_engine::row_detail(&case, row)), "internal");
     drop(case);
 
     // And an input mistake is still `invalid`.

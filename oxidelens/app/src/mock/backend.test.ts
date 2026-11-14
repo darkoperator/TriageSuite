@@ -8,8 +8,9 @@ import type { Histogram } from "../contract/generated/Histogram";
 import type { Listing } from "../contract/generated/Listing";
 import type { GroupView } from "../contract/generated/GroupView";
 import type { ValueCount } from "../contract/generated/ValueCount";
-import { MOCK_COMMANDS, mockCall, mockOn, setMockLatency } from "./backend";
-import { HOSTILE, HAYABUSA_COLUMNS, EVENT_COLUMNS, EVENT_ROWS, eventRows, hayabusaRows } from "./generated";
+import type { MergedView } from "../contract/generated/MergedView";
+import { MOCK_COMMANDS, mockCall, mockOn, setMockLatency, setMockMarks } from "./backend";
+import { HOSTILE, HAYABUSA_COLUMNS, HAYABUSA_FIRST_ID, EVENT_COLUMNS, EVENT_ROWS, eventRows, hayabusaRows } from "./generated";
 
 const apiCommands = [...apiSource.matchAll(/\bcall(?:<[^(]*>)?\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
 
@@ -49,6 +50,32 @@ describe("mock backend", () => {
     expect(summary.relations[0].primary_time).toBe("TimeCreated");
     expect(await mockCall("case_close")).toBeNull();
     expect(await rejection(mockCall("case_summary", q("s")))).toMatchObject({ code: "no_case" });
+  });
+});
+
+describe("the marked worklist", () => {
+  it("orders the marked rows of every relation by time, then pages them", async () => {
+    await mockCall<CaseSummary>("case_open", { path: "/cases/acme.case.duckdb" });
+    // Events 1, 2 and 5 fall at 02:14:03, 02:14:25 and 02:15:07; the first two Hayabusa rows at 02:14:00 and
+    // 02:19:12, so the two relations interleave.
+    const [h1, h2] = [HAYABUSA_FIRST_ID, HAYABUSA_FIRST_ID + 1];
+    setMockMarks([[1, "malicious"], [2, "suspicious"], [5, "agent_malicious"], [h1, "suspicious"], [h2, "malicious"]]);
+    const page = (offset: number, limit: number) =>
+      mockCall<Listing<MergedView>>("merged_page", {
+        ...q("m"), source: { marked: { marks: ["suspicious", "malicious", "agent_malicious"] } }, limit, offset, zone: "UTC",
+      });
+    const all = await page(0, 10);
+    expect(all.items.map((v) => v.row.row_id)).toEqual([h1, 1, 2, 5, h2]);
+    expect(all.truncated).toBe(false);
+    // A page boundary inside the interleaving.
+    const second = await page(2, 2);
+    expect(second.items.map((v) => v.row.row_id)).toEqual([2, 5]);
+    expect(second.truncated).toBe(true);
+    const only = await mockCall<Listing<MergedView>>("merged_page", {
+      ...q("m"), source: { marked: { marks: ["malicious"] } }, limit: 10, offset: 0, zone: "UTC",
+    });
+    expect(only.items.map((v) => [v.row.row_id, v.row.mark])).toEqual([[1, "malicious"], [h2, "malicious"]]);
+    await mockCall("case_close");
   });
 });
 
