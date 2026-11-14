@@ -41,6 +41,32 @@ describe("eslint config", () => {
     expect((await errors(code)).length).toBe(6);
   });
 
+  it("fails a clickable div with no keyboard path", async () => {
+    const found = await errors("export const A = (f: () => void) => <div onClick={f}>x</div>;\n");
+    expect(found.map((m) => m.ruleId).sort()).toEqual([
+      "jsx-a11y/click-events-have-key-events",
+      "jsx-a11y/no-static-element-interactions",
+    ]);
+  });
+
+  it("allows key handlers on a dialog and a focusable menu", async () => {
+    const code = [
+      "export const A = (k: () => void) => (",
+      "  <>",
+      '    <div role="dialog" aria-label="d" onKeyDown={k}><button type="button">x</button></div>',
+      '    <div role="menu" tabIndex={-1} onKeyDown={k}><button type="button" role="menuitem">y</button></div>',
+      "  </>",
+      ");",
+      "",
+    ].join("\n");
+    expect(await errors(code)).toEqual([]);
+  });
+
+  it("fails a mouse handler on a dialog", async () => {
+    const found = await errors('export const A = (f: () => void) => <div role="dialog" aria-label="d" onClick={f} />;\n');
+    expect(found.map((m) => m.ruleId)).toContain("jsx-a11y/no-noninteractive-element-interactions");
+  });
+
   it("allows a bare new Date() and a test file's dates", async () => {
     expect(await errors("export const now = () => new Date();\n")).toEqual([]);
     expect(await errors("export const d = (s: string) => new Date(s);\n", "src/x.test.ts")).toEqual([]);

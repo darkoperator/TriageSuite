@@ -1,3 +1,4 @@
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
@@ -43,6 +44,25 @@ export default tseslint.config(
           message: "The front end does no date arithmetic: show the engine's text.",
         },
       ],
+    },
+  },
+  {
+    // Every control works from the keyboard: a mouse-only handler on an element that cannot take focus is an error.
+    files: ["src/**/*.tsx"],
+    ...jsxA11y.flatConfigs.recommended,
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // Key handlers on a dialog or menu container are how they trap Tab and close on Escape (keys bubble up from
+      // the focused control); the rule's role list only exempts a native <dialog>. Mouse handlers stay errors.
+      "jsx-a11y/no-noninteractive-element-interactions": [
+        "error",
+        { handlers: ["onClick", "onDoubleClick", "onMouseDown", "onMouseUp"] },
+      ],
+      // WebKit (the macOS window) drops list semantics from a <ul> styled `list-style: none` unless the role is
+      // written out.
+      "jsx-a11y/no-redundant-roles": ["error", { ul: ["list"] }],
+      // A field in a form the analyst just opened takes focus on purpose; dialogs do the same through useDialogFocus.
+      "jsx-a11y/no-autofocus": "off",
     },
   },
   {

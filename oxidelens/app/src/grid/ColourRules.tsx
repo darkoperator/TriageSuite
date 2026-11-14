@@ -80,6 +80,7 @@ export default function ColourRules(p: ColourRulesProps): ReactNode {
   const full = p.rules.length >= MAX_RULES;
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a press on the backdrop closes the dialog; Escape inside it is the keyboard path
     <div className="viewer-scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
       <div ref={box} role="dialog" aria-modal="true" aria-label="Colour rules" className="rules-dialog" tabIndex={-1} onKeyDown={onKey}>
         <div className="viewer-title">

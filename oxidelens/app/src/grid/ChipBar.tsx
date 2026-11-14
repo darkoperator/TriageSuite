@@ -172,7 +172,7 @@ function ColumnPicker(p: {
     }
   };
   return (
-    <div ref={box} className="cell-menu column-picker" role="menu" aria-label="Filter column" style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
+    <div ref={box} className="cell-menu column-picker" role="menu" aria-label="Filter column" tabIndex={-1} style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
       {p.columns.map((c) => (
         <button key={c.name} type="button" role="menuitem" onClick={() => p.onPick(c.name)}>{displaySafe(c.label)}</button>
       ))}

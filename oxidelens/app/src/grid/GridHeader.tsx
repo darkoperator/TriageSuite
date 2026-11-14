@@ -152,6 +152,7 @@ export default function GridHeader(p: GridHeaderProps): ReactNode {
                 {multi ? col.getSortIndex() + 1 : ""}
               </span>
             )}
+            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- onClick only stops the header's sort; dragging is pointer-only and the keyboard path to a width is Best fit (header menu, column manager) */}
             <div
               role="separator"
               aria-orientation="vertical"

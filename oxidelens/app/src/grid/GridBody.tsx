@@ -74,6 +74,7 @@ export default function GridBody(p: GridBodyProps): ReactNode {
             className={classes.filter(Boolean).join(" ")}
             style={{ height: p.rowHeight, transform: `translateY(${v.start}px)`, width: p.width }}
           >
+            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- the grid (Grid.tsx) holds focus and moves the focused cell with the arrow keys; a cell is not a tab stop */}
             <div
               role="gridcell"
               aria-colindex={1}
@@ -92,6 +93,7 @@ export default function GridBody(p: GridBodyProps): ReactNode {
               const left = p.pinLeft[c];
               const focused = p.focus !== null && p.focus.row === v.index && p.focus.col === c;
               return (
+                // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- the grid (Grid.tsx) holds focus and moves the focused cell with the arrow keys; a cell is not a tab stop
                 <div
                   key={c}
                   role="gridcell"

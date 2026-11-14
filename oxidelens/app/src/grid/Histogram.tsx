@@ -226,7 +226,7 @@ export default function Histogram(p: HistogramProps): ReactNode {
   const message = brushError ?? error;
 
   return (
-    <section className="hist" role="region" aria-label="Histogram">
+    <section className="hist" aria-label="Histogram">
       <div className="hist-head">
         <select
           className="hist-picker"

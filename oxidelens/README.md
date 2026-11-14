@@ -47,8 +47,17 @@ cd crates/oxl-app && ../../app/node_modules/.bin/tauri dev    # the real app
 
 **[docs/APP.md](docs/APP.md)** is the app's developer notes: running it (dev,
 the mock page, a test build), the generated contract and how to add a
-command, query slots and cancellation, what is kept in the case and what per
-machine, and the debug-only MCP bridge.
+command, query slots and cancellation, the conventions front-end code
+follows, what is kept in the case and what per machine, and the debug-only MCP
+bridge.
+
+**Reviewing a change.** [CODING_STANDARDS.md](CODING_STANDARDS.md) is what a
+reviewer checks beyond what clippy, rustfmt and ESLint enforce.
+`scripts/review/codex-review.ps1` runs one read-only Codex review of a commit
+range (a task, a fix round or the whole branch): it writes the review package
+and the prompt from the templates beside it, then runs Codex. Its help
+(`Get-Help .\scripts\review\codex-review.ps1 -Full`) lists the files it
+reads and writes.
 
 **Mock mode.** `npm run dev:mock` serves the front end on http://localhost:5173
 with a fake backend (`app/src/mock/`) in place of the desktop app: a seeded

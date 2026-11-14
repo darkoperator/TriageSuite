@@ -5,7 +5,8 @@ TypeScript front end (`app/`). The engine (`crates/oxl-engine`) holds every
 rule; the backend drives it from a window, and the front end renders what the
 backend answers and keeps what it is showing. These notes cover how to run it,
 the contract between the two halves, how queries are superseded and
-cancelled, where state is kept, and the debug-only bridge an agent can drive
+cancelled, the conventions front-end code follows, where state is kept, and
+the debug-only bridge an agent can drive
 the window through. All names in the examples are synthetic.
 
 ## Running it
@@ -193,6 +194,66 @@ it is done (`no_case`), waits for the readers to come back, and drops them
 before the writer, so the file can be opened again as soon as `case_close`
 returns. Quitting the app closes the case off the event loop's thread and
 waits for that a bounded time.
+
+## Writing front-end code
+
+**Where things are.** `app/src/api.ts` is the only caller of the backend
+(`call()`, one typed wrapper per command, `newQueryId`, `isCmdError`, the
+event listeners) and the only importer of `@tauri-apps/api`. The contract
+types in `app/src/contract/generated/` are written by `cargo test -p oxl-app
+--test contract`; regenerate them, never edit them. `app/src/text.ts` has
+`displaySafe` and `displaySafeMultiline`. `app/src/shell/slots.tsx` names the
+mount points a screen fills, and `useShell()` (`shell/context.ts`) is how a
+screen reaches the shell: status bar, errors, settings writes.
+`grid/dialogFocus.ts` has `useDialogFocus` and `trapTab`, `shell/keys.ts`
+has `isTypingTarget`, and `shell/useCaseChanged.ts` subscribes to
+`case-changed`.
+
+**Answers that arrive late.** A read can come back after the screen has moved
+on: the state, zone, rules, tab or case changed while it ran. The front end
+draws only answers that belong to what it shows now, and every async path
+follows the same four rules. `grid/useGridData.ts` is the reference:
+
+- Key the request by what it reads: `stableKey([state, zone, rules])`, not
+  object identity, so an equal state does not refetch and a changed one does.
+- Take a version (or key) before the call, and compare it after *every*
+  `await` and in the rejection path too. A mismatch drops the answer, whatever
+  it holds.
+- Record the query ids in flight. When the version moves on, cancel them with
+  `query_cancel` and forget the settled ones. A copy or export run gets its own
+  session (`GridStore.beginCopy()`) that a newer run or a state change ends.
+- Treat `superseded`, `interrupted` and `no_case` as "not drawn", never as
+  errors.
+
+When one step reads state that another step writes, swap them together in
+one record (`grid/useMatches.ts` keeps `{key, state, running}` and swaps it
+in one layout effect), so a render between the two never pairs a new key
+with an old state.
+
+**Settings writes** go through the shell's one queue (`shell/Shell.tsx`;
+screens reach it through `useShell()`'s `saveLayout`, `saveColourRules` and
+`setHistogram`): plain changes coalesce, an awaited save (`saveSettings`, the
+settings dialog's) is its own entry, and each
+write is the last confirmed reply plus the queued changes. A second write
+path can persist an older object last, so there is none.
+
+**Keyboard and focus.** Every action has a keyboard path. Use a `<button>`
+for anything clickable. A dialog focuses its first control when it opens and
+gives focus back to the control that opened it when it closes
+(`useDialogFocus(box, returnTo)`; pass `returnTo` when a menu opened it,
+because the menu is gone by then). A modal keeps Tab inside it (`trapTab`).
+Shortcuts do nothing while `isTypingTarget` is true. ESLint
+(`jsx-a11y`) fails a mouse-only handler on an element that cannot take focus.
+Where pointer-only is deliberate, the disable comment says what the keyboard
+path is instead.
+
+**Tests.** Screen tests call the real `api.ts` against the mock backend
+(`src/test/backend.ts`: `callLog`, `callsOf`, `overrideCommand`,
+`emitEvent`). Shapes the engine really answers come from the recorded
+fixtures (`src/test/fixtures.ts`). Every component that renders case data
+also renders the mock's hostile rows. For each async path, a test holds the
+first answer back, changes the state, then releases the answer and asserts
+it is not drawn.
 
 ## What is kept where
 

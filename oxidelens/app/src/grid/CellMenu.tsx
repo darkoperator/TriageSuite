@@ -47,7 +47,7 @@ export default function CellMenu(p: CellMenuProps): ReactNode {
   };
 
   return (
-    <div ref={box} className="cell-menu" role="menu" style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
+    <div ref={box} className="cell-menu" role="menu" tabIndex={-1} style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
       <button type="button" role="menuitem" onClick={choose(p.onCopyCell)}>Copy cell</button>
       <button type="button" role="menuitem" onClick={choose(p.onCopyRows)}>Copy rows (with headers)</button>
       <button type="button" role="menuitem" onClick={choose(p.onShowValue)}>Show full value (Space)</button>

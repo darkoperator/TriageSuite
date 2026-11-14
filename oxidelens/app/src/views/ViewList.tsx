@@ -212,7 +212,7 @@ function ViewMenu(p: { opener: HTMLElement; x: number; y: number; name: string; 
   };
 
   return (
-    <div ref={box} className="cell-menu" role="menu" aria-label="Saved view" style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
+    <div ref={box} className="cell-menu" role="menu" aria-label="Saved view" tabIndex={-1} style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
       {asking ? (
         <>
           <p className="menu-ask">{`Delete “${displaySafe(p.name)}”?`}</p>

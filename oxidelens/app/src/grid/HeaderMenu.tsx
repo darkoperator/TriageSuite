@@ -49,7 +49,7 @@ export default function HeaderMenu(p: HeaderMenuProps): ReactNode {
   };
 
   return (
-    <div ref={box} className="cell-menu" role="menu" aria-label="Column" style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
+    <div ref={box} className="cell-menu" role="menu" aria-label="Column" tabIndex={-1} style={{ left: p.x, top: p.y }} onKeyDown={onKeyDown}>
       <button type="button" role="menuitem" onClick={choose(() => p.onSort(false))}>Sort ascending</button>
       <button type="button" role="menuitem" onClick={choose(() => p.onSort(true))}>Sort descending</button>
       <button type="button" role="menuitem" disabled={!p.onGroupBy} onClick={choose(p.onGroupBy)}>Group by this column</button>

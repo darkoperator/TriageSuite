@@ -49,6 +49,7 @@ export default function GroupBody(p: GroupBodyProps): ReactNode {
             const column = p.by[item.depth] ?? "";
             const name = column === MARK_COLUMN ? "Mark" : column;
             return (
+              // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- known gap: opening a group as a tab is double-click only; the toggle button inside is the row's keyboard control
               <div
                 key={item.id}
                 role="row"
