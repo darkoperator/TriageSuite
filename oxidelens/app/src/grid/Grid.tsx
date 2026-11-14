@@ -11,8 +11,8 @@ import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
 import {
-  columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowOffset, gridRowPositions, isCmdError, newQueryId,
-  queryCancel, viewSave,
+  columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowIds, gridRowOffset, gridRowPositions, isCmdError,
+  newQueryId, queryCancel, viewSave,
 } from "../api";
 import { pickCsvSavePath } from "../dialogs";
 import ApplyWarnings, { type ViewNotice } from "../views/ApplyWarnings";
@@ -56,7 +56,7 @@ import { measureText } from "./measure";
 import { BLOCK_ROWS, MAX_BLOCKS, blockOf } from "./blocks";
 import { filterFromChips, newRule, rulesStatus } from "./ruleClasses";
 import {
-  MAX_COPY_ROWS, contains, emptySelection, fromPositions, indices, selectOnly, selectRange, size, toggle, type Selection,
+  MAX_ACTION_ROWS, MAX_COPY_ROWS, contains, emptySelection, fromPositions, indices, selectOnly, selectRange, size, toggle, type Selection,
 } from "./selection";
 import SearchBox from "./SearchBox";
 import { stableKey, useGridData } from "./useGridData";
@@ -73,6 +73,8 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const NO_RULES: ColourRule[] = [];
+/** An answer that is "not drawn", never an error. */
+const isStale = (e: unknown) => isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case");
 
 let revealCount = 0;
 /** A token no other reveal request of this window has: a counter and some randomness (never a clock). */
@@ -353,72 +355,138 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   // A write to the case (a mark, a load, a zone) re-reads the rows; filters and scroll stay. The selection, its anchor
   // and the focused cell are row offsets, and a load or a supersede can put other rows at the same offsets, so the
-  // selection is kept by row id instead (ruling S10): its ids (resolved by an action, or read from the rows in memory
-  // before they are dropped) go to `grid_row_positions`, and the selection is rebuilt from where those rows are now;
-  // a row the new answer leaves out drops out. Until the answer comes nothing is selected, and a selection whose rows
-  // are not all known by id (some in blocks never read) is cleared: Copy rows can never take rows the analyst did not
-  // pick. The focused cell is cleared. (The row detail is kept: it holds a row id.) A change to the saved views alone
-  // re-reads no rows and keeps them.
+  // selection is kept by row id instead (ruling S10). Its ids are resolved as soon as it is made, while the indexes
+  // still mean the rows the analyst picked: from the rows in memory, else through `grid_row_ids`. On a re-read those
+  // ids go to `grid_row_positions` and the selection is rebuilt from where the rows are now; a row the new answer
+  // leaves out drops out. Until the answer comes nothing is selected. A selection past `MAX_ACTION_ROWS` is never
+  // resolved, so a re-read clears it: Copy rows can never take rows the analyst did not pick. The focused cell is
+  // cleared. (The row detail is kept: it holds a row id.) A change to the saved views alone re-reads no rows and keeps
+  // them. Both reads are keyed by the whole state they send (`shownKey`): a change of it, or a new pick, cancels them,
+  // and an answer or a failure that arrives after either is dropped.
   const treeRefresh = tree.refresh;
   const seenGeneration = useRef(change.generation);
   // Rises with every re-read of the rows; the histogram strip re-reads with it.
   const [dataVersion, setDataVersion] = useState(0);
+  const shownKey = useMemo(() => stableKey(shownState), [shownState]);
   const selectionRef = useRef(selection);
   const shownStateRef = useRef(shownState);
+  const shownKeyRef = useRef(shownKey);
   useEffect(() => {
     selectionRef.current = selection;
     shownStateRef.current = shownState;
+    shownKeyRef.current = shownKey;
   });
-  /** The rebuild in flight: its query id, and the one selection its answer may replace. */
-  const rebuild = useRef<{ queryId: string; waiting: Selection } | null>(null);
+  /** The selected rows' ids from the rows in memory, or null when one of them is not there. */
+  const known = useCallback(
+    (sel: Selection): number[] | null => {
+      if (size(sel) > BLOCK_ROWS * MAX_BLOCKS) return null;
+      const ids: number[] = [];
+      for (const i of indices(sel)) {
+        const row = rowAt(i);
+        if (!row) return null;
+        ids.push(row.id);
+      }
+      return ids;
+    },
+    [rowAt],
+  );
+
+  // ---- resolving the selection's ids --------------------------------------------------------------------------------
+  /** The `grid_row_ids` in flight: its query id, the selection it resolves and the state key it was asked under. */
+  const resolving = useRef<{ queryId: string; sel: Selection; key: string } | null>(null);
+  const cancelResolve = useCallback(() => {
+    const r = resolving.current;
+    resolving.current = null;
+    if (r) queryCancel([r.queryId]).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (resolving.current && (resolving.current.sel !== selection || resolving.current.key !== shownKey)) cancelResolve();
+    if (selection.ids !== null || selection.ranges.length === 0 || resolving.current) return;
+    if (size(selection) > MAX_ACTION_ROWS) return;
+    const sel = selection;
+    const inMemory = known(sel);
+    if (inMemory !== null) {
+      setSelection((s) => (s === sel ? { ...sel, ids: inMemory } : s));
+      return;
+    }
+    const key = shownKey;
+    const queryId = newQueryId();
+    resolving.current = { queryId, sel, key };
+    const ranges = sel.ranges.map(([a, b]): [number, number] => [a, b]);
+    gridRowIds(shownState, ranges, `tab:${tab.id}:selection`, queryId).then(
+      (ids) => {
+        if (resolving.current?.queryId !== queryId) return;
+        resolving.current = null;
+        if (shownKeyRef.current !== key) return;
+        setSelection((s) => (s === sel ? { ...sel, ids } : s));
+      },
+      (e: unknown) => {
+        if (resolving.current?.queryId !== queryId) return;
+        resolving.current = null;
+        if (shownKeyRef.current !== key || selectionRef.current !== sel) return;
+        if (!isStale(e)) reportError(e);
+      },
+    );
+  }, [selection, shownKey, shownState, known, cancelResolve, tab.id, reportError]);
+  useEffect(() => cancelResolve, [cancelResolve]);
+
+  // ---- rebuilding it after a re-read --------------------------------------------------------------------------------
+  /** The rebuild in flight: its query id, the one selection its answer may replace, the state key it was asked under. */
+  const rebuild = useRef<{ queryId: string; waiting: Selection; key: string; anchorId: number | null } | null>(null);
   const cancelRebuild = useCallback(() => {
     const r = rebuild.current;
     rebuild.current = null;
     if (r) queryCancel([r.queryId]).catch(() => {});
   }, []);
+  const startRebuild = useCallback(
+    (waiting: Selection, anchorId: number | null) => {
+      const key = shownKeyRef.current;
+      const queryId = newQueryId();
+      rebuild.current = { queryId, waiting, key, anchorId };
+      gridRowPositions(shownStateRef.current, waiting.ids ?? [], `tab:${tab.id}:selection`, queryId).then(
+        (positions) => {
+          if (rebuild.current?.queryId !== queryId) return;
+          rebuild.current = null;
+          if (shownKeyRef.current !== key) return;
+          setSelection((s) => (s === waiting ? fromPositions(positions, anchorId) : s));
+        },
+        (e: unknown) => {
+          if (rebuild.current?.queryId !== queryId) return;
+          rebuild.current = null;
+          if (shownKeyRef.current !== key || selectionRef.current !== waiting) return;
+          if (!isStale(e)) reportError(e);
+        },
+      );
+    },
+    [tab.id, reportError],
+  );
   // A new pick, a state change or the tab closing ends a rebuild: its answer could only undo what the analyst did since.
+  // A change of what the grid reads (a column hidden) asks again under the new state.
   useEffect(() => {
-    if (rebuild.current && rebuild.current.waiting !== selection) cancelRebuild();
-  }, [selection, cancelRebuild]);
+    const r = rebuild.current;
+    if (!r) return;
+    if (r.waiting !== selection) cancelRebuild();
+    else if (r.key !== shownKey) {
+      cancelRebuild();
+      startRebuild(r.waiting, r.anchorId);
+    }
+  }, [selection, shownKey, cancelRebuild, startRebuild]);
   useEffect(() => cancelRebuild, [cancelRebuild]);
   useEffect(() => {
     if (change.generation === seenGeneration.current) return;
     seenGeneration.current = change.generation;
     if (change.kinds.some((k) => k !== "views")) {
       const sel = selectionRef.current;
-      // The rows in memory still belong to the state before the write: read the ids there, before `refresh` drops them.
-      const known = (): number[] | null => {
-        if (size(sel) > BLOCK_ROWS * MAX_BLOCKS) return null;
-        const ids: number[] = [];
-        for (const i of indices(sel)) {
-          const row = rowAt(i);
-          if (!row) return null;
-          ids.push(row.id);
-        }
-        return ids;
-      };
-      const ids = sel.ids ?? known();
+      // A resolve still out may be answered under the new rows, so it is dropped; the rows in memory still belong to
+      // the state before the write, so they are read instead, before `refresh` drops them.
+      cancelResolve();
+      const ids = sel.ids ?? known(sel);
       const anchorId = sel.anchor === null ? null : (rowAt(sel.anchor)?.id ?? null);
       cancelRebuild();
       if (ids !== null && ids.length > 0) {
         const waiting: Selection = { ranges: [], anchor: null, ids };
-        const key = stableKey(stateRef.current);
-        const queryId = newQueryId();
-        rebuild.current = { queryId, waiting };
         setSelection(waiting);
-        gridRowPositions(shownStateRef.current, ids, `tab:${tab.id}:selection`, queryId).then(
-          (positions) => {
-            if (rebuild.current?.queryId !== queryId) return;
-            rebuild.current = null;
-            if (stableKey(stateRef.current) !== key) return;
-            setSelection((s) => (s === waiting ? fromPositions(positions, anchorId) : s));
-          },
-          (e: unknown) => {
-            if (rebuild.current?.queryId !== queryId) return;
-            rebuild.current = null;
-            if (!(isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case"))) reportError(e);
-          },
-        );
+        startRebuild(waiting, anchorId);
       } else {
         setSelection(emptySelection);
       }
@@ -428,7 +496,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       refresh();
       treeRefresh();
     }
-  }, [change, refresh, treeRefresh, rowAt, cancelRebuild, tab.id, reportError]);
+  }, [change, refresh, treeRefresh, rowAt, known, cancelResolve, cancelRebuild, startRebuild]);
 
   // ---- virtual rows -----------------------------------------------------------------------------------------------
   const rowHeight = rowHeightFor(settings.font_size);

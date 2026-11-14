@@ -20,6 +20,12 @@ export interface Selection {
 
 export const emptySelection: Selection = { ranges: [], anchor: null, ids: null };
 
+/**
+ * The most rows the grid resolves to ids (the engine's `MAX_ACTION_ROWS`, ruling S10: `grid_row_ids` refuses more).
+ * A larger selection is not asked for, so it has no ids and does not survive a re-read.
+ */
+export const MAX_ACTION_ROWS = 10_000;
+
 /** The most rows Copy rows will fetch and write. */
 export const MAX_COPY_ROWS = 50_000;
 

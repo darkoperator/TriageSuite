@@ -474,35 +474,124 @@ describe("grid", () => {
     expect(statusText(status)).toContain(" · 1 selected · ");
   });
 
-  it("a_selection_not_all_in_memory_is_cleared_by_a_reread", async () => {
-    const { user, status, ctx, rerender } = await mount();
+  /** Click row 10, scroll down and shift-click row `to`: a range over blocks never read. */
+  async function selectAcrossUnreadBlocks(user: ReturnType<typeof userEvent.setup>, to: number) {
     await user.click(cellOf(rowOf(10), "Channel"));
-    await scrollToRow(1500);
-    await waitFor(() => expect(rowOf(1500)).toBeTruthy());
-    await waitFor(() => expect(cellOf(rowOf(1500), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    await scrollToRow(to);
+    await waitFor(() => expect(rowOf(to)).toBeTruthy());
+    await waitFor(() => expect(cellOf(rowOf(to), "Channel").textContent).not.toBe(""), { timeout: 5000 });
     await user.keyboard("{Shift>}");
-    await user.click(cellOf(rowOf(1500), "Channel"));
+    await user.click(cellOf(rowOf(to), "Channel"));
     await user.keyboard("{/Shift}");
-    await waitFor(() => expect(statusText(status)).toContain(" · 1,491 selected · "));
+  }
+  const selectedIndexes = () => dataRows().filter((r) => r.getAttribute("aria-selected") === "true").map((r) => r.getAttribute("data-row-index"));
+  const reread = (rerender: (ui: ReactNode) => void, ctx: ShellContext, generation = 1) =>
     rerender(
-      <ShellCtx.Provider value={{ ...ctx, change: { generation: 1, kinds: ["sources"] } }}>
+      <ShellCtx.Provider value={{ ...ctx, change: { generation, kinds: ["sources"] } }}>
         <Grid tab={events} active scrollOffset={0} onScroll={() => {}} />
       </ShellCtx.Provider>,
     );
-    // Rows in blocks never read have no id here, and after the write their offsets may name other rows: nothing
-    // survives, Copy rows copies nothing, and shift-click has no anchor left to extend from.
-    await waitFor(() => expect(statusText(status)).toContain(" · 0 selected · "));
+
+  it("a_selection_over_unread_blocks_survives_case_changed_by_id", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    await selectAcrossUnreadBlocks(user, 1500);
+    // The rows in blocks never read are named by the engine as soon as the selection is made, under the old order.
+    await waitFor(() => expect(callsOf("grid_row_ids")).toHaveLength(1));
+    const asked = callsOf("grid_row_ids")[0].args as { ranges: Array<[number, number]>; slot: string };
+    expect(asked.ranges).toEqual([[10, 1500]]);
+    expect(asked.slot).toBe("tab:dataset:mock_events:selection");
+    const ids = (await mockCall("grid_row_ids", { ...callsOf("grid_row_ids")[0].args, queryId: "t", slot: "t" })) as number[];
+    expect(ids).toHaveLength(1491);
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    reread(rerender, ctx);
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    expect((callsOf("grid_row_positions")[0].args as { ids: number[] }).ids).toEqual(ids);
+    await waitFor(() => expect(selectedIndexes()).toContain("1500"));
+    expect(statusText(status)).toContain(" · 1,491 selected · ");
+  }, 30_000);
+
+  it("a_late_row_ids_answer_is_not_stored", async () => {
+    const { user, ctx, rerender } = await mount();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("grid_row_ids", async (args) => {
+      await gate;
+      return mockCall("grid_row_ids", args);
+    });
+    await selectAcrossUnreadBlocks(user, 1500);
+    await waitFor(() => expect(callsOf("grid_row_ids")).toHaveLength(1));
+    const id = (callsOf("grid_row_ids")[0].args as { queryId: string }).queryId;
+    // A plain click on row 1500 replaces the range before the engine answers: the resolve is cancelled.
+    await user.click(cellOf(rowOf(1500), "Channel"));
+    await waitFor(() => expect(callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds)).toContain(id));
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    reread(rerender, ctx);
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    expect((callsOf("grid_row_positions")[0].args as { ids: number[] }).ids).toHaveLength(1);
+    await waitFor(() => expect(selectedIndexes()).toEqual(["1500"]));
+  }, 30_000);
+
+  it("a_selection_over_the_action_cap_is_dropped_by_a_reread", async () => {
+    // The relation is made 12,000 rows long: the mock's 5,000 again and again, under ids of their own.
+    const LONG = 12_000;
+    overrideCommand("grid_counts", async (args) => ({ ...((await mockCall("grid_counts", args)) as object), rows: LONG, total: LONG }));
+    overrideCommand("grid_page", async (args) => {
+      const a = args as { offset: number };
+      const lap = Math.floor(a.offset / 5000);
+      const page = (await mockCall("grid_page", { ...a, offset: a.offset % 5000 })) as GridPage;
+      return { ...page, row_ids: page.row_ids.map((id) => id + lap * 100_000) };
+    });
+    const { user, status, ctx, rerender } = await mount();
+    await selectAcrossUnreadBlocks(user, 10_500);
+    await waitFor(() => expect(selectedIndexes()).toContain("10500"));
+    expect(statusText(status)).toContain(" · 10,491 selected · ");
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    // Past 10,000 rows nothing is resolved, so nothing can be kept: the re-read drops the selection and Copy takes nothing.
+    expect(callsOf("grid_row_ids")).toHaveLength(0);
+    reread(rerender, ctx);
+    await waitFor(() => expect(selectedIndexes()).toEqual([]));
     expect(callsOf("grid_row_positions")).toHaveLength(0);
+    expect(statusText(status)).toContain(" · 0 selected · ");
     screen.getByRole("grid").focus();
     await user.keyboard("{Control>}{Shift>}c{/Shift}{/Control}");
     await act(() => new Promise((r) => setTimeout(r, 100)));
     expect(copy.writeClipboard).not.toHaveBeenCalled();
-    await waitFor(() => expect(cellOf(rowOf(1500), "Channel").textContent).not.toBe(""), { timeout: 5000 });
-    await user.keyboard("{Shift>}");
-    await user.click(cellOf(rowOf(1500), "Channel"));
-    await user.keyboard("{/Shift}");
-    await waitFor(() => expect(statusText(status)).toContain(" · 1 selected · "));
   }, 30_000);
+
+  it("a_layout_change_restarts_a_pending_rebuild_and_drops_its_failure", async () => {
+    const { user, ctx, rerender } = await mount();
+    await user.click(cellOf(rowOf(2), "Channel"));
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(4), "Channel"));
+    await user.keyboard("{/Shift}");
+    let fail!: () => void;
+    const gate = new Promise<void>((r) => (fail = r));
+    let first = true;
+    overrideCommand("grid_row_positions", async (args) => {
+      if (!first) return mockCall("grid_row_positions", args);
+      first = false;
+      await gate;
+      throw { code: "invalid", message: "an answer for the old layout" };
+    });
+    reread(rerender, ctx);
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    const oldId = (callsOf("grid_row_positions")[0].args as { queryId: string }).queryId;
+    // Hiding a column changes what the grid reads while the rebuild is out: it is cancelled and asked again.
+    fireEvent.contextMenu(header("Channel"));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Hide" }));
+    await waitFor(() => expect(callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds)).toContain(oldId));
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(2));
+    expect((callsOf("grid_row_positions")[1].args as { state: GridState }).state.columns).not.toContain("Channel");
+    await act(async () => {
+      fail();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(ctx.reportError).not.toHaveBeenCalled();
+    await waitFor(() => expect(selectedIndexes()).toEqual(["2", "3", "4"]));
+  });
 
   it("a_views_only_case_change_keeps_the_selection", async () => {
     const { user, status, ctx, rerender } = await mount();
