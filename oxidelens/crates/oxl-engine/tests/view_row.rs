@@ -236,6 +236,31 @@ fn manifest_paths_are_normalised() {
     );
 }
 
+/// A `..` left over once the path is folded climbs above where the path
+/// starts, so the place it names is unknown: such a path names no file,
+/// even when its last components are the file's.
+#[test]
+fn a_manifest_path_climbing_above_its_start_names_nothing() {
+    let manifest = |path: &str| {
+        serde_json::json!({
+            "schema_version": 3,
+            "hosts": [{"host": "WS01", "tools": [{"output_paths": [path]}]}],
+        })
+        .to_string()
+    };
+    for path in [
+        "../Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        "x/../../Processed-WS01-20260101000000/EventLogs/evtx.csv",
+        r"..\Processed-WS01-20260101000000\EventLogs\evtx.csv",
+    ] {
+        assert_eq!(
+            listed_under_manifest(&manifest(path)),
+            Some(false),
+            "{path}"
+        );
+    }
+}
+
 #[test]
 fn a_manifest_written_before_the_run_moved_still_lists_its_files() {
     // The manifest's absolute paths name where the run was written; the

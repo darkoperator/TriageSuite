@@ -279,8 +279,11 @@ fn listed_in_manifest(
     output_file: &str,
 ) -> Option<bool> {
     let hosts = serde_json::from_str::<RunManifest>(manifest).ok()?.hosts?;
-    let file = components(output_file);
-    let root = components(root);
+    // The run root and the row's file are canonical paths, so neither
+    // climbs above its start; if one did, it would name nothing known.
+    let (Some(file), Some(root)) = (components(output_file), components(root)) else {
+        return Some(false);
+    };
     let wanted = match file.strip_prefix(root.as_slice()) {
         Some(below) if !below.is_empty() => below,
         _ => file.as_slice(),
@@ -296,26 +299,27 @@ fn listed_in_manifest(
         })
         .flat_map(|h| h.tools.iter().chain(&h.external_tools))
         .flat_map(|t| &t.output_paths)
-        .any(|path| components(path).ends_with(wanted));
+        .any(|path| components(path).is_some_and(|path| path.ends_with(wanted)));
     Some(listed)
 }
 
 /// A path's components, split at either separator, lower-cased; empty,
 /// `.` and the `\\?\` prefix's `?` components dropped, and each `..` folded
-/// into the component before it (`a/../b` is `b`). A `..` with nothing
-/// before it to fold is kept, so it matches no file's component.
-fn components(path: &str) -> Vec<String> {
+/// into the component before it (`a/../b` is `b`). `None` for a path with
+/// a `..` that has nothing before it to fold: it climbs above where it
+/// starts, so the place it names is unknown, and it names no file.
+fn components(path: &str) -> Option<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     for c in path.split(['/', '\\']) {
         match c {
             "" | "." | "?" => {}
-            ".." if out.last().is_some_and(|last| last != "..") => {
-                out.pop();
+            ".." => {
+                out.pop()?;
             }
             _ => out.push(c.to_ascii_lowercase()),
         }
     }
-    out
+    Some(out)
 }
 
 /// One cell's whole value.
@@ -469,9 +473,13 @@ mod tests {
 
     #[test]
     fn dot_dot_folds_into_the_component_before_it() {
-        assert_eq!(components(r"a\b/../C/./d"), ["a", "c", "d"]);
-        // Nothing before it to fold: kept, so it matches no real component.
-        assert_eq!(components("../a/../../b"), ["..", "..", "b"]);
+        assert_eq!(
+            components(r"a\b/../C/./d"),
+            Some(vec!["a".to_string(), "c".to_string(), "d".to_string()])
+        );
+        // Nothing before it to fold: it climbs above its start.
+        assert_eq!(components("../b"), None);
+        assert_eq!(components("a/../../b"), None);
     }
 
     #[test]

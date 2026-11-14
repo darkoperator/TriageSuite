@@ -119,7 +119,7 @@ pub fn view_export(state: &AppState, at: At<'_>, id: i64, path: &Path) -> Result
 /// one that is not UTF-8 text, or anything that is not a regular file;
 /// `not_found` for no file there.
 pub fn view_import(state: &AppState, path: &Path) -> Result<SavedView, CmdError> {
-    let json = read_capped(path)?;
+    let json = read_capped(state, path)?;
     let actor = state.actor();
     state.write(VIEWS, |c| oxl_engine::import_view(c, &json, &actor))
 }
@@ -145,7 +145,7 @@ fn write_partial(path: &Path, bytes: &[u8]) -> oxl_engine::Result<PathBuf> {
 /// `MAX_VIEW_FILE_BYTES`: by its size before it is opened, and by what is
 /// read (at most one byte past the cap), since a file can grow between the
 /// two.
-fn read_capped(path: &Path) -> Result<String, CmdError> {
+fn read_capped(state: &AppState, path: &Path) -> Result<String, CmdError> {
     let meta = std::fs::metadata(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             EngineError::NotFound(format!("no file at {}", path.display()))
@@ -164,6 +164,7 @@ fn read_capped(path: &Path) -> Result<String, CmdError> {
     if meta.len() > MAX_VIEW_FILE_BYTES as u64 {
         return Err(too_big(path));
     }
+    state.hook(Point::BeforeImportOpen);
     let file = std::fs::File::open(path).map_err(EngineError::Io)?;
     let mut bytes = Vec::new();
     file.take(MAX_VIEW_FILE_BYTES as u64 + 1)
@@ -185,6 +186,44 @@ fn too_big(path: &Path) -> CmdError {
         "a view file is at most {MAX_VIEW_FILE_BYTES} bytes; {} is larger",
         path.display()
     ))
+}
+
+/// A view file over the cap is refused by its size before it is opened:
+/// the hook just before the open is never reached for it, on any platform.
+/// A file at the cap is opened, which shows the hook is where the open is.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::NoSink;
+    use crate::settings::SettingsStore;
+    use std::sync::atomic::Ordering;
+
+    /// Whether importing a file of `len` bytes reached the open, and the
+    /// error it answered.
+    fn import_of(len: u64) -> (bool, CmdError) {
+        let d = tempfile::tempdir().unwrap();
+        let state = AppState::new(SettingsStore::in_memory(), Arc::new(NoSink));
+        let path = d.path().join("view.oxlview.json");
+        std::fs::File::create(&path).unwrap().set_len(len).unwrap();
+        let opened = Arc::new(AtomicBool::new(false));
+        let seen = opened.clone();
+        state.on(Point::BeforeImportOpen, move || {
+            seen.store(true, Ordering::SeqCst);
+        });
+        let err = view_import(&state, &path).unwrap_err();
+        (opened.load(Ordering::SeqCst), err)
+    }
+
+    #[test]
+    fn view_import_checks_size_before_reading() {
+        let (opened, err) = import_of(MAX_VIEW_FILE_BYTES as u64 + 1);
+        assert_eq!(err.code, "invalid", "{}", err.message);
+        assert!(err.message.contains("at most"), "{}", err.message);
+        assert!(!opened, "the oversized file was opened");
+        // At the cap the file is opened (and, all NUL bytes, is no view).
+        let (opened, _) = import_of(MAX_VIEW_FILE_BYTES as u64);
+        assert!(opened, "a file at the cap was never opened");
+    }
 }
 
 pub mod commands {

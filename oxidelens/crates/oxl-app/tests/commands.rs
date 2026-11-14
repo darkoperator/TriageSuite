@@ -637,6 +637,73 @@ fn view_delete_removes_it() {
     );
 }
 
+/// A grid export cancelled part way through its file (once the partial file
+/// has its first bytes, which the writer flushes only after the row-0 check)
+/// answers `interrupted` and leaves neither the file nor its partial. The
+/// cancel both sets the export's flag and interrupts DuckDB, so either one
+/// stops it; the partial file is watched while it grows, and the bound on
+/// what was seen says it stopped part way, not after all 400,000 rows. (The
+/// engine's `export_stops_mid_file` pins the flag on its own.)
+#[test]
+fn grid_export_cancelled_mid_file_is_interrupted() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const ROWS: u32 = 400_000;
+    let l = loaded();
+    let source = l.dir.path().join("many.csv");
+    let mut text = String::from("n\n");
+    for i in 0..ROWS {
+        text.push_str(&format!("{i:07}\n"));
+    }
+    std::fs::write(&source, text).unwrap();
+    let options: FileOptions = serde_json::from_value(json!({ "name": "many" })).unwrap();
+    let rel = load::load_file(&l.state, &source, options)
+        .unwrap()
+        .relations[0]
+        .name
+        .clone();
+    let mut state = grid(&rel);
+    state.columns = Some(vec!["n".into()]);
+    let out = l.dir.path().join("stopped.csv");
+    let mut partial = out.as_os_str().to_os_string();
+    partial.push(".partial");
+    let partial = std::path::PathBuf::from(partial);
+
+    let done = AtomicBool::new(false);
+    let (answer, largest) = std::thread::scope(|s| {
+        let watcher = s.spawn(|| {
+            let (mut largest, mut cancelled) = (0u64, false);
+            while !done.load(Ordering::SeqCst) {
+                if let Ok(meta) = std::fs::metadata(&partial) {
+                    largest = largest.max(meta.len());
+                    if meta.len() > 0 && !cancelled {
+                        cmd::query_cancel(&l.state, &["export-mid".to_string()]).unwrap();
+                        cancelled = true;
+                    }
+                }
+                std::thread::yield_now();
+            }
+            (largest, cancelled)
+        });
+        let answer = g::grid_export(
+            &l.state,
+            At::new("export-mid", "export"),
+            &state,
+            &out,
+            None,
+        );
+        done.store(true, Ordering::SeqCst);
+        (answer, watcher.join().unwrap())
+    });
+    let (largest, cancelled) = largest;
+    assert!(cancelled, "the watcher never saw a byte");
+    assert_eq!(answer.unwrap_err().code, "interrupted");
+    assert!(!out.exists());
+    assert!(!partial.exists());
+    // Eight bytes a row: what was seen stayed far below the whole file.
+    let whole = u64::from(ROWS) * 8;
+    assert!(largest < whole / 2, "{largest} of {whole} bytes written");
+}
+
 #[test]
 fn view_apply_disables_what_the_dataset_lacks() {
     let l = loaded();
@@ -731,37 +798,6 @@ fn view_export_can_be_cancelled() {
     });
     assert!(!partial.exists());
     assert!(!file.exists());
-}
-
-/// A view file over the cap is refused from its size alone, before it is
-/// opened: here the file cannot be opened at all (another handle denies
-/// reading it on Windows; no read permission on Unix), so an import that
-/// opened it first would fail on the open rather than refuse its size.
-#[test]
-fn view_import_checks_size_before_reading() {
-    let l = loaded();
-    let big = l.dir.path().join("big.oxlview.json");
-    let f = std::fs::File::create(&big).unwrap();
-    f.set_len(oxl_engine::MAX_VIEW_FILE_BYTES as u64 + 1)
-        .unwrap();
-    drop(f);
-    #[cfg(windows)]
-    let _held = {
-        use std::os::windows::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&big)
-            .unwrap()
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&big, std::fs::Permissions::from_mode(0o000)).unwrap();
-    }
-    let err = views::view_import(&l.state, &big).unwrap_err();
-    assert_eq!(err.code, "invalid", "{}", err.message);
-    assert!(err.message.contains("at most"), "{}", err.message);
 }
 
 #[test]

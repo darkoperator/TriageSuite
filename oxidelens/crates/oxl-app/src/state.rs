@@ -198,6 +198,9 @@ pub(crate) enum Point {
     /// and has not yet taken the write gate for the second check and the
     /// rename.
     BeforeRename,
+    /// A view import has checked the file's metadata and is about to open
+    /// it.
+    BeforeImportOpen,
 }
 
 /// How often an export waiting for the write gate looks whether it was
