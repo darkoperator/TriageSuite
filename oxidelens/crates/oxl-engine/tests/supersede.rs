@@ -1851,10 +1851,7 @@ fn evidence_moves_by_hash() {
     use oxl_engine::EvidenceStanding::Unchanged;
     let (d, mut case) = setup();
     let (entry, failed, _) = evidence_case(d.path(), &mut case);
-    let snapshot = n(
-        &case,
-        &format!("select length(snapshot_json) from ox.evidence where row_id = {failed}"),
-    );
+    let snapshot = snapshot_of(&case, entry, failed);
     let r = load_run(
         &mut case,
         &oxl_fixtures::rerun_ws01_events(&d.path().join("b")),
@@ -1872,16 +1869,17 @@ fn evidence_moves_by_hash() {
     assert_ne!(moved_to, failed);
     let rows = standings(&case, entry);
     assert!(rows.contains(&(moved_to, Unchanged)), "{rows:?}");
-    // The snapshot and hash went with it unchanged.
+    // The snapshot went with it byte for byte, and the hash with it.
+    assert_eq!(snapshot_of(&case, entry, moved_to), snapshot);
     assert_eq!(
         n(
             &case,
             &format!(
-                "select length(snapshot_json) from ox.evidence v join evtxtriage_events r \
+                "select count(*) from ox.evidence v join evtxtriage_events r \
                  on r._ox_row = v.row_id and r._ox_hash = v.row_hash where v.row_id = {moved_to}"
             )
         ),
-        snapshot
+        1
     );
     // The supersession's history lists the move.
     assert_eq!(
@@ -1939,10 +1937,7 @@ fn removing_a_source_with_evidence_needs_confirmation() {
     use oxl_engine::EvidenceStanding::SourceRemoved;
     let (d, mut case) = setup();
     let (entry, failed, rclone) = evidence_case(d.path(), &mut case);
-    let snapshots = "select sum(length(snapshot_json)) from ox.evidence \
-                     where json_extract_string(snapshot_json, '$.MapDescription') \
-                           in ('Failed logon', 'Process creation')";
-    let before = n(&case, snapshots);
+    let before = [failed, rclone].map(|row| snapshot_of(&case, entry, row));
 
     let (c, message) = code(remove_source(&mut case, 1, false, &analyst()));
     assert_eq!(c, "refused");
@@ -1963,8 +1958,12 @@ fn removing_a_source_with_evidence_needs_confirmation() {
         standings(&case, entry),
         [(failed, SourceRemoved), (rclone, SourceRemoved)]
     );
-    // Every snapshot is kept, and the evidence still reads from it.
-    assert_eq!(n(&case, snapshots), before);
+    // Every snapshot is kept byte for byte, and the evidence still reads
+    // from it.
+    assert_eq!(
+        [failed, rclone].map(|row| snapshot_of(&case, entry, row)),
+        before
+    );
     let listed = oxl_engine::evidence(&case, entry).unwrap();
     let summary = &listed.iter().find(|e| e.row_id == failed).unwrap().summary;
     assert!(summary.contains("Failed logon"), "{summary}");
@@ -1975,5 +1974,110 @@ fn removing_a_source_with_evidence_needs_confirmation() {
              and after_json like '%\"orphaned_evidence\":2%'"
         ),
         1
+    );
+}
+
+/// The stored snapshot of row `row` as evidence on `entry`, exactly.
+fn snapshot_of(case: &Case, entry: i64, row: i64) -> String {
+    case.scalar_text(&format!(
+        "select snapshot_json from ox.evidence where entry_id = {entry} and row_id = {row}"
+    ))
+    .unwrap()
+    .unwrap()
+}
+
+/// The `after_json` of the newest history row with `action`, parsed.
+fn last_after(case: &Case, action: &str) -> serde_json::Value {
+    let text = case
+        .scalar_text(&format!(
+            "select after_json from ox.history where action = '{action}' order by id desc limit 1"
+        ))
+        .unwrap()
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The evidence entries of a history list, as `(from_row, to_row, entry_id)`.
+fn evidence_moves(list: &serde_json::Value) -> Vec<(i64, Option<i64>, i64)> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "evidence")
+        .map(|e| {
+            (
+                e["from_row"].as_i64().unwrap(),
+                e["to_row"].as_i64(),
+                e["entry_id"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// Evidence moves are not history rows of their own (step 1's rule for
+/// annotations): the supersession's history row lists each evidence row it
+/// moved, with its row before and after, and each it left; the removal
+/// that reinstates the older run lists each it moved back.
+#[test]
+fn evidence_moves_are_listed_in_the_history() {
+    let (d, mut case) = setup();
+    let (entry, failed, rclone) = evidence_case(d.path(), &mut case);
+    let later = load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_events(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap()
+    .source_id;
+    let moved_to = n(&case, FAILED_LOGON_WS01);
+    // The rerun holds only WS01's events: one supersession.
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'supersede'"
+        ),
+        1
+    );
+    let supersede = last_after(&case, "supersede");
+    assert_eq!(
+        evidence_moves(&supersede["moved"]),
+        [(failed, Some(moved_to), entry)]
+    );
+    assert_eq!(
+        evidence_moves(&supersede["left_behind"]),
+        [(rclone, None, entry)]
+    );
+
+    remove_source(&mut case, later, true, &analyst()).unwrap();
+    let removal = last_after(&case, "source_remove");
+    let reinstated = removal["reinstated"].as_array().unwrap();
+    let ws01 = reinstated
+        .iter()
+        .find(|r| r["relation"] == "evtxtriage_events" && r["host"] == "WS01")
+        .unwrap();
+    assert_eq!(
+        evidence_moves(&ws01["moved"]),
+        [(moved_to, Some(failed), entry)]
+    );
+}
+
+/// Deleting an entry keeps its evidence, so a source holding only a deleted
+/// entry's evidence still needs confirmation to remove.
+#[test]
+fn removing_a_source_with_a_deleted_entrys_evidence_needs_confirmation() {
+    let (d, mut case) = setup();
+    let (entry, failed, rclone) = evidence_case(d.path(), &mut case);
+    oxl_engine::delete_entry(&mut case, entry, &analyst()).unwrap();
+    let before = [failed, rclone].map(|row| snapshot_of(&case, entry, row));
+
+    let (c, message) = code(remove_source(&mut case, 1, false, &analyst()));
+    assert_eq!(c, "refused", "{message}");
+    assert!(message.contains("2 evidence rows"), "{message}");
+    assert!(!sources(&case).unwrap()[0].removed);
+
+    let report = remove_source(&mut case, 1, true, &analyst()).unwrap();
+    assert_eq!(report.orphaned_evidence, 2);
+    assert_eq!(
+        [failed, rclone].map(|row| snapshot_of(&case, entry, row)),
+        before
     );
 }

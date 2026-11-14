@@ -473,6 +473,13 @@ impl Case {
         Ok(self.conn().query_row(sql, [], |r| r.get(0))?)
     }
 
+    /// The first column of the first row of `sql` as text, for integration
+    /// tests that compare stored text (a snapshot, a history row) exactly.
+    #[doc(hidden)]
+    pub fn scalar_text(&self, sql: &str) -> Result<Option<String>> {
+        Ok(self.conn().query_row(sql, [], |r| r.get(0))?)
+    }
+
     /// `scalar_i64` with bound parameters, for integration tests that run a
     /// compiled fragment before the query API exists to run it for them.
     #[doc(hidden)]

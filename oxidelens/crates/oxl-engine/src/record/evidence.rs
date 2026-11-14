@@ -10,7 +10,7 @@
 
 use super::entry::{changeable, next_ids, read_stored, Stored, INSERT_ROW, INSERT_SQL};
 use super::hosts::{ensure_host, link_hosts};
-use super::{has_records, require_records, MAX_TITLE};
+use super::{has_records, require_records, MAX_DESCRIPTION, MAX_TITLE};
 use crate::actor::Actor;
 use crate::annot::{
     check_batch, clear_where_allowed, id_list, inactive, locate_rows, no_row, record_all,
@@ -28,9 +28,9 @@ use duckdb::{params, params_from_iter, Connection};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use triage_core::output::duckdb::sql::quote_ident;
 
-/// The most characters of a cell's written time an undated entry's
-/// description quotes.
-const MAX_WRITTEN: usize = 1_000;
+/// What ends an undated entry's description whose written time had to be
+/// cut to fit `MAX_DESCRIPTION`.
+const CUT_NOTE: &str = " ... (cut to fit the description)";
 /// Characters of a summary made from a snapshot, as a merged row's.
 const SNAPSHOT_SUMMARY_CAP: usize = 300;
 /// Values a snapshot's summary takes when its relation has no summary entry.
@@ -352,6 +352,18 @@ fn title_for(row: &LocatedRow, facts: &RowFacts) -> String {
     cut(summary, MAX_TITLE)
 }
 
+/// An undated entry's description: the primary time column and its value
+/// as written, whole while it fits `MAX_DESCRIPTION`; a longer value is cut
+/// so that the description, ending in `CUT_NOTE`, is exactly that long.
+fn written_description(column: &str, text: &str) -> String {
+    let whole = format!("{column} as written: {text}");
+    if whole.chars().count() <= MAX_DESCRIPTION {
+        return whole;
+    }
+    let keep = MAX_DESCRIPTION.saturating_sub(CUT_NOTE.chars().count());
+    format!("{}{CUT_NOTE}", cut(&whole, keep))
+}
+
 /// The first `max` characters of `text`.
 fn cut(text: &str, max: usize) -> String {
     match text.char_indices().nth(max) {
@@ -434,7 +446,7 @@ pub fn promote_rows(case: &mut Case, rows: &[i64], actor: &Actor) -> Result<Vec<
             }
             None => {
                 if let Some((column, text)) = &facts.written {
-                    stored.description = format!("{column} as written: {}", cut(text, MAX_WRITTEN));
+                    stored.description = written_description(column, text);
                 }
             }
         }

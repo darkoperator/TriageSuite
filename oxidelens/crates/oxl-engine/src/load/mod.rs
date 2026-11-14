@@ -156,8 +156,9 @@ pub struct RemoveReport {
     pub orphaned_tags: u64,
     /// Notes not deleted.
     pub orphaned_notes: u64,
-    /// Evidence rows on entries not deleted. Each keeps its snapshot, and
-    /// its entry lists it as "source removed".
+    /// Evidence rows, a deleted entry's included: deleting an entry keeps
+    /// its evidence. Each keeps its snapshot, and its entry lists it as
+    /// "source removed".
     pub orphaned_evidence: u64,
 }
 
@@ -300,8 +301,8 @@ fn remove_in(
     Ok(report)
 }
 
-/// The marks, tags, (not deleted) notes and evidence (on entries not
-/// deleted) on any row of `source_id`'s tables for `relations`, superseded
+/// The marks, tags, (not deleted) notes and evidence (a deleted entry's
+/// too, which is kept) on any row of `source_id`'s tables for `relations`, superseded
 /// rows included: an annotation left behind on an old row is orphaned by
 /// its removal too.
 fn annotations_on(conn: &Connection, source_id: i64, relations: &[String]) -> Result<RemoveReport> {
@@ -338,10 +339,7 @@ fn annotations_on(conn: &Connection, source_id: i64, relations: &[String]) -> Re
         orphaned_tags: count("ox.row_tag", "")?,
         orphaned_notes: count("ox.note", " AND NOT deleted")?,
         orphaned_evidence: if has_evidence(conn)? {
-            count(
-                "ox.evidence",
-                " AND entry_id IN (SELECT id FROM ox.entry WHERE NOT deleted)",
-            )?
+            count("ox.evidence", "")?
         } else {
             0
         },

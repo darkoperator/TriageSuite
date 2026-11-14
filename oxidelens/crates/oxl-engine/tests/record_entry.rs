@@ -194,25 +194,51 @@ fn m_removes_the_suspicious_mark_in_the_same_transaction() {
     let (_d, mut case) = loaded();
     let failed = n(&case, FAILED_LOGON_WS01);
     assert!(mark_suspicious(&mut case, &[failed], &analyst()).unwrap()[0].done);
-    promote(&mut case, failed, &analyst());
-    assert_eq!(
-        n(
-            &case,
-            &format!("select count(*) from ox.row_mark where row_id = {failed}")
+    let marked = format!("select count(*) from ox.row_mark where row_id = {failed}");
+
+    // One transaction: M writes five history rows, entry_create,
+    // evidence_attach, host_create, link_add and last mark_clear, after the
+    // mark is deleted and the entry, evidence, host and link are written. A
+    // row planted on the fifth id makes that last write fail, and nothing
+    // of the call is left.
+    let history = n(&case, "select count(*) from ox.history");
+    let next = n(&case, "select nextval('ox.history_seq')");
+    let fault = next + 5;
+    n(
+        &case,
+        &format!(
+            "insert into ox.history values ({fault}, '2026-01-01T00:00:00.000000Z', \
+             'analyst:x', 'case', 'x', 'fault', NULL, NULL) returning 1"
         ),
-        0
     );
-    // The clear and the entry carry one stamp: one transaction wrote both.
+    let (c, message) = code(promote_rows(&mut case, &[failed], &analyst()));
+    assert_eq!(c, "engine", "{message}");
+    assert_eq!(n(&case, &marked), 1, "the mark's removal was rolled back");
+    for table in ["ox.entry", "ox.evidence", "ox.host", "ox.entry_host"] {
+        assert_eq!(
+            n(&case, &format!("select count(*) from {table}")),
+            0,
+            "{table} was rolled back"
+        );
+    }
+    assert_eq!(n(&case, "select count(*) from ox.history"), history + 1);
+    n(
+        &case,
+        &format!("delete from ox.history where id = {fault} returning 1"),
+    );
+
+    promote(&mut case, failed, &analyst());
+    assert_eq!(n(&case, &marked), 0);
+    // The fifth id is the clear's: the call writes five history rows, the
+    // clear last, so the fault hit after the mark was deleted.
+    assert_eq!(n(&case, "select count(*) from ox.history"), history + 5);
     assert_eq!(
-        n(
-            &case,
-            &format!(
-                "select count(distinct \"at\") from ox.history \
-                 where (action = 'mark_clear' and target_id = '{failed}') \
-                    or action = 'entry_create'"
-            )
-        ),
-        1
+        case.scalar_text(
+            "select action || ':' || target_id from ox.history order by id desc limit 1"
+        )
+        .unwrap()
+        .unwrap(),
+        format!("mark_clear:{failed}")
     );
 
     // An agent clears only its own mark: an analyst's stays (under the
@@ -544,7 +570,7 @@ fn delete_is_a_tombstone_that_drops_links() {
 }
 
 #[test]
-fn technique_ids_and_tactics_are_validated() {
+fn technique_ids_are_validated() {
     let (_d, case) = loaded();
     let case = RefCell::new(case);
     let id = new_entry(&mut case.borrow_mut(), &titled("lead"), &analyst())
@@ -590,19 +616,25 @@ fn technique_ids_and_tactics_are_validated() {
 
     let good = EntryEdit {
         technique_ids: Some(vec!["T1059".into(), "T1059.001".into(), "T1059".into()]),
-        tactic: Some(Some("Execution".into())),
         ..Default::default()
     };
     let e = edit_entry(&mut case.borrow_mut(), id, &good, &analyst()).unwrap();
     assert_eq!(e.technique_ids, ["T1059", "T1059.001"]);
-    assert_eq!(e.tactic.as_deref(), Some("Execution"));
+}
+
+#[test]
+fn tactics_and_titles_are_validated() {
+    let (_d, mut case) = loaded();
+    let id = new_entry(&mut case, &titled("lead"), &analyst())
+        .unwrap()
+        .id;
     for tactic in ["Bogus", "execution ", "", "TA0002"] {
         let edit = EntryEdit {
             tactic: Some(Some(tactic.into())),
             ..Default::default()
         };
         assert_eq!(
-            code(edit_entry(&mut case.borrow_mut(), id, &edit, &analyst())).0,
+            code(edit_entry(&mut case, id, &edit, &analyst())).0,
             "invalid",
             "{tactic:?}"
         );
@@ -629,19 +661,14 @@ fn technique_ids_and_tactics_are_validated() {
             tactic: Some(Some(tactic.into())),
             ..Default::default()
         };
-        let e = edit_entry(&mut case.borrow_mut(), id, &edit, &analyst()).unwrap();
+        let e = edit_entry(&mut case, id, &edit, &analyst()).unwrap();
         assert_eq!(e.tactic.as_deref(), Some(tactic));
     }
     assert_eq!(oxl_engine::TACTICS.len(), 14);
     // A title is required and bounded.
     for title in ["", "   ", &"x".repeat(201)] {
         assert_eq!(
-            code(new_entry(
-                &mut case.borrow_mut(),
-                &titled(title),
-                &analyst()
-            ))
-            .0,
+            code(new_entry(&mut case, &titled(title), &analyst())).0,
             "invalid",
             "{title:?}"
         );
@@ -869,4 +896,45 @@ fn entries_filter_by_status_host_tactic_and_text() {
         code(entries(&case, &EntryQuery::default(), 0, 0)).0,
         "invalid"
     );
+}
+
+/// The written time an undated entry quotes is kept whole up to the
+/// description's own bound; only what would pass `MAX_DESCRIPTION` is cut,
+/// and the description says so.
+#[test]
+fn an_undated_entry_quotes_the_written_time_whole() {
+    let (_d, mut case) = loaded();
+    let source = n(&case, "select min(id) from ox.source");
+    let rows = n(&case, "select count(*) from evtxtriage_events");
+    let mut written = |text: &str| -> String {
+        let row = n(&case, NOT_A_TIME_WS01);
+        n(
+            &case,
+            &format!(
+                "update src_{source}.evtxtriage_events set TimeCreated__text = '{text}' \
+                 where _ox_row = {row} returning 1"
+            ),
+        );
+        let id = promote(&mut case, row, &analyst());
+        let description = one(&case, id).description;
+        delete_entry(&mut case, id, &analyst()).unwrap();
+        description
+    };
+    let long = "9".repeat(5_000);
+    assert_eq!(written(&long), format!("TimeCreated as written: {long}"));
+
+    let longer = "8".repeat(12_000);
+    let description = written(&longer);
+    assert_eq!(description.chars().count(), oxl_engine::MAX_DESCRIPTION);
+    assert!(
+        description.starts_with(&format!("TimeCreated as written: {}", "8".repeat(9_000))),
+        "{}",
+        &description[..60]
+    );
+    assert!(
+        description.ends_with("(cut to fit the description)"),
+        "{}",
+        &description[description.len() - 60..]
+    );
+    assert_eq!(n(&case, "select count(*) from evtxtriage_events"), rows);
 }
