@@ -1813,3 +1813,167 @@ fn tags_and_notes_return_on_reinstatement() {
         ]
     );
 }
+
+const FAILED_LOGON_WS01: &str =
+    "SELECT _ox_row FROM evtxtriage_events WHERE MapDescription = 'Failed logon'";
+/// `rerun_ws01_events` edits this row's `MapDescription`, so it has no
+/// identical row in that run.
+const RCLONE_WS01: &str = "SELECT _ox_row FROM evtxtriage_events \
+                           WHERE PayloadData1 = 'rclone.exe' AND _triage_host = 'WS01'";
+
+/// The two-host run loaded, the failed logon and the `rclone.exe` row
+/// promoted into one entry; returns the entry's id and the two rows.
+fn evidence_case(d: &Path, case: &mut Case) -> (i64, i64, i64) {
+    use oxl_engine::{attach_rows, promote_rows};
+    load_run(case, &oxl_fixtures::two_hosts(&d.join("a")), &analyst()).unwrap();
+    let failed = n(case, FAILED_LOGON_WS01);
+    let rclone = n(case, RCLONE_WS01);
+    let entry = promote_rows(case, &[failed], &analyst()).unwrap()[0]
+        .entry_id
+        .unwrap();
+    assert!(attach_rows(case, entry, &[rclone], &analyst()).unwrap()[0].done);
+    (entry, failed, rclone)
+}
+
+/// The entry's evidence as `(row_id, standing)`, by row id.
+fn standings(case: &Case, entry: i64) -> Vec<(i64, oxl_engine::EvidenceStanding)> {
+    let mut out: Vec<_> = oxl_engine::evidence(case, entry)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.row_id, e.standing))
+        .collect();
+    out.sort();
+    out
+}
+
+#[test]
+fn evidence_moves_by_hash() {
+    use oxl_engine::EvidenceStanding::Unchanged;
+    let (d, mut case) = setup();
+    let (entry, failed, _) = evidence_case(d.path(), &mut case);
+    let snapshot = n(
+        &case,
+        &format!("select length(snapshot_json) from ox.evidence where row_id = {failed}"),
+    );
+    let r = load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_events(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap();
+    let ws01 = r
+        .superseded
+        .iter()
+        .find(|s| s.relation == "evtxtriage_events" && s.host == "WS01")
+        .unwrap();
+    // The failed logon's evidence moved; the edited row's stayed.
+    assert_eq!((ws01.moved, ws01.left_behind), (1, 1));
+    let moved_to = n(&case, FAILED_LOGON_WS01);
+    assert_ne!(moved_to, failed);
+    let rows = standings(&case, entry);
+    assert!(rows.contains(&(moved_to, Unchanged)), "{rows:?}");
+    // The snapshot and hash went with it unchanged.
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select length(snapshot_json) from ox.evidence v join evtxtriage_events r \
+                 on r._ox_row = v.row_id and r._ox_hash = v.row_hash where v.row_id = {moved_to}"
+            )
+        ),
+        snapshot
+    );
+    // The supersession's history lists the move.
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.history where action = 'supersede' \
+                 and after_json like '%\"kind\":\"evidence\"%\"to_row\":{moved_to}%'"
+            )
+        ),
+        1
+    );
+    // The row is still malicious where it now is, and its entry still lists it.
+    assert_eq!(
+        n(
+            &case,
+            &format!(
+                "select count(*) from ox.row_state where row_id = {moved_to} and mark = 'malicious'"
+            )
+        ),
+        1
+    );
+}
+
+#[test]
+fn unmatched_evidence_stays_from_a_superseded_run() {
+    use oxl_engine::EvidenceStanding::{Superseded, Unchanged};
+    let (d, mut case) = setup();
+    let (entry, failed, rclone) = evidence_case(d.path(), &mut case);
+    let later = load_run(
+        &mut case,
+        &oxl_fixtures::rerun_ws01_events(&d.path().join("b")),
+        &analyst(),
+    )
+    .unwrap()
+    .source_id;
+    let moved_to = n(&case, FAILED_LOGON_WS01);
+    assert_eq!(
+        standings(&case, entry),
+        [(rclone, Superseded), (moved_to, Unchanged)]
+    );
+    // Removing the later run moves the evidence back to the first run's
+    // row, so none is orphaned; the row that stayed behind is in the view
+    // again.
+    let report = remove_source(&mut case, later, true, &analyst()).unwrap();
+    assert_eq!(report.orphaned_evidence, 0);
+    assert_eq!(
+        standings(&case, entry),
+        [(failed, Unchanged), (rclone, Unchanged)]
+    );
+}
+
+#[test]
+fn removing_a_source_with_evidence_needs_confirmation() {
+    use oxl_engine::EvidenceStanding::SourceRemoved;
+    let (d, mut case) = setup();
+    let (entry, failed, rclone) = evidence_case(d.path(), &mut case);
+    let snapshots = "select sum(length(snapshot_json)) from ox.evidence \
+                     where json_extract_string(snapshot_json, '$.MapDescription') \
+                           in ('Failed logon', 'Process creation')";
+    let before = n(&case, snapshots);
+
+    let (c, message) = code(remove_source(&mut case, 1, false, &analyst()));
+    assert_eq!(c, "refused");
+    assert!(message.contains("2 evidence rows"), "{message}");
+    assert!(!sources(&case).unwrap()[0].removed);
+
+    let report = remove_source(&mut case, 1, true, &analyst()).unwrap();
+    assert_eq!(
+        (
+            report.orphaned_marks,
+            report.orphaned_tags,
+            report.orphaned_notes,
+            report.orphaned_evidence
+        ),
+        (0, 0, 0, 2)
+    );
+    assert_eq!(
+        standings(&case, entry),
+        [(failed, SourceRemoved), (rclone, SourceRemoved)]
+    );
+    // Every snapshot is kept, and the evidence still reads from it.
+    assert_eq!(n(&case, snapshots), before);
+    let listed = oxl_engine::evidence(&case, entry).unwrap();
+    let summary = &listed.iter().find(|e| e.row_id == failed).unwrap().summary;
+    assert!(summary.contains("Failed logon"), "{summary}");
+    assert_eq!(
+        n(
+            &case,
+            "select count(*) from ox.history where action = 'source_remove' \
+             and after_json like '%\"orphaned_evidence\":2%'"
+        ),
+        1
+    );
+}

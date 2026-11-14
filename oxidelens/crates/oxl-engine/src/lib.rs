@@ -15,6 +15,7 @@ pub mod filter;
 pub mod listing;
 pub mod load;
 pub mod query;
+pub mod record;
 pub mod search;
 pub mod time;
 #[cfg(feature = "ts")]
@@ -51,6 +52,11 @@ pub use query::{
     MergedRow, MergedSource, Page, RowAnchor, SortKey, SqlResult, Stack, StackOrder, StackRow,
     BUCKET_LADDER, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_VALUE, SQL_MEMORY_LIMIT, SQL_TEXT_MAX,
     SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
+};
+pub use record::{
+    attach_rows, delete_entry, detach_row, edit_entry, entries, evidence, new_entry, promote_rows,
+    set_entry_status, Entry, EntryEdit, EntryQuery, EntryStatus, Evidence, EvidenceStanding,
+    PromoteOutcome, MAX_DESCRIPTION, MAX_TECHNIQUES, MAX_TITLE, TACTICS,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};

@@ -224,6 +224,36 @@ impl<'a> MarkBatch<'a> {
     }
 }
 
+/// Clear, in the caller's transaction, the Suspicious mark on each of
+/// `rows` that `actor` may clear: an analyst any, an agent only its own.
+/// A mark the actor may not clear stays, under whatever higher mark the
+/// row has; a row with no mark is left. Returns the history of each clear
+/// for the caller to record with the rest of its batch. M goes through
+/// here, so promoting a row clears its mark by the rule U follows.
+pub(crate) fn clear_where_allowed(
+    conn: &Connection,
+    rows: &[i64],
+    actor: &Actor,
+) -> Result<Vec<Change<'static>>> {
+    let label = actor.label();
+    let mut marked: Vec<(i64, Mark)> = marks_on(conn, rows)?
+        .into_iter()
+        .filter(|(_, mark)| !actor.is_agent() || mark.marked_by == label)
+        .collect();
+    marked.sort_by_key(|(row, _)| *row);
+    let cleared: Vec<i64> = marked.iter().map(|(row, _)| *row).collect();
+    per_id_chunk(
+        conn,
+        "DELETE FROM ox.row_mark WHERE row_id IN ({ids})",
+        &[],
+        &cleared,
+    )?;
+    Ok(marked
+        .iter()
+        .map(|(row, mark)| change(*row, "mark_clear", Some(mark), None))
+        .collect())
+}
+
 /// The mark on each of `rows` that has one: its earliest, should a row
 /// carry more than one. Every reader of one row's mark goes through here.
 pub(super) fn marks_on(conn: &Connection, rows: &[i64]) -> Result<HashMap<i64, Mark>> {

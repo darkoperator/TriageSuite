@@ -88,5 +88,6 @@ pub fn remove(ctx: &Ctx, id: i64, confirm_orphans: bool) -> Result<Reply> {
         "orphaned_marks": report.orphaned_marks,
         "orphaned_tags": report.orphaned_tags,
         "orphaned_notes": report.orphaned_notes,
+        "orphaned_evidence": report.orphaned_evidence,
     })))
 }

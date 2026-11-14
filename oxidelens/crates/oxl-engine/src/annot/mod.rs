@@ -21,7 +21,8 @@ mod tags;
 
 pub use counts::{mark_counts, MarkCounts};
 pub use history::{history, HistoryRow};
-pub(crate) use history::{record, Change};
+pub(crate) use history::{record, record_all, Change};
+pub(crate) use marks::clear_where_allowed;
 pub use marks::{clear_suspicious, mark_suspicious, marks, MarkedRow};
 pub use notes::{add_note, delete_note, notes, Note, MAX_NOTE};
 pub use row::{row_detail, row_place, RowDetail, RowPlace, RowStanding};
@@ -48,7 +49,7 @@ pub struct RowOutcome {
 }
 
 impl RowOutcome {
-    fn changed(row_id: i64) -> RowOutcome {
+    pub(crate) fn changed(row_id: i64) -> RowOutcome {
         RowOutcome {
             row_id,
             done: true,
@@ -56,7 +57,7 @@ impl RowOutcome {
         }
     }
 
-    fn unchanged(row_id: i64, reason: String) -> RowOutcome {
+    pub(crate) fn unchanged(row_id: i64, reason: String) -> RowOutcome {
         RowOutcome {
             row_id,
             done: true,
@@ -64,7 +65,7 @@ impl RowOutcome {
         }
     }
 
-    fn refused(row_id: i64, reason: String) -> RowOutcome {
+    pub(crate) fn refused(row_id: i64, reason: String) -> RowOutcome {
         RowOutcome {
             row_id,
             done: false,
@@ -77,7 +78,7 @@ impl RowOutcome {
 /// appearance, so a row named twice gets one outcome and counts once. The
 /// whole-call checks are made on them: at least one row, and no more than
 /// `AGENT_ROWS_PER_CALL` from an agent.
-fn check_batch(rows: &[i64], actor: &Actor) -> Result<Vec<i64>> {
+pub(crate) fn check_batch(rows: &[i64], actor: &Actor) -> Result<Vec<i64>> {
     if rows.is_empty() {
         return Err(EngineError::Invalid("no row ids were given".to_string()));
     }
@@ -317,7 +318,7 @@ fn unwritable(located: &HashMap<i64, LocatedRow>, row_id: i64) -> Option<String>
 
 /// Why located row `row` is out of its relation's view, or `None` when it
 /// is in it.
-fn inactive(row: &LocatedRow) -> Option<String> {
+pub(crate) fn inactive(row: &LocatedRow) -> Option<String> {
     let row_id = row.row_id;
     match row.standing {
         Standing::Active => None,
@@ -333,6 +334,6 @@ fn inactive(row: &LocatedRow) -> Option<String> {
     }
 }
 
-fn no_row(row_id: i64) -> String {
+pub(crate) fn no_row(row_id: i64) -> String {
     format!("no row {row_id} in the case")
 }

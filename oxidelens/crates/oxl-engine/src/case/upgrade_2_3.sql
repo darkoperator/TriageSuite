@@ -31,7 +31,7 @@ CREATE TABLE ox.entry (
     reviewed_at VARCHAR,
     deleted BOOLEAN NOT NULL DEFAULT false
 );
-COMMENT ON TABLE ox.entry IS 'Timeline entries, shown as E-<id>. A deleted entry is kept and flagged, never removed; its evidence and links stay as they were.';
+COMMENT ON TABLE ox.entry IS 'Timeline entries, shown as E-<id>. A deleted entry is kept and flagged, never removed; deleting it removes its links to records and keeps its evidence, which then marks no row.';
 COMMENT ON COLUMN ox.entry.id IS 'Entry id, from ox.entry_seq.';
 COMMENT ON COLUMN ox.entry."time" IS 'When it happened (UTC text, full precision); NULL when no time is known yet, which sorts the entry into the undated group and keeps it from being reviewed.';
 COMMENT ON COLUMN ox.entry.time_source IS 'Where time came from: row (an evidence row''s primary time, a UTC instant) or typed (entered by hand); NULL when time is NULL.';

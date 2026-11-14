@@ -23,6 +23,7 @@ mod page;
 mod sql;
 mod stack;
 
+pub(crate) use around::summary_sql;
 pub use around::{
     anchor_of, around, merged_rows, row_anchor, row_summary, AroundCount, MergedRow, MergedSource,
     RowAnchor,

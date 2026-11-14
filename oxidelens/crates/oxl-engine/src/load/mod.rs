@@ -86,11 +86,12 @@ pub struct Superseded {
     pub relation: String,
     pub host: String,
     pub old_source: i64,
-    /// Annotations (each mark, tag and note not deleted) that moved to the
-    /// new source's identical rows.
+    /// Annotations (each mark, tag, note not deleted and evidence row on an
+    /// entry not deleted) that moved to the new source's identical rows.
     pub moved: u64,
     /// Annotations left on the old rows: no identical row in the new
-    /// source, or one that already had a mark or the same tag.
+    /// source, or one that already had a mark, the same tag or was already
+    /// evidence on the same entry.
     pub left_behind: u64,
 }
 
@@ -155,6 +156,9 @@ pub struct RemoveReport {
     pub orphaned_tags: u64,
     /// Notes not deleted.
     pub orphaned_notes: u64,
+    /// Evidence rows on entries not deleted. Each keeps its snapshot, and
+    /// its entry lists it as "source removed".
+    pub orphaned_evidence: u64,
 }
 
 /// Remove source `source_id` from the case: it is marked removed, its
@@ -163,8 +167,9 @@ pub struct RemoveReport {
 /// and host it was the active run for, the latest live run it had
 /// superseded there is reinstated, and annotations move back to that run's
 /// identical rows. Annotations with nowhere to go are kept, orphaned; when
-/// the source's rows carry any annotation, `confirm_orphans` must be true or
-/// the removal is `Refused` with their counts. Refused for an agent
+/// the source's rows carry any annotation (a mark, a tag, a note or
+/// evidence), `confirm_orphans` must be true or the removal is `Refused`
+/// with their counts. Refused for an agent
 /// and for a source already removed; `NotFound` for an unknown id. A
 /// removed run may be loaded again.
 pub fn remove_source(
@@ -215,14 +220,19 @@ fn remove_in(
     // Every annotation on the source's rows counts here, even one that will
     // move back to a reinstated run: the caller cannot know which will.
     let annotated = annotations_on(conn, source_id, &relations)?;
-    let total = annotated.orphaned_marks + annotated.orphaned_tags + annotated.orphaned_notes;
+    let total = annotated.orphaned_marks
+        + annotated.orphaned_tags
+        + annotated.orphaned_notes
+        + annotated.orphaned_evidence;
     if total > 0 && !confirm_orphans {
         return Err(EngineError::Refused(format!(
-            "source {source_id} has annotations on its rows: {}, {}, {}; removing it \
-             may orphan them (they are kept). Confirm to remove it anyway",
+            "source {source_id} has annotations on its rows: {}, {}, {}, {}; removing it \
+             may orphan them (they are kept, evidence with its snapshot). Confirm to \
+             remove it anyway",
             counted(annotated.orphaned_marks, "mark"),
             counted(annotated.orphaned_tags, "tag"),
             counted(annotated.orphaned_notes, "note"),
+            counted(annotated.orphaned_evidence, "evidence row"),
         )));
     }
 
@@ -273,6 +283,7 @@ fn remove_in(
         "orphaned_marks": report.orphaned_marks,
         "orphaned_tags": report.orphaned_tags,
         "orphaned_notes": report.orphaned_notes,
+        "orphaned_evidence": report.orphaned_evidence,
     });
     conn.execute(
         "INSERT INTO ox.history \
@@ -289,15 +300,17 @@ fn remove_in(
     Ok(report)
 }
 
-/// The marks, tags and (not deleted) notes on any row of `source_id`'s
-/// tables for `relations`, superseded rows included: an annotation left
-/// behind on an old row is orphaned by its removal too.
+/// The marks, tags, (not deleted) notes and evidence (on entries not
+/// deleted) on any row of `source_id`'s tables for `relations`, superseded
+/// rows included: an annotation left behind on an old row is orphaned by
+/// its removal too.
 fn annotations_on(conn: &Connection, source_id: i64, relations: &[String]) -> Result<RemoveReport> {
     if relations.is_empty() {
         return Ok(RemoveReport {
             orphaned_marks: 0,
             orphaned_tags: 0,
             orphaned_notes: 0,
+            orphaned_evidence: 0,
         });
     }
     let schema = source_schema(source_id);
@@ -324,7 +337,30 @@ fn annotations_on(conn: &Connection, source_id: i64, relations: &[String]) -> Re
         orphaned_marks: count("ox.row_mark", "")?,
         orphaned_tags: count("ox.row_tag", "")?,
         orphaned_notes: count("ox.note", " AND NOT deleted")?,
+        orphaned_evidence: if has_evidence(conn)? {
+            count(
+                "ox.evidence",
+                " AND entry_id IN (SELECT id FROM ox.entry WHERE NOT deleted)",
+            )?
+        } else {
+            0
+        },
     })
+}
+
+/// Whether the case has `ox.evidence`. Every case the engine opens for
+/// writing does (format 3 and later); only the test-built writable cases of
+/// earlier formats (`Case::create_at_format_1`, `create_at_format_2`) lack
+/// it, and supersession and removal read them as holding no evidence.
+fn has_evidence(conn: &Connection) -> Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM duckdb_tables() \
+         WHERE database_name = current_database() AND schema_name = 'ox' \
+           AND table_name = 'evidence'",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
 }
 
 /// `1 mark`, `2 marks`.

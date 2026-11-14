@@ -546,7 +546,7 @@ fn require_relation(conn: &Connection, relation: &str) -> Result<()> {
     Ok(())
 }
 
-fn read_relation(conn: &Connection, name: &str) -> Result<RelationInfo> {
+pub(crate) fn read_relation(conn: &Connection, name: &str) -> Result<RelationInfo> {
     read_relations(conn, Some(name))?
         .pop()
         .ok_or_else(|| EngineError::NotFound(format!("no relation {name}")))
@@ -648,7 +648,7 @@ pub(crate) fn column_names(conn: &Connection, relation: &str) -> Result<Vec<Stri
         .collect::<std::result::Result<_, _>>()?)
 }
 
-fn read_columns(conn: &Connection, relation: &str) -> Result<Vec<ColumnInfo>> {
+pub(crate) fn read_columns(conn: &Connection, relation: &str) -> Result<Vec<ColumnInfo>> {
     let rows: Vec<CatalogRow> = conn
         .prepare(&format!(
             "SELECT {CATALOG_COLUMNS} FROM ox.column_catalog WHERE relation = ? ORDER BY ordinal"

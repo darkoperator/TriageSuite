@@ -5,12 +5,13 @@
  */
 export type Superseded = { relation: string, host: string, old_source: number, 
 /**
- * Annotations (each mark, tag and note not deleted) that moved to the
- * new source's identical rows.
+ * Annotations (each mark, tag, note not deleted and evidence row on an
+ * entry not deleted) that moved to the new source's identical rows.
  */
 moved: number, 
 /**
  * Annotations left on the old rows: no identical row in the new
- * source, or one that already had a mark or the same tag.
+ * source, or one that already had a mark, the same tag or was already
+ * evidence on the same entry.
  */
 left_behind: number, };

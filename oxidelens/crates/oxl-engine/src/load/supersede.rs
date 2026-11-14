@@ -15,7 +15,7 @@
 //! its own and is left alone.
 
 use super::stage::{host_column, source_schema};
-use super::Superseded;
+use super::{has_evidence, Superseded};
 use crate::actor::Actor;
 use crate::annot::{id_list, write_rows, IDS_PER_STATEMENT};
 use crate::error::{EngineError, Result};
@@ -25,7 +25,9 @@ use std::collections::{BTreeSet, HashMap};
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// The annotation tables; each points at a loaded row by its `row_id`.
-const ANNOTATIONS: [&str; 3] = ["ox.row_mark", "ox.row_tag", "ox.note"];
+/// Evidence is an annotation here: it follows its row by hash as a note
+/// does, and keeps its snapshot wherever it ends up.
+const ANNOTATIONS: [&str; 4] = ["ox.row_mark", "ox.row_tag", "ox.note", "ox.evidence"];
 
 /// Supersede, for every relation and host `new_source` (a run just loaded,
 /// inside the load's transaction) is active for, every other live run active
@@ -182,14 +184,16 @@ pub(super) fn reinstate(conn: &Connection, removed_source: i64) -> Result<Vec<Re
 
 /// What `rebind` did, for the caller's report and its history row.
 pub(super) struct Rebound {
-    /// Annotations that moved, counted per record: each mark, each tag row
-    /// and each note that is not deleted.
+    /// Annotations that moved, counted per record: each mark, each tag row,
+    /// each note that is not deleted and each evidence row on an entry that
+    /// is not deleted.
     pub moved: u64,
     /// Annotations that stayed on the old rows, counted the same way.
     pub left_behind: u64,
-    /// Every annotation that moved, deleted notes included, as
-    /// `{kind, from_row, to_row}` plus `tag` for a tag and `note_id` and
-    /// `deleted` for a note; `kind` is `row_mark`, `row_tag` or `note`.
+    /// Every annotation that moved, deleted notes and evidence of deleted
+    /// entries included, as `{kind, from_row, to_row}` plus `tag` for a tag,
+    /// `note_id` and `deleted` for a note, and `entry_id` and `deleted` for
+    /// evidence; `kind` is `row_mark`, `row_tag`, `note` or `evidence`.
     pub moves: Vec<serde_json::Value>,
     /// Every annotation that stayed, in the same shape without `to_row`.
     pub stayed: Vec<serde_json::Value>,
@@ -231,15 +235,27 @@ fn note_entry(note: (i64, bool), from_row: i64, to_row: Option<i64>) -> serde_js
     e
 }
 
-/// Repoint every mark, tag and note on an annotated row of `from_source`'s
-/// `relation` for `host` at the row of `to_source` with the same hash and
+/// `evidence` is `(entry_id, whether that entry is deleted)`.
+fn evidence_entry(evidence: (i64, bool), from_row: i64, to_row: Option<i64>) -> serde_json::Value {
+    let mut e = entry("evidence", from_row, to_row);
+    e["entry_id"] = evidence.0.into();
+    e["deleted"] = evidence.1.into();
+    e
+}
+
+/// Repoint every mark, tag, note and evidence row on an annotated row of
+/// `from_source`'s `relation` for `host` at the row of `to_source` with the
+/// same hash and
 /// occurrence. Supersession moves them forward to the new run; removing
 /// that run moves them back to the run it had superseded.
 ///
 /// Counted per annotation record (see `Rebound`); a deleted note moves with
 /// its row and is listed, but is not counted. An annotation stays where it
 /// is, and is left behind, when its row has no counterpart, or when the
-/// counterpart already has a mark (for a mark) or the same tag (for a tag).
+/// counterpart already has a mark (for a mark), the same tag (for a tag) or
+/// is already evidence on the same entry (for evidence). Evidence keeps its
+/// hash and snapshot as it moves; evidence on a deleted entry moves too but
+/// is not counted, as a deleted note is not.
 ///
 /// The annotations are read and written set-wise: the pairs, then the
 /// marks, tags and notes of every row involved, a statement each (per
@@ -268,8 +284,13 @@ pub(super) fn rebind(
             quote_ident(relation)
         )
     };
+    // Only a test-built writable case below format 3 lacks evidence.
+    let with_evidence = has_evidence(conn)?;
     let annotated = ANNOTATIONS
+        .iter()
+        .filter(|t| with_evidence || **t != "ox.evidence")
         .map(|t| format!("SELECT row_id FROM {t}"))
+        .collect::<Vec<_>>()
         .join(" UNION ");
     let pairs: Vec<(i64, Option<i64>)> = conn
         .prepare(&format!(
@@ -332,18 +353,42 @@ pub(super) fn rebind(
     )? {
         notes.entry(row).or_default().push((id, deleted));
     }
+    // `(entry_id, entry deleted)` of every evidence row on any row involved.
+    let mut evidence: HashMap<i64, Vec<(i64, bool)>> = HashMap::new();
+    let evidence_rows: &[i64] = if with_evidence { &rows } else { &[] };
+    for (row, entry_id, deleted) in read_by_row(
+        conn,
+        "SELECT v.row_id, v.entry_id, e.deleted FROM ox.evidence v \
+         JOIN ox.entry e ON e.id = v.entry_id WHERE v.row_id IN ({ids}) \
+         ORDER BY v.row_id, v.entry_id",
+        evidence_rows,
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, bool>(2)?,
+            ))
+        },
+    )? {
+        evidence.entry(row).or_default().push((entry_id, deleted));
+    }
 
     let none = Vec::new();
     let mut mark_moves: Vec<Vec<SqlValue>> = Vec::new();
     let mut tag_moves: BTreeSet<(i64, String, i64)> = BTreeSet::new();
     let mut note_moves: Vec<Vec<SqlValue>> = Vec::new();
+    let mut evidence_moves: Vec<Vec<SqlValue>> = Vec::new();
     for (old_row, new_row) in pairs {
         let n_marks = marks.get(&old_row).copied().unwrap_or(0);
         let old_tags = tags.get(&old_row).unwrap_or(&none);
         let old_notes = notes.get(&old_row).map_or(&[][..], Vec::as_slice);
         let live = len(old_notes.iter().filter(|(_, deleted)| !deleted));
+        let old_evidence = evidence.get(&old_row).map_or(&[][..], Vec::as_slice);
         let Some(new_row) = new_row else {
-            out.left_behind += n_marks + len(old_tags.iter()) + live;
+            out.left_behind += n_marks
+                + len(old_tags.iter())
+                + live
+                + len(old_evidence.iter().filter(|(_, deleted)| !deleted));
             if n_marks > 0 {
                 out.stayed.push(entry("row_mark", old_row, None));
             }
@@ -351,6 +396,11 @@ pub(super) fn rebind(
                 .extend(old_tags.iter().map(|t| tag_entry(t, old_row, None)));
             out.stayed
                 .extend(old_notes.iter().map(|n| note_entry(*n, old_row, None)));
+            out.stayed.extend(
+                old_evidence
+                    .iter()
+                    .map(|v| evidence_entry(*v, old_row, None)),
+            );
             continue;
         };
         // A row carries at most one mark: one the target already has (an
@@ -388,6 +438,26 @@ pub(super) fn rebind(
                 .iter()
                 .map(|n| note_entry(*n, old_row, Some(new_row))),
         );
+        // A row is evidence on an entry at most once: evidence the target
+        // already is for that entry stands, and the incoming one stays.
+        let held = evidence.get(&new_row).map_or(&[][..], Vec::as_slice);
+        for &(entry_id, deleted) in old_evidence {
+            let counted = u64::from(!deleted);
+            if held.iter().any(|(e, _)| *e == entry_id) {
+                out.left_behind += counted;
+                out.stayed
+                    .push(evidence_entry((entry_id, deleted), old_row, None));
+            } else {
+                evidence_moves.push(vec![
+                    SqlValue::BigInt(old_row),
+                    SqlValue::BigInt(entry_id),
+                    SqlValue::BigInt(new_row),
+                ]);
+                out.moved += counted;
+                out.moves
+                    .push(evidence_entry((entry_id, deleted), old_row, Some(new_row)));
+            }
+        }
     }
 
     const PAIR: &str = "(CAST(? AS BIGINT), CAST(? AS BIGINT))";
@@ -422,6 +492,14 @@ pub(super) fn rebind(
          FROM (VALUES {values}) AS v(from_row, to_row) WHERE n.row_id = v.from_row",
         PAIR,
         &note_moves,
+    )?;
+    write_rows(
+        conn,
+        "UPDATE ox.evidence AS e SET row_id = v.to_row \
+         FROM (VALUES {values}) AS v(from_row, entry_id, to_row) \
+         WHERE e.row_id = v.from_row AND e.entry_id = v.entry_id",
+        "(CAST(? AS BIGINT), CAST(? AS BIGINT), CAST(? AS BIGINT))",
+        &evidence_moves,
     )?;
     Ok(out)
 }

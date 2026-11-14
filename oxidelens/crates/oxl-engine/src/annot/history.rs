@@ -61,7 +61,7 @@ pub(crate) fn record(conn: &Connection, actor: &Actor, at: &str, change: Change<
 /// `at` and by `actor`, their ids rising in the order given: the order a
 /// batch made the changes, as one statement per change would have numbered
 /// them.
-pub(super) fn record_all(
+pub(crate) fn record_all(
     conn: &Connection,
     actor: &Actor,
     at: &str,

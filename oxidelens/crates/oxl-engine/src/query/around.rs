@@ -402,7 +402,11 @@ fn shown_rows(conn: &Connection, scope: &Scope, ids: &[i64]) -> Result<Vec<(i64,
 /// metadata nor timestamps, in catalog order; joined by ` · ` and cut to
 /// `SUMMARY_CAP` characters. `present`, when given, names (lower-cased) the
 /// columns the table read has; any other column reads as NULL.
-fn summary_sql(relation: &str, all: &[ColumnInfo], present: Option<&BTreeSet<String>>) -> String {
+pub(crate) fn summary_sql(
+    relation: &str,
+    all: &[ColumnInfo],
+    present: Option<&BTreeSet<String>>,
+) -> String {
     let listed: Vec<&ColumnInfo> = summary_for(relation)
         .unwrap_or_default()
         .iter()
