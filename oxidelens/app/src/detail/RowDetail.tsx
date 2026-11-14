@@ -30,11 +30,12 @@ export interface RowDetailProps {
 const obsolete = (e: unknown) => isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case");
 
 interface ViewRecord {
-  key: string;
+  /** What the answer is about apart from the case generation: a re-read after `case-changed` keeps drawing it. */
+  about: string;
   view: RowView;
 }
 interface AroundRecord {
-  key: string;
+  about: string;
   totals: WindowTotal[] | "untimed";
 }
 
@@ -42,6 +43,7 @@ export default function RowDetail({ rowId, onFilter, onShowRow }: RowDetailProps
   const { summary, change, openScoped, reportError } = useShell();
   const zone = summary.display_zone;
   const key = `${rowId}|${zone}|${change.generation}`;
+  const about = `${rowId}|${zone}`;
   const aroundKey = `${rowId}|${change.generation}`;
   const [record, setRecord] = useState<ViewRecord | null>(null);
   const [aroundRecord, setAroundRecord] = useState<AroundRecord | null>(null);
@@ -56,7 +58,7 @@ export default function RowDetail({ rowId, onFilter, onShowRow }: RowDetailProps
     rowView(rowId, zone, "detail", id).then(
       (view) => {
         settled = true;
-        if (live) setRecord({ key, view });
+        if (live) setRecord({ about, view });
       },
       (e: unknown) => {
         settled = true;
@@ -67,7 +69,7 @@ export default function RowDetail({ rowId, onFilter, onShowRow }: RowDetailProps
       live = false;
       if (!settled) void queryCancel([id]).catch(() => {});
     };
-  }, [key, rowId, zone, reportError]);
+  }, [key, about, rowId, zone, reportError]);
 
   // The counts around it. A row with no time is the engine's `invalid`, which is what says so.
   useEffect(() => {
@@ -77,12 +79,12 @@ export default function RowDetail({ rowId, onFilter, onShowRow }: RowDetailProps
     aroundTotals(rowId, PIVOT_WINDOWS, "detail:around", id).then(
       (totals) => {
         settled = true;
-        if (live) setAroundRecord({ key: aroundKey, totals });
+        if (live) setAroundRecord({ about: String(rowId), totals });
       },
       (e: unknown) => {
         settled = true;
         if (!live) return;
-        if (isCmdError(e) && e.code === "invalid") setAroundRecord({ key: aroundKey, totals: "untimed" });
+        if (isCmdError(e) && e.code === "invalid") setAroundRecord({ about: String(rowId), totals: "untimed" });
         else if (!obsolete(e)) reportError(e);
       },
     );
@@ -92,9 +94,10 @@ export default function RowDetail({ rowId, onFilter, onShowRow }: RowDetailProps
     };
   }, [aroundKey, rowId, reportError]);
 
-  // What the screen draws is what was read for this very key: the first render under a new key draws nothing old.
-  const view = record?.key === key ? record.view : null;
-  const totals = aroundRecord?.key === aroundKey ? aroundRecord.totals : null;
+  // What the screen draws is what was read for this very row and zone: another row or zone draws nothing old. A new case
+  // generation (`case-changed`) keeps the last answer up while the re-read runs, and the new answer replaces it.
+  const view = record?.about === about ? record.view : null;
+  const totals = aroundRecord?.about === String(rowId) ? aroundRecord.totals : null;
 
   // The anchor is the engine's (`RowView.anchor`: host and R1 time), handed on unchanged.
   const anchor = view?.anchor ?? null;

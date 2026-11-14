@@ -62,6 +62,16 @@ describe("welcome", () => {
     expect(open).not.toBeInTheDocument();
   });
 
+  it("welcome_opens_a_case", async () => {
+    vi.mocked(dialogs.pickCaseFile).mockResolvedValue("/cases/picked.duckdb");
+    const user = userEvent.setup();
+    render(<Shell />);
+    await user.click(await screen.findByRole("button", { name: "Open case…" }));
+    await screen.findByRole("tab", { name: "Overview" });
+    expect(callsOf("case_open")[0].args).toEqual({ path: "/cases/picked.duckdb" });
+    expect(screen.queryByRole("button", { name: "Open case…" })).toBeNull(); // the welcome screen is gone
+  });
+
   it("a_settings_write_in_flight_when_a_case_opens_keeps_the_new_recent_case", async () => {
     vi.mocked(dialogs.pickCaseFile).mockResolvedValue("/cases/second.duckdb");
     await openRecent();

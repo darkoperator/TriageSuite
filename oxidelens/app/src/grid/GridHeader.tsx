@@ -1,4 +1,4 @@
-// The header row: the fixed mark column, then one cell per visible column. A click sorts (ascending, descending, off),
+// The header row: the fixed mark column, then one cell per visible column. A click, or Enter or Space on a focused header, sorts (ascending, descending, off),
 // shift-click adds a secondary key. A header drags to a new place, its right edge drags to resize (double-click fits
 // it to its text), a right-click opens the column menu. Pinned columns stick left of the scrolling area. A timestamp
 // column whose zone is not known carries the `?tz` badge.
@@ -58,13 +58,13 @@ export default function GridHeader(p: GridHeaderProps): ReactNode {
   const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>, id: string, i: number) => {
     if (e.target !== e.currentTarget) return;
     // The header sits inside the grid, whose handler moves the cell focus: the keys handled here stop here.
-    if (["ArrowRight", "ArrowLeft", "Enter", "ContextMenu"].includes(e.key) || (e.key === "F10" && e.shiftKey)) e.stopPropagation();
+    if (["ArrowRight", "ArrowLeft", "Enter", " ", "ContextMenu"].includes(e.key) || (e.key === "F10" && e.shiftKey)) e.stopPropagation();
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
       e.preventDefault();
       const to = ids[Math.min(ids.length - 1, Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)))];
       setCurrent(to);
       cells.current.get(to)?.focus();
-    } else if (e.key === "Enter") {
+    } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       p.onSort(id, e.shiftKey);
     } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {

@@ -76,23 +76,31 @@ async function openPanel(user: User, column: string) {
 
 describe("filter row", () => {
   it("filter_row_debounces_into_one_chip", async () => {
-    const { user } = await mount();
-    const input = screen.getByRole("textbox", { name: "Match UserName" });
-    await user.type(input, "adm");
-    expect(chips()).toEqual([]); // nothing yet: 300 ms of quiet first
-    await waitFor(() => expect(chips()).toHaveLength(1), { timeout: 2000 });
-    expect(chips()[0]).toMatchObject({
-      origin: "filter_row", enabled: true, filter: { column: "UserName", op: "contains", value: "adm", case_sensitive: false },
-    });
-    expect(chips()[0].id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
-    await settle(200);
-    // three keystrokes, one state with a filter: one page fetch for it
-    expect(callsOf("grid_page").filter((c) => stateOf(c).chips.length > 0)).toHaveLength(1);
-    await user.type(input, "i"); // replaces, never adds a second chip for the column
-    await waitFor(() => expect(chips()[0].filter).toMatchObject({ value: "admi" }), { timeout: 2000 });
-    expect(chips()).toHaveLength(1);
-    await user.clear(input);
-    await waitFor(() => expect(chips()).toEqual([]), { timeout: 2000 });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { user } = await mount();
+      const input = screen.getByRole("textbox", { name: "Match UserName" });
+      await user.type(input, "adm");
+      expect(chips()).toEqual([]); // nothing yet: 300 ms of quiet first
+      await act(() => vi.advanceTimersByTimeAsync(400));
+      await waitFor(() => expect(chips()).toHaveLength(1));
+      expect(chips()[0]).toMatchObject({
+        origin: "filter_row", enabled: true, filter: { column: "UserName", op: "contains", value: "adm", case_sensitive: false },
+      });
+      expect(chips()[0].id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      // three keystrokes, one state with a filter: one page fetch for it
+      expect(callsOf("grid_page").filter((c) => stateOf(c).chips.length > 0)).toHaveLength(1);
+      await user.type(input, "i"); // replaces, never adds a second chip for the column
+      await act(() => vi.advanceTimersByTimeAsync(400));
+      await waitFor(() => expect(chips()[0].filter).toMatchObject({ value: "admi" }));
+      expect(chips()).toHaveLength(1);
+      await user.clear(input);
+      await act(() => vi.advanceTimersByTimeAsync(400));
+      await waitFor(() => expect(chips()).toEqual([]));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -313,17 +321,40 @@ describe("chip bar", () => {
     expect(await screen.findByRole("dialog", { name: "Filter Provider" })).toBeTruthy();
   });
 
+  // Adds `n` cell filters in one act: the menu item's handler runs `n` times before React renders once, as batched adds do.
+  async function addInOneAct(user: User, n: number) {
+    await waitFor(() => expect(cellText(0, "Channel").textContent).not.toBe(""));
+    fireEvent.contextMenu(cellText(0, "Channel"));
+    const item = await screen.findByRole("menuitem", { name: "Filter in" });
+    act(() => {
+      for (let i = 0; i < n; i++) fireEvent.click(item);
+    });
+    void user;
+  }
+
   it("at_most_fifty_filters", async () => {
     const { user, reportError } = await mount();
     // fifty cell filters fill the bar; the 51st is refused with a message
-    for (let i = 0; i < 51; i++) {
-      await waitFor(() => expect(cellText(0, "Channel").textContent).not.toBe(""));
-      fireEvent.contextMenu(cellText(0, "Channel"));
-      await user.click(await screen.findByRole("menuitem", { name: "Filter in" }));
-    }
+    await addInOneAct(user, 50);
+    await waitFor(() => expect(chips()).toHaveLength(50));
+    expect(reportError).not.toHaveBeenCalled();
+    await addInOneAct(user, 1);
     expect(chips()).toHaveLength(50);
-    expect(reportError).toHaveBeenCalled();
-  }, 60_000);
+    expect(reportError).toHaveBeenCalledTimes(1);
+  });
+
+  it("fifty_chips_hold_under_batched_adds", async () => {
+    const { user, reportError } = await mount();
+    await addInOneAct(user, 49);
+    await waitFor(() => expect(chips()).toHaveLength(49));
+    await addInOneAct(user, 2); // two adds in one act at 49: one fits, the other is refused
+    await waitFor(() => expect(chips()).toHaveLength(50));
+    await settle(50);
+    expect(chips()).toHaveLength(50);
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(String(reportError.mock.calls[0][0])).toMatch(/at most 50 filters/);
+    expect(within(chipBar()).getAllByRole("button", { name: /^Remove filter/ })).toHaveLength(50);
+  });
 });
 
 describe("cell filters", () => {

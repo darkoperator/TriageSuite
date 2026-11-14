@@ -243,6 +243,15 @@ describe("search", () => {
     await waitFor(() => expect(label.textContent).toBe(`${back.items[0].ordinal} of ${count}`));
   });
 
+  it("aa_toggle_reaches_grid_state", async () => {
+    const { user } = await inFind();
+    expect(lastState().search.case_sensitive).toBe(false);
+    const before = callsOf("grid_page").length;
+    await user.click(screen.getByRole("button", { name: "Match case" }));
+    await waitFor(() => expect(callsOf("grid_page").length).toBeGreaterThan(before));
+    await waitFor(() => expect(lastState().search.case_sensitive).toBe(true));
+  });
+
   it("a_state_change_cancels_match_queries_and_a_step_that_was_running_moves_nothing", async () => {
     const { user } = await inFind();
     let release: () => void = () => {};

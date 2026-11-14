@@ -49,7 +49,7 @@ interface Mounted {
   onFilter: ReturnType<typeof vi.fn>;
   onShowRow: ReturnType<typeof vi.fn>;
   container: HTMLElement;
-  rerender(summary: CaseSummary, rowId?: number): void;
+  rerender(summary: CaseSummary, rowId?: number, generation?: number): void;
   user: ReturnType<typeof userEvent.setup>;
 }
 
@@ -62,20 +62,20 @@ async function mount(opts: { rowId?: number; zone?: string } = {}): Promise<Moun
   const openRow = vi.fn();
   const onFilter = vi.fn();
   const onShowRow = vi.fn();
-  const ctxOf = (s: CaseSummary): ShellContext => ({
-    summary: s, settings, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped, openRow, setGridStatus: () => {},
+  const ctxOf = (s: CaseSummary, generation = 0): ShellContext => ({
+    summary: s, settings, change: { generation, kinds: [] }, openDataset: () => {}, openScoped, openRow, setGridStatus: () => {},
     setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(), setHistogram: vi.fn(),
     saveColourRules: vi.fn(),
   });
-  const tree = (s: CaseSummary, rowId: number) => (
-    <ShellCtx.Provider value={ctxOf(s)}>
+  const tree = (s: CaseSummary, rowId: number, generation = 0) => (
+    <ShellCtx.Provider value={ctxOf(s, generation)}>
       <RowDetail rowId={rowId} onFilter={onFilter} onShowRow={onShowRow} />
     </ShellCtx.Provider>
   );
   const utils = render(tree(summary, opts.rowId ?? 1));
   return {
     container: utils.container, ctx: ctxOf(summary), openScoped, openRow, onFilter, onShowRow, user: userEvent.setup(),
-    rerender: (s, rowId = opts.rowId ?? 1) => utils.rerender(tree(s, rowId)),
+    rerender: (s, rowId = opts.rowId ?? 1, generation = 0) => utils.rerender(tree(s, rowId, generation)),
   };
 }
 
@@ -391,6 +391,35 @@ describe("row detail", () => {
     expect(screen.getByTestId("detail-row")).not.toHaveTextContent(/\b1\b/);
     // The first read was told to stop.
     expect(callsOf("query_cancel").length).toBeGreaterThan(0);
+  });
+
+  it("detail_keeps_its_rows_while_it_re_reads", async () => {
+    const m = await mount({ rowId: 1 });
+    await screen.findByTestId("detail-row");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("row_view", async (args: Args) => {
+      await gate;
+      return mockCall<RowView>("row_view", args);
+    });
+    m.rerender(await caseSummary("t"), 1, 1); // case-changed: a new generation, the same row
+    await settle(50);
+    expect(screen.getByTestId("detail-row")).toHaveTextContent("1"); // the old detail stays up
+    expect(screen.queryByText(/Loading row/)).toBeNull();
+    release();
+    await settle(50);
+    expect(screen.getByTestId("detail-row")).toHaveTextContent("1");
+    expect(callsOf("row_view")).toHaveLength(2);
+  });
+
+  it("a_different_row_does_not_show_the_old_one_while_it_loads", async () => {
+    const m = await mount({ rowId: 1 });
+    await screen.findByTestId("detail-row");
+    overrideCommand("row_view", () => new Promise(() => {}));
+    m.rerender(await caseSummary("t"), 2);
+    await settle(50);
+    expect(screen.queryByTestId("detail-row")).toBeNull();
+    expect(screen.getByText(/Loading row 2/)).toBeInTheDocument();
   });
 });
 

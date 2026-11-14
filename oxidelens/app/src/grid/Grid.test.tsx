@@ -149,6 +149,19 @@ describe("grid", () => {
     expect(header("Channel")).toHaveAttribute("aria-sort", "ascending");
   });
 
+  it("a_focused_sort_header_sorts_on_enter_and_space", async () => {
+    const { user } = await mount();
+    await user.tab(); // the grid's first stop is the header row
+    const cells = screen.getAllByRole("columnheader").filter((h) => h.querySelector(".col-name"));
+    cells[0].focus();
+    expect(cells[0]).toHaveFocus();
+    const first = cells[0].querySelector(".col-name")!.textContent!;
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(lastState().sort).toEqual([{ column: first, descending: false }]));
+    await user.keyboard(" ");
+    await waitFor(() => expect(lastState().sort).toEqual([{ column: first, descending: true }]));
+  });
+
   it("mark_column_is_first_and_fixed", async () => {
     await mount();
     const heads = screen.getAllByRole("columnheader");

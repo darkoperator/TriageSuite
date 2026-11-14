@@ -149,6 +149,19 @@ describe("settings dialog", () => {
     expect(screen.queryByText(/^invalid:/)).toBeNull(); // not also reported as a global error
   });
 
+  it("a_refused_settings_write_restores_the_confirmed_settings", async () => {
+    const { user } = await openSettings();
+    overrideCommand("settings_update", () => {
+      throw { code: "io", message: "the settings file is read-only" };
+    });
+    const light = screen.getByRole("radio", { name: "Light" });
+    await user.click(light); // shown at once
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(1));
+    await waitFor(() => expect(light).not.toBeChecked()); // the file kept the old theme, so does the window
+    expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
+    expect(root.getAttribute("data-theme")).toBe("dark");
+  });
+
   it("queued_name_saves_each_get_their_own_writes_outcome", async () => {
     const { user, dialog } = await openSettings();
     const release = holdFirstWrite();

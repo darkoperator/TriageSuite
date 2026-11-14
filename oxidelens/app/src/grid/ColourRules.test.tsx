@@ -16,9 +16,11 @@ import type { Tab } from "../shell/tabs";
 import { callsOf, overrideCommand } from "../test/backend";
 import { leaf } from "./chips";
 import { readFileSync } from "node:fs";
+import Shell from "../shell/Shell";
 import Grid from "./Grid";
 
 vi.mock("./measure", () => ({ measureText: vi.fn(() => 50) }));
+vi.mock("../dialogs", () => ({ pickNewCasePath: vi.fn(), pickCaseFile: vi.fn(), pickRunFolder: vi.fn(), pickCsvFile: vi.fn() }));
 
 beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => 440 });
@@ -306,5 +308,40 @@ describe("the colours button", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Colour rules" })).toBeNull());
     expect(button).toHaveFocus();
+  });
+});
+
+describe("rules edits through the shell's settings queue", () => {
+  it("a_second_rules_edit_waits_for_the_first_write", async () => {
+    localStorage.clear();
+    const user = userEvent.setup();
+    render(<Shell />);
+    await user.click(await screen.findByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ }));
+    await screen.findByRole("tab", { name: "Overview" });
+    await user.click(within(screen.getByRole("complementary", { name: "Case" })).getByRole("button", { name: /mock_hayabusa/ }));
+    await waitFor(() => expect(dataRows().length).toBeGreaterThan(0));
+    await user.click(screen.getByRole("button", { name: /^Colours/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Colour rules" });
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let first = true;
+    overrideCommand("settings_update", async (args) => {
+      if (first) {
+        first = false;
+        await gate;
+      }
+      return mockCall("settings_update", args);
+    });
+    const colours = within(dialog).getAllByRole("combobox", { name: /^Colour of / });
+    await user.selectOptions(colours[0], "green"); // write 1, held
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(1));
+    await user.selectOptions(within(dialog).getAllByRole("combobox", { name: /^Scope of / })[0], "cell"); // a second edit, queued
+    expect(callsOf("settings_update")).toHaveLength(1); // it waits: nothing is written beside the first
+    release();
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(2));
+    const sent = callsOf("settings_update").map((c) => (c.args as { settings: Settings }).settings.colour_rules.mock_hayabusa);
+    expect(sent[0][0]).toMatchObject({ colour: "green", scope: "row" });
+    expect(sent[1][0]).toMatchObject({ colour: "green", scope: "cell" }); // the second write carries both edits
   });
 });
