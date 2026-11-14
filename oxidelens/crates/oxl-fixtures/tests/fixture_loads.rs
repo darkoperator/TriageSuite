@@ -205,6 +205,10 @@ fn the_logons_run_adds_three_security_rows_to_ws01() {
     );
 }
 
+/// A row that differs between two files: its line number, and each cell
+/// that differs as (column, before, after).
+type ChangedRow<'a> = (usize, Vec<(&'a str, &'a str, &'a str)>);
+
 /// The later WS01 event run holds WS01's eight rows, one of them with its
 /// `MapDescription` changed: seven rows match `two_hosts`'s exactly.
 #[test]
@@ -223,31 +227,49 @@ fn the_event_rerun_changes_one_ws01_row() {
         ),
         0
     );
+    // The files themselves, compared whole: same header, same rows in the
+    // same order, and one row that differs in one cell, its MapDescription.
     let old = oxl_fixtures::two_hosts(&d.path().join("old"));
-    conn.execute_batch(&format!(
-        "ATTACH ':memory:' AS old; CREATE TABLE old.e AS SELECT * FROM read_csv('{}', all_varchar = true);",
-        old.join("Processed-WS01-20260101000000")
-            .join("EventLogs")
-            .join("evtx.csv")
-            .display()
-            .to_string()
-            .replace('\'', "''")
-    ))
-    .unwrap();
-    let same = "select count(*) from evtxtriage_events n join old.e o \
-                on n.TimeCreated__text is not distinct from o.TimeCreated \
-               and n.MapDescription = o.MapDescription \
-               and n.PayloadData1 = o.PayloadData1 \
-               and n.EventId__text = o.EventId";
-    // The two byte-identical audit-log rows match each other twice over.
-    assert_eq!(count(&conn, same), 9);
+    let read = |root: &Path, folder: &str| -> Vec<String> {
+        std::fs::read_to_string(root.join(folder).join("EventLogs").join("evtx.csv"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    };
+    let before = read(&old, "Processed-WS01-20260101000000");
+    let after = read(&root, "Processed-WS01-20260108000000");
+    assert_eq!(after.len(), before.len());
+    assert_eq!(after[0], before[0], "the header changed");
+    let header: Vec<&str> = before[0].split(',').collect();
+    let changed: Vec<ChangedRow> = before
+        .iter()
+        .zip(&after)
+        .enumerate()
+        .skip(1)
+        .filter(|(_, (b, a))| b != a)
+        .map(|(at, (b, a))| {
+            let (b, a): (Vec<&str>, Vec<&str>) = (b.split(',').collect(), a.split(',').collect());
+            assert_eq!(a.len(), b.len(), "row {at} changed its cell count");
+            let cells = header
+                .iter()
+                .zip(b.iter().zip(&a))
+                .filter(|(_, (b, a))| b != a)
+                .map(|(name, (b, a))| (*name, *b, *a))
+                .collect();
+            (at, cells)
+        })
+        .collect();
+    assert_eq!(changed.len(), 1, "{changed:?}");
     assert_eq!(
-        count(
-            &conn,
-            "select count(*) from evtxtriage_events where MapDescription = 'Process creation (edited)'"
-        ),
-        1
+        changed[0].1,
+        [(
+            "MapDescription",
+            "Process creation",
+            "Process creation (edited)"
+        )]
     );
+    assert!(before[changed[0].0].contains(",rclone.exe,"));
 }
 
 #[test]
