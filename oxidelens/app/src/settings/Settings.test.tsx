@@ -237,6 +237,31 @@ describe("settings dialog", () => {
     expect(reply.settings.recent).toEqual([]);
   });
 
+  it("a_write_answered_before_the_forget_but_delivered_after_does_not_bring_the_case_back", async () => {
+    // The backend answers the histogram write (with the old recent list), then the forget; the write's
+    // reply reaches the window last.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let delivered = false;
+    overrideCommand("settings_update", async (args) => {
+      const reply = await mockCall("settings_update", args);
+      await gate;
+      delivered = true;
+      return reply;
+    });
+    const { user } = await openSettings();
+    const forget = screen.getByRole("button", { name: "Forget recent cases" });
+    await user.click(screen.getByRole("checkbox", { name: "Show the histogram" }));
+    await waitFor(() => expect(callsOf("settings_update")).toHaveLength(1));
+    await user.click(forget);
+    await waitFor(() => expect(forget).toBeDisabled());
+    release();
+    await waitFor(() => expect(delivered).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(forget).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Show the histogram" })).not.toBeChecked();
+  });
+
   it("focus_moves_in_returns_to_the_gear_and_escape_closes", async () => {
     const { user, gear, dialog } = await openSettings();
     expect(dialog.contains(document.activeElement)).toBe(true);

@@ -105,6 +105,13 @@ export default function Shell() {
   const queued = useRef<Entry[]>([]);
   const writing = useRef(false);
   const [actor, setActor] = useState("");
+  // Counts the forget answers taken in. A settings answer to a request sent before the latest one may have been
+  // computed before the forget, so its `recent` is stale: the confirmed list (the forget's, or newer) is kept instead.
+  const recentGen = useRef(0);
+  const withFreshRecent = useCallback((s: SettingsData, sentAt: number): SettingsData => {
+    if (sentAt === recentGen.current || !confirmed.current) return s;
+    return { ...s, recent: confirmed.current.recent };
+  }, []);
 
   const pump = useCallback(async () => {
     if (writing.current) return;
@@ -113,7 +120,9 @@ export default function Shell() {
       while (queued.current.length > 0 && confirmed.current) {
         const { patch, waiter } = queued.current.shift()!;
         try {
-          const r = await settingsUpdate({ ...confirmed.current, ...patch });
+          const sentAt = recentGen.current;
+          const answer = await settingsUpdate({ ...confirmed.current, ...patch });
+          const r = { ...answer, settings: withFreshRecent(answer.settings, sentAt) };
           confirmed.current = r.settings;
           setActor(r.actor);
           if (r.damaged === null) setDamaged(null);
@@ -128,7 +137,7 @@ export default function Shell() {
     } finally {
       writing.current = false;
     }
-  }, [applySettings, reportError]);
+  }, [applySettings, reportError, withFreshRecent]);
 
   /** Saves a change to the settings, shown at once; the file follows through the queue. */
   const enqueue = useCallback(
@@ -188,14 +197,15 @@ export default function Shell() {
 
   /**
    * Forgets one recent case or all of them through the backend's own command, outside the queue. The answer's list is
-   * taken into both the confirmed and the shown settings; a queued write in flight answers the same list, since the
-   * backend keeps its own whatever a write sends.
+   * taken into both the confirmed and the shown settings. A settings answer already on its way may carry the list from
+   * before the forget; `recentGen` makes it keep this one.
    */
   const forgetRecent = useCallback(
     (path: string | null) => {
       (path === null ? recentClear() : recentRemove(path)).then(
         (r) => {
           const recent = r.settings.recent;
+          recentGen.current++;
           if (confirmed.current) confirmed.current = { ...confirmed.current, recent };
           if (settingsRef.current) applySettings({ ...settingsRef.current, recent });
           setActor(r.actor);
@@ -208,19 +218,21 @@ export default function Shell() {
 
   /** Settings read from the backend: the new confirmed state, shown unless a change is still on its way. */
   const adoptSettings = useCallback(
-    (s: SettingsData) => {
-      confirmed.current = s;
-      if (!writing.current && queued.current.length === 0) applySettings(s);
+    (s: SettingsData, sentAt: number) => {
+      const fresh = withFreshRecent(s, sentAt);
+      confirmed.current = fresh;
+      if (!writing.current && queued.current.length === 0) applySettings(fresh);
     },
-    [applySettings],
+    [applySettings, withFreshRecent],
   );
 
   useEffect(() => {
     let live = true;
+    const sentAt = recentGen.current;
     settingsGet().then(
       (r) => {
         if (!live) return;
-        adoptSettings(r.settings);
+        adoptSettings(r.settings, sentAt);
         setActor(r.actor);
         setDamaged(r.damaged);
       },
@@ -266,7 +278,8 @@ export default function Shell() {
       setGridStatus(null);
       setRightPane(null);
       readSessionsNow();
-      settingsGet().then((r) => (adoptSettings(r.settings), setActor(r.actor)), reportError); // the open put the case first in `recent`
+      const sentAt = recentGen.current;
+      settingsGet().then((r) => (adoptSettings(r.settings, sentAt), setActor(r.actor)), reportError); // the open put the case first in `recent`
     },
     [adoptSettings, readSessionsNow, reportError, store],
   );
