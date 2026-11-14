@@ -392,7 +392,9 @@ fn a_page_reads_cells_and_marks_for_its_own_rows_only() {
         .collect();
     assert_eq!(paging.len(), 1, "{statements:#?}");
     assert!(
-        !paging[0].contains("ox.row_mark") && !paging[0].contains("left("),
+        !paging[0].contains("ox.row_state")
+            && !paging[0].contains("ox.row_mark")
+            && !paging[0].contains("left("),
         "the paging statement reads marks or cuts cells: {}",
         paging[0]
     );

@@ -19,7 +19,7 @@ mod notes;
 mod row;
 mod tags;
 
-pub use counts::{mark_counts, MarkCounts};
+pub use counts::{mark_counts, MarkCounts, RelationMarks};
 pub use history::{history, HistoryRow};
 pub(crate) use history::{record, record_all, Change};
 pub(crate) use marks::clear_where_allowed;

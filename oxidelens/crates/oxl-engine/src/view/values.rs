@@ -69,7 +69,7 @@ pub fn values(
     check_offset(offset)?;
     let q = state.compile(except_chips)?;
     let scope = scope(case, &q)?;
-    let key = group_key_sql(&scope.all, &scope.relation.name, column)?;
+    let key = group_key_sql(&scope, column)?;
     let typed = if column == MARK_COLUMN {
         None
     } else {

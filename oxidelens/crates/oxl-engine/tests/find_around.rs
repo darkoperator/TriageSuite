@@ -153,7 +153,9 @@ fn a_merged_list_reads_summaries_and_marks_for_its_page_only() {
             .collect();
         assert_eq!(paging.len(), 1, "{statements:#?}");
         assert!(
-            !paging[0].contains("ox.row_mark") && !paging[0].contains("array_to_string"),
+            !paging[0].contains("ox.row_state")
+                && !paging[0].contains("ox.row_mark")
+                && !paging[0].contains("array_to_string"),
             "the paging statement reads marks or builds summaries: {}",
             paging[0]
         );

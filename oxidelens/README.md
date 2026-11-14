@@ -267,8 +267,9 @@ of `between`) accept depends on the column:
 | `BOOLEAN` | a JSON boolean (`true` or `false`) |
 | untyped | a JSON number (the cell is compared as a number) or a string (compared as text); both bounds of a `between` must be of one kind |
 
-`conversion_failed` needs a typed column. The pseudo-column `_mark` filters on marks:
-`eq`, `ne` or `in` with `"suspicious"` or `"none"`.
+`conversion_failed` needs a typed column. The pseudo-column `_mark` filters on a row's mark
+as `ox.row_state` gives it: `eq`, `ne` or `in` with `"suspicious"`, `"malicious"`,
+`"agent_malicious"` or `"none"`.
 
 ## Search syntax
 

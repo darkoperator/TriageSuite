@@ -15,31 +15,45 @@ pub const MAX_LIMIT: u32 = 1000;
 /// Characters of one cell's text a page carries.
 pub const CELL_CAP: usize = 2_000;
 
-/// The suspicious mark as `ox.row_mark.mark` stores it, and as the `_mark`
-/// filter spells it. Every reader and writer of a mark uses this one
-/// constant, so the spellings cannot drift apart.
+/// The suspicious mark as `ox.row_mark.mark` stores it, and as
+/// `ox.row_state` and the `_mark` filter spell it. Every reader and writer
+/// of a mark uses these constants, so the spellings cannot drift apart.
 pub(crate) const MARK_SUSPICIOUS: &str = "suspicious";
+/// The mark `ox.row_state` derives for a row that is evidence on a live
+/// entry an analyst created or reviewed (`schema.sql`, `upgrade_2_3.sql`).
+pub(crate) const MARK_MALICIOUS: &str = "malicious";
+/// The mark `ox.row_state` derives for a row that is evidence only on live
+/// unreviewed agent entries.
+pub(crate) const MARK_AGENT_MALICIOUS: &str = "agent_malicious";
 
-/// A row's mark, as `ox.row_mark` spells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+/// A row's mark, as `ox.row_state` spells it: the most severe one the row
+/// has (ruling S2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MarkState {
     Suspicious,
+    Malicious,
+    AgentMalicious,
 }
 
 impl MarkState {
     pub(crate) fn parse(text: &str) -> Option<MarkState> {
         match text {
             MARK_SUSPICIOUS => Some(MarkState::Suspicious),
+            MARK_MALICIOUS => Some(MarkState::Malicious),
+            MARK_AGENT_MALICIOUS => Some(MarkState::AgentMalicious),
             _ => None,
         }
     }
 
-    /// The spelling stored in `ox.row_mark.mark`.
+    /// The spelling in `ox.row_state.mark` (and, for `Suspicious`, in
+    /// `ox.row_mark.mark`).
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             MarkState::Suspicious => MARK_SUSPICIOUS,
+            MarkState::Malicious => MARK_MALICIOUS,
+            MarkState::AgentMalicious => MARK_AGENT_MALICIOUS,
         }
     }
 }
@@ -109,7 +123,7 @@ pub fn page(case: &Case, q: &GridQuery, limit: u32, offset: u64) -> Result<Page>
 
     // Each text is cut a character past the cap in SQL, so a huge cell is
     // not carried whole only to be clipped here.
-    let mut select = vec![format!("{ROW_ALIAS}._ox_row"), mark_sql()];
+    let mut select = vec![format!("{ROW_ALIAS}._ox_row"), mark_sql(scope.marks)];
     for c in &scope.columns {
         let text = format!("{ROW_ALIAS}.{}", quote_ident(&c.text_column));
         select.push(format!("left(CAST({text} AS VARCHAR), {})", CELL_CAP + 1));
@@ -162,11 +176,11 @@ pub fn count(case: &Case, q: &GridQuery) -> Result<u64> {
     Ok(u64::try_from(n).unwrap_or_default())
 }
 
-/// SQL for the mark of the row in scope, as `ox.row_mark` spells it; NULL
-/// for an unmarked row. Read it back with `read_mark`.
-pub(crate) fn mark_sql() -> String {
+/// SQL for the mark of the row in scope, as `marks` (`Scope::marks`)
+/// spells it; NULL for an unmarked row. Read it back with `read_mark`.
+pub(crate) fn mark_sql(marks: &str) -> String {
     format!(
-        "(SELECT max(ox_pm.mark) FROM ox.row_mark AS ox_pm \
+        "(SELECT max(ox_pm.mark) FROM {marks} AS ox_pm \
          WHERE ox_pm.row_id = {ROW_ALIAS}._ox_row)"
     )
 }

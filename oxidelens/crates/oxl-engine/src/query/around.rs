@@ -209,8 +209,8 @@ pub struct MergedRow {
 }
 
 /// The rows a merged list shows. The app sends one as JSON,
-/// `{"find": FindRequest}` or `{"around": {host, at, window_seconds}}`;
-/// unknown fields are refused.
+/// `{"find": FindRequest}`, `{"around": {host, at, window_seconds}}` or
+/// `{"marked": {"marks": [MarkState, ...]}}`; unknown fields are refused.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
@@ -224,6 +224,10 @@ pub enum MergedSource {
         at: String,
         window_seconds: u64,
     },
+    /// Every row in its relation's view whose mark (`ox.row_state`) is one
+    /// of `marks`, across all relations: the worklist a mark count opens.
+    /// No marks is no rows.
+    Marked { marks: Vec<MarkState> },
 }
 
 /// Characters of a merged row's summary.
@@ -269,6 +273,13 @@ pub fn merged_rows(
             window_seconds,
         } => {
             for scope in around_scopes(case, host, at, *window_seconds)? {
+                parts.push(part_sql(&scope, &scope.where_sql, &mut params));
+                params.extend(scope.params.iter().cloned());
+                scopes.insert(scope.relation.name.clone(), scope);
+            }
+        }
+        MergedSource::Marked { marks } => {
+            for scope in marked_scopes(case, marks)? {
                 parts.push(part_sql(&scope, &scope.where_sql, &mut params));
                 params.extend(scope.params.iter().cloned());
                 scopes.insert(scope.relation.name.clone(), scope);
@@ -348,6 +359,40 @@ pub fn merged_rows(
     })
 }
 
+/// The scope of every relation, narrowed to its rows whose mark is one of
+/// `marks`; none when `marks` is empty.
+fn marked_scopes(case: &Case, marks: &[MarkState]) -> Result<Vec<Scope>> {
+    let mut wanted: Vec<&'static str> = marks.iter().map(MarkState::as_str).collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for subject in subjects(case)? {
+        let mut scope = scope_of(
+            case,
+            &subject,
+            &GridQuery {
+                relation: subject.relation.name.clone(),
+                ..Default::default()
+            },
+        )?;
+        scope.where_sql = format!(
+            "({}) AND EXISTS (SELECT 1 FROM {} AS ox_wm \
+             WHERE ox_wm.row_id = {ROW_ALIAS}._ox_row AND ox_wm.mark IN ({}))",
+            scope.where_sql,
+            scope.marks,
+            vec!["?"; wanted.len()].join(", ")
+        );
+        scope
+            .params
+            .extend(wanted.iter().map(|m| SqlValue::Text((*m).to_string())));
+        out.push(scope);
+    }
+    Ok(out)
+}
+
 /// One relation's part of the merged union: its rows that satisfy
 /// `where_sql`, as row id, relation and time, which is all that ordering
 /// and paging them takes. Pushes the relation name, which the part binds
@@ -380,7 +425,7 @@ fn shown_rows(conn: &Connection, scope: &Scope, ids: &[i64]) -> Result<Vec<(i64,
         "SELECT {ROW_ALIAS}._ox_row, {host}, {summary}, {mark} \
          FROM {from} WHERE {ROW_ALIAS}._ox_row IN ({slots})",
         summary = summary_sql(&relation.name, &scope.columns, None),
-        mark = mark_sql(),
+        mark = mark_sql(scope.marks),
         from = scope.from_sql,
         slots = vec!["?"; ids.len()].join(", "),
     );

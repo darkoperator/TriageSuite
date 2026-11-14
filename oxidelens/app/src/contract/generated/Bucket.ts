@@ -22,4 +22,9 @@ end_label: string,
  * counted in days, weeks or months of the local calendar, so a DST day
  * is one position like any other.
  */
-index: number, count: number, suspicious: number, };
+index: number, count: number, 
+/**
+ * Rows with a mark of any state (`ox.row_state`). The name predates
+ * the derived marks; it counts Malicious and Agent: malicious rows too.
+ */
+suspicious: number, };

@@ -13,7 +13,9 @@ use super::{shown, valid_id, MAX_CHIP_ID};
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo};
 use crate::error::{EngineError, Result};
-use crate::filter::{check_caps, compile_filter, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN};
+use crate::filter::{
+    check_caps, compile_filter_over, FilterNode, Leaf, Op, SqlFragment, MARK_COLUMN,
+};
 use crate::query::{probe_regex, regex_leaves};
 use duckdb::Connection;
 use serde_json::Value;
@@ -156,8 +158,9 @@ pub(super) fn compile_rule(
     conn: &Connection,
     rule: &ColourRule,
     all: &[ColumnInfo],
+    marks: &str,
 ) -> Result<SqlFragment> {
-    let fragment = compile_filter(&rule.filter, all)?;
+    let fragment = compile_filter_over(&rule.filter, all, marks)?;
     let mut patterns = Vec::new();
     regex_leaves(&rule.filter, &mut patterns);
     for (pattern, case_sensitive) in &patterns {

@@ -17,7 +17,8 @@
 use super::{check_caps, FilterNode, Leaf, Op, MARK_COLUMN};
 use crate::catalog::{ColumnInfo, SqlType};
 use crate::error::{EngineError, Result};
-use crate::query::MARK_SUSPICIOUS;
+use crate::query::{MARK_AGENT_MALICIOUS, MARK_MALICIOUS, MARK_SUSPICIOUS};
+use crate::record::CURRENT_MARKS;
 use crate::time::parse_utc_text;
 use duckdb::types::Value as SqlValue;
 use serde_json::Value;
@@ -32,32 +33,52 @@ pub struct SqlFragment {
 }
 
 /// The value a `_mark` condition takes for the absence of any mark; the
-/// other value it accepts is the stored spelling, `MARK_SUSPICIOUS`.
+/// others are the marks as `ox.row_state` spells them.
 pub(crate) const MARK_NONE: &str = "none";
 
+/// Every value a `_mark` condition takes.
+const MARK_VALUES: [&str; 4] = [
+    MARK_SUSPICIOUS,
+    MARK_MALICIOUS,
+    MARK_AGENT_MALICIOUS,
+    MARK_NONE,
+];
+
 /// Compile `node` against `columns`, the catalogued columns of the relation
-/// it will run over. `Invalid` on an unknown column or a value of the wrong
+/// it will run over, for a case at the current format (`_mark` reads
+/// `ox.row_state`). `Invalid` on an unknown column or a value of the wrong
 /// shape.
 pub fn compile_filter(node: &FilterNode, columns: &[ColumnInfo]) -> Result<SqlFragment> {
+    compile_filter_over(node, columns, CURRENT_MARKS)
+}
+
+/// `compile_filter`, with `_mark` read from `marks`, the case's relation of
+/// marks (`marks_relation`).
+pub(crate) fn compile_filter_over(
+    node: &FilterNode,
+    columns: &[ColumnInfo],
+    marks: &str,
+) -> Result<SqlFragment> {
     // Bounds the recursion below as well as enforcing the caps.
     check_caps(node)?;
     let mut params = Vec::new();
-    let sql = node_sql(node, columns, &mut params)?;
+    let sql = node_sql(node, &Over { columns, marks }, &mut params)?;
     Ok(SqlFragment { sql, params })
 }
 
-fn node_sql(
-    node: &FilterNode,
-    columns: &[ColumnInfo],
-    params: &mut Vec<SqlValue>,
-) -> Result<String> {
+/// What a document compiles over: the relation's catalogued columns, and
+/// the relation of marks `_mark` reads.
+struct Over<'a> {
+    columns: &'a [ColumnInfo],
+    marks: &'a str,
+}
+
+fn node_sql(node: &FilterNode, over: &Over, params: &mut Vec<SqlValue>) -> Result<String> {
     let (children, joiner, identity) = match node {
         FilterNode::And(children) => (children, " AND ", "TRUE"),
         FilterNode::Or(children) => (children, " OR ", "FALSE"),
-        FilterNode::Not(inner) => {
-            return Ok(format!("(NOT {})", node_sql(inner, columns, params)?))
-        }
-        FilterNode::Leaf(leaf) => return leaf_sql(leaf, columns, params),
+        FilterNode::Not(inner) => return Ok(format!("(NOT {})", node_sql(inner, over, params)?)),
+        FilterNode::Leaf(leaf) => return leaf_sql(leaf, over, params),
     };
     // An empty `and` is every row and an empty `or` none: the identities, so
     // that removing the last chip of a group does what the group said.
@@ -66,7 +87,7 @@ fn node_sql(
     }
     let parts = children
         .iter()
-        .map(|child| node_sql(child, columns, params))
+        .map(|child| node_sql(child, over, params))
         .collect::<Result<Vec<_>>>()?;
     Ok(format!("({})", parts.join(joiner)))
 }
@@ -134,11 +155,12 @@ pub(super) fn leaf_value(leaf: &Leaf) -> Result<LeafValue<'_>> {
     }
 }
 
-fn leaf_sql(leaf: &Leaf, columns: &[ColumnInfo], params: &mut Vec<SqlValue>) -> Result<String> {
+fn leaf_sql(leaf: &Leaf, over: &Over, params: &mut Vec<SqlValue>) -> Result<String> {
     if leaf.column == MARK_COLUMN {
-        return mark_sql(leaf, params);
+        return mark_sql(leaf, over.marks, params);
     }
-    let column = columns
+    let column = over
+        .columns
         .iter()
         .find(|c| c.name == leaf.column)
         .ok_or_else(|| EngineError::Invalid(format!("unknown column \"{}\"", leaf.column)))?;
@@ -401,23 +423,26 @@ fn op_name(op: Op) -> String {
         .unwrap_or_default()
 }
 
-/// `_mark`: whether `ox.row_mark` holds a mark for the row. `"none"` is the
-/// absence of any mark.
-fn mark_sql(leaf: &Leaf, params: &mut Vec<SqlValue>) -> Result<String> {
+/// `_mark`: the row's mark in `marks` (`ox.row_state`, or what stands in
+/// for it below format 3). `"none"` is the absence of any mark.
+fn mark_sql(leaf: &Leaf, marks: &str, params: &mut Vec<SqlValue>) -> Result<String> {
     let one = |value: &str, params: &mut Vec<SqlValue>| -> Result<String> {
         let exists = format!(
-            "EXISTS (SELECT 1 FROM ox.row_mark AS ox_m WHERE ox_m.row_id = {}",
+            "EXISTS (SELECT 1 FROM {marks} AS ox_m WHERE ox_m.row_id = {}",
             quote_ident("_ox_row")
         );
         match value {
             MARK_NONE => Ok(format!("NOT {exists})")),
-            MARK_SUSPICIOUS => {
-                params.push(SqlValue::Text(MARK_SUSPICIOUS.into()));
+            MARK_SUSPICIOUS | MARK_MALICIOUS | MARK_AGENT_MALICIOUS => {
+                params.push(SqlValue::Text(value.into()));
                 Ok(format!("{exists} AND ox_m.mark = ?)"))
             }
             _ => Err(invalid(
                 leaf,
-                &format!("{MARK_COLUMN} is \"{MARK_SUSPICIOUS}\" or \"{MARK_NONE}\""),
+                &format!(
+                    "{MARK_COLUMN} is one of {}",
+                    MARK_VALUES.map(|v| format!("\"{v}\"")).join(", ")
+                ),
             )),
         }
     };

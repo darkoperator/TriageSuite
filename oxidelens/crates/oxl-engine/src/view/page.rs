@@ -158,7 +158,7 @@ pub fn page_view(
         }
         // `check_rules` capped the list well under u16::MAX.
         let index = u16::try_from(i).unwrap_or(u16::MAX);
-        match compile_rule(conn, rule, &scope.all) {
+        match compile_rule(conn, rule, &scope.all, scope.marks) {
             Ok(fragment) => {
                 whens.push(format!("WHEN {} THEN {index}", null_safe(&fragment.sql)));
                 rule_params.extend(fragment.params);
@@ -223,7 +223,7 @@ pub fn page_view(
     // Per column: the text cut a character past the cap, whether it failed
     // to convert, and for a UTC time its typed value as R1 text, which says
     // it converted and stands in when the text is not in the UTC form.
-    let mut select = vec![format!("{ROW_ALIAS}._ox_row"), mark_sql()];
+    let mut select = vec![format!("{ROW_ALIAS}._ox_row"), mark_sql(scope.marks)];
     let mut renders = Vec::with_capacity(scope.columns.len());
     for c in &scope.columns {
         let text = format!("{ROW_ALIAS}.{}", quote_ident(&c.text_column));

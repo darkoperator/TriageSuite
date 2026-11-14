@@ -21,9 +21,11 @@ import type { FilterNode } from "../contract/generated/FilterNode";
 import type { GridState } from "../contract/generated/GridState";
 import type { GroupView } from "../contract/generated/GroupView";
 import type { Leaf } from "../contract/generated/Leaf";
+import type { MarkCounts } from "../contract/generated/MarkCounts";
 import type { MarkState } from "../contract/generated/MarkState";
 import type { MergedView } from "../contract/generated/MergedView";
 import type { RelationInfo } from "../contract/generated/RelationInfo";
+import type { RelationMarks } from "../contract/generated/RelationMarks";
 import type { SavedView } from "../contract/generated/SavedView";
 import type { Settings } from "../contract/generated/Settings";
 import type { ValueCount } from "../contract/generated/ValueCount";
@@ -204,8 +206,24 @@ function summary(): CaseSummary {
   return {
     path: c.path, name: c.name, case_id: MOCK_CASE_ID, format: 3, display_zone: c.displayZone,
     hosts: ["SRV01", "WS01"], relations: relations().map((r) => r.info), sources: template.sources,
-    mark_counts: { suspicious: c.marks.size },
+    mark_counts: markCounts(),
   };
+}
+
+/** The marks of the rows the mock holds, in all and per relation, as the engine's `mark_counts` counts them. */
+function markCounts(): MarkCounts {
+  const marks = theCase().marks;
+  const by_relation: RelationMarks[] = [];
+  for (const rel of [...relations()].sort((x, y) => (x.info.name < y.info.name ? -1 : x.info.name > y.info.name ? 1 : 0))) {
+    const counts: RelationMarks = { relation: rel.info.name, suspicious: 0, malicious: 0, agent_malicious: 0 };
+    for (let i = 0; i < rel.rows.length; i++) {
+      const mark = marks.get(rowIdOf(rel, i));
+      if (mark) counts[mark] += 1;
+    }
+    if (counts.suspicious + counts.malicious + counts.agent_malicious > 0) by_relation.push(counts);
+  }
+  const total = (k: MarkState) => by_relation.reduce((n, r) => n + r[k], 0);
+  return { suspicious: total("suspicious"), malicious: total("malicious"), agent_malicious: total("agent_malicious"), by_relation };
 }
 
 // --------------------------------------------------------------------------------------------- filters, sorts, rows
@@ -705,13 +723,18 @@ const handlers: Handlers = {
         const sumIx = rel.columns.findIndex((c) => c.name === "Message" || c.name === "Details");
         for (let i = 0; i < rel.rows.length; i++) {
           const row = rel.rows[i];
+          const id = rowIdOf(rel, i);
           if ("find" in a.source) {
             const f = a.source.find;
             const needle = f.value.toLowerCase();
             const hit = row.some((v) => v !== null && (f.mode === "exact" ? v.toLowerCase() === needle : v.toLowerCase().includes(needle)));
             if (!hit || (f.hosts.length && !f.hosts.includes(row[hostIx] ?? ""))) continue;
-          } else if (row[hostIx] !== a.source.around.host) continue;
-          const id = rowIdOf(rel, i);
+          } else if ("around" in a.source) {
+            if (row[hostIx] !== a.source.around.host) continue;
+          } else {
+            const mark = marks.get(id);
+            if (!mark || !a.source.marked.marks.includes(mark)) continue;
+          }
           out.push({
             row: {
               row_id: id, relation: rel.info.name, time: row[timeIx], time_semantics: rel.columns[timeIx].time_semantics,

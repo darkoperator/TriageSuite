@@ -14,7 +14,8 @@ use crate::catalog::{self, physical_columns, ColumnRole};
 use crate::error::{EngineError, Result};
 use crate::filter::failed_sql;
 use crate::load::stage::{host_column, source_schema};
-use crate::query::{read_mark, Cell, MarkState};
+use crate::query::{read_mark, Cell, MarkState, MARK_SUSPICIOUS};
+use crate::record::marks_relation;
 use duckdb::{params, Connection};
 use triage_core::output::duckdb::sql::quote_ident;
 
@@ -161,10 +162,23 @@ pub fn row_detail(case: &Case, row_id: i64) -> Result<RowDetail> {
         return Err(EngineError::NotFound(no_row(row_id)));
     }
 
-    // The mark exactly as a mark or clear call reads it.
-    let (mark, marked_by) = marks_on(conn, &[row_id])?
-        .remove(&row_id)
-        .map_or((None, None), |m| (Some(m.mark), Some(m.marked_by)));
+    // The mark as every reader shows it (`ox.row_state`); a Suspicious
+    // mark's setter exactly as a mark or clear call reads it.
+    let state: Option<(String, String)> = conn
+        .prepare(&format!(
+            "SELECT mark, \"by\" FROM {} AS s WHERE row_id = ? ORDER BY \"by\" LIMIT 1",
+            marks_relation(case)
+        ))?
+        .query_map(params![row_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .next()
+        .transpose()?;
+    let (mark, marked_by) = match state {
+        Some((mark, _)) if mark == MARK_SUSPICIOUS => marks_on(conn, &[row_id])?
+            .remove(&row_id)
+            .map_or((None, None), |m| (Some(m.mark), Some(m.marked_by))),
+        Some((mark, by)) => (Some(mark), Some(by)),
+        None => (None, None),
+    };
     let tags: Vec<String> = conn
         .prepare("SELECT tag FROM ox.row_tag WHERE row_id = ? ORDER BY tag")?
         .query_map(params![row_id], |r| r.get(0))?

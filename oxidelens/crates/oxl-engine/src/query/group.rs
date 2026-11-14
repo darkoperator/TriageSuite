@@ -2,7 +2,9 @@
 //! time spans, nested by further columns and expanded one level at a time.
 
 use super::page::{clip_text, mark_sql};
-use super::{check_offset, find_column, marked_sql, scope, GridQuery, ISO_FORMAT, ROW_ALIAS};
+use super::{
+    check_offset, find_column, marked_sql, scope, GridQuery, Scope, ISO_FORMAT, ROW_ALIAS,
+};
 use crate::case::Case;
 use crate::catalog::{ColumnInfo, TimeSemantics};
 use crate::error::{EngineError, Result};
@@ -35,13 +37,15 @@ pub struct GroupRow {
     /// the relation has no primary time or the group has no timed row.
     pub first: Option<String>,
     pub last: Option<String>,
+    /// Rows with a mark of any state (`ox.row_state`). The name predates
+    /// the derived marks; it counts Malicious and Agent: malicious rows too.
     pub suspicious: u64,
 }
 
 /// Up to `limit` groups of `by[parent.len()]` from `offset`, among rows
 /// whose earlier `by` columns equal `parent`. Ordered by count descending,
 /// then key. A `by` column may be the `_mark` pseudo-column, whose key is
-/// `suspicious` or `None` for an unmarked row. `Invalid` for an empty `by`, more than four columns, a
+/// the mark as `ox.row_state` spells it or `None` for an unmarked row. `Invalid` for an empty `by`, more than four columns, a
 /// `parent` as long as `by`, a `limit` of 0 or over `MAX_LIMIT`, or an
 /// `offset` past `i64::MAX`.
 pub fn groups(
@@ -92,7 +96,7 @@ pub(crate) fn group_spans(
     let all = &scope.all;
     let keys: Vec<String> = by
         .iter()
-        .map(|name| group_key_sql(all, &scope.relation.name, name))
+        .map(|name| group_key_sql(&scope, name))
         .collect::<Result<_>>()?;
 
     let mut conditions = String::new();
@@ -114,7 +118,7 @@ pub(crate) fn group_spans(
          FROM {from} WHERE ({where_sql}){conditions} \
          GROUP BY ox_key ORDER BY count(*) DESC, ox_key ASC NULLS LAST LIMIT ? OFFSET ?",
         key = keys[parent.len()],
-        marked = marked_sql(),
+        marked = marked_sql(scope.marks),
         from = scope.from_sql,
         where_sql = scope.where_sql,
     );
@@ -148,7 +152,7 @@ pub(crate) fn group_spans(
 /// key[i]` (IsEmpty for a None key). Pairs beyond the shorter list are
 /// ignored. The keys are whole keys (`GroupRow::full_key`); a key cut to
 /// the cell cap matches no row. On `_mark` a key is the mark (`eq
-/// "suspicious"`) and `None` is no mark (`eq "none"`), as its filter
+/// "malicious"`) and `None` is no mark (`eq "none"`), as its filter
 /// spells them.
 pub fn group_filter(q: &GridQuery, by: &[String], key: &[Option<String>]) -> GridQuery {
     let leaves = by.iter().zip(key).map(|(column, key)| {
@@ -187,15 +191,19 @@ pub fn group_filter(q: &GridQuery, by: &[String], key: &[Option<String>]) -> Gri
     out
 }
 
-/// The group key of `name` among `all`, the relation's catalogued columns:
-/// `key_sql` of the column, or for the `_mark` pseudo-column the row's mark
-/// as `ox.row_mark` spells it, NULL for none. `NotFound` for a column the
+/// The group key of `name` among the scope's catalogued columns: `key_sql`
+/// of the column, or for the `_mark` pseudo-column the row's mark as
+/// `ox.row_state` spells it, NULL for none. `NotFound` for a column the
 /// relation lacks.
-pub(crate) fn group_key_sql(all: &[ColumnInfo], relation: &str, name: &str) -> Result<String> {
+pub(crate) fn group_key_sql(scope: &Scope, name: &str) -> Result<String> {
     if name == MARK_COLUMN {
-        return Ok(mark_sql());
+        return Ok(mark_sql(scope.marks));
     }
-    Ok(key_sql(find_column(all, relation, name)?))
+    Ok(key_sql(find_column(
+        &scope.all,
+        &scope.relation.name,
+        name,
+    )?))
 }
 
 /// A cell's group key: its text, with an empty cell read as NULL.

@@ -24,7 +24,8 @@ describe("recorded fixtures", () => {
 
   it("holds what the screen tests rely on", () => {
     const summary = fx.caseSummary();
-    expect(summary.format).toBe(2);
+    expect(summary.format).toBe(3);
+    expect(summary.mark_counts.by_relation.map((r) => [r.relation, r.suspicious])).toEqual([["evtxtriage_events", 1]]);
     expect(summary.hosts).toEqual(["SRV01", "WS01"]);
     const page = fx.gridPageEvents();
     expect(page.cells.length).toBe(page.row_ids.length);

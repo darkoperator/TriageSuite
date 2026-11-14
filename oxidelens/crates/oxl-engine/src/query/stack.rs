@@ -31,6 +31,8 @@ pub struct StackRow {
     pub hosts: u64,
     pub first: Option<String>,
     pub last: Option<String>,
+    /// Rows with a mark of any state (`ox.row_state`). The name predates
+    /// the derived marks; it counts Malicious and Agent: malicious rows too.
     pub suspicious: u64,
 }
 
@@ -126,7 +128,7 @@ pub fn stack(
          count(*) FILTER (WHERE {marked}) \
          FROM {from} WHERE ({where_sql}) GROUP BY {key_list} \
          ORDER BY count(*) {direction}, {tiebreak} LIMIT ? OFFSET ?",
-        marked = marked_sql(),
+        marked = marked_sql(scope.marks),
         tiebreak = tiebreak.join(", "),
     );
     let mut params = scope.params.clone();

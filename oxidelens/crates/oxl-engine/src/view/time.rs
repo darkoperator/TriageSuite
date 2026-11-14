@@ -37,6 +37,8 @@ pub struct GroupView {
     /// for any other; `None` without a typed primary time or a timed row.
     pub first: Option<String>,
     pub last: Option<String>,
+    /// Rows with a mark of any state (`ox.row_state`). The name predates
+    /// the derived marks; it counts Malicious and Agent: malicious rows too.
     pub suspicious: u64,
 }
 

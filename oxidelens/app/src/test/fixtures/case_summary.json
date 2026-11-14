@@ -2,7 +2,7 @@
   "path": "/fixture/case.duckdb",
   "name": "WS01 triage",
   "case_id": "0123456789abcdef0123456789abcdef",
-  "format": 2,
+  "format": 3,
   "display_zone": "UTC",
   "hosts": [
     "SRV01",
@@ -90,6 +90,16 @@
     }
   ],
   "mark_counts": {
-    "suspicious": 1
+    "suspicious": 1,
+    "malicious": 0,
+    "agent_malicious": 0,
+    "by_relation": [
+      {
+        "relation": "evtxtriage_events",
+        "suspicious": 1,
+        "malicious": 0,
+        "agent_malicious": 0
+      }
+    ]
   }
 }

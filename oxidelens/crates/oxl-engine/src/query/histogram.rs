@@ -51,6 +51,8 @@ pub struct Bucket {
     /// is one position like any other.
     pub index: u64,
     pub count: u64,
+    /// Rows with a mark of any state (`ox.row_state`). The name predates
+    /// the derived marks; it counts Malicious and Agent: malicious rows too.
     pub suspicious: u64,
 }
 
@@ -220,7 +222,7 @@ pub fn histogram(
              FROM {from} WHERE ({where_sql}) AND {t} IS NOT NULL) AS ox_x{join}) AS ox_y \
          GROUP BY ox_k ORDER BY ox_k",
         key = floor_us(&wall, unit),
-        marked = marked_sql(),
+        marked = marked_sql(scope.marks),
         from = scope.from_sql,
         where_sql = scope.where_sql,
     );

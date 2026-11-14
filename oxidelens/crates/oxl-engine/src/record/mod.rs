@@ -15,6 +15,7 @@
 mod entry;
 mod evidence;
 pub(crate) mod hosts;
+mod state;
 
 pub use entry::{
     delete_entry, edit_entry, entries, new_entry, set_entry_status, Entry, EntryEdit, EntryQuery,
@@ -23,6 +24,8 @@ pub use entry::{
 pub use evidence::{
     attach_rows, detach_row, evidence, promote_rows, Evidence, EvidenceStanding, PromoteOutcome,
 };
+
+pub(crate) use state::{detach_there, holders, marks_relation, Holder, CURRENT_MARKS};
 
 use crate::case::Case;
 use crate::error::{EngineError, Result};
@@ -52,7 +55,7 @@ pub const TACTICS: [&str; 14] = [
 ];
 
 /// Whether `case` has the record tables.
-fn has_records(case: &Case) -> bool {
+pub(crate) fn has_records(case: &Case) -> bool {
     case.format() >= RECORD_FORMAT
 }
 

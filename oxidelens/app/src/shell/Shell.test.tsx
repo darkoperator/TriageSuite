@@ -369,7 +369,7 @@ describe("the open case", () => {
     const next: CaseSummary = {
       ...base,
       case_id: MOCK_CASE_ID,
-      mark_counts: { suspicious: 9 },
+      mark_counts: { ...base.mark_counts, suspicious: 9 },
       relations: [
         { ...base.relations[0], name: "mock_events", rows: 123 },
         { ...base.relations[0], name: "mock_hayabusa", rows: 45 },

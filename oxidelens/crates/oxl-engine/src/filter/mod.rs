@@ -16,7 +16,8 @@ mod compile;
 use compile::leaf_value;
 pub use compile::{compile_filter, SqlFragment};
 pub(crate) use compile::{
-    failed_sql, literal_eq_sql, literal_sql, null_safe, regex_sql, LiteralMatch, MARK_NONE,
+    compile_filter_over, failed_sql, literal_eq_sql, literal_sql, null_safe, regex_sql,
+    LiteralMatch, MARK_NONE,
 };
 
 use crate::error::{EngineError, Result};
@@ -79,8 +80,9 @@ pub const MAX_IN: usize = 10_000;
 /// Characters in one `regex` pattern.
 pub const MAX_REGEX: usize = 1_000;
 
-/// The pseudo-column that filters on a row's mark: `eq`, `ne` or `in` with
-/// `"suspicious"` or `"none"`.
+/// The pseudo-column that filters on a row's mark (`ox.row_state`): `eq`,
+/// `ne` or `in` with `"suspicious"`, `"malicious"`, `"agent_malicious"` or
+/// `"none"`.
 pub const MARK_COLUMN: &str = "_mark";
 
 /// Parse a filter document. `Invalid` on any malformed or over-cap document.

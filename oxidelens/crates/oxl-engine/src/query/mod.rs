@@ -34,7 +34,7 @@ pub use group::{group_filter, groups, GroupRow};
 pub use histogram::{histogram, Bucket, Histogram, BUCKET_LADDER};
 pub(crate) use page::clip_text;
 pub use page::{count, page, Cell, MarkState, Page, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT};
-pub(crate) use page::{mark_sql, read_mark, MARK_SUSPICIOUS};
+pub(crate) use page::{mark_sql, read_mark, MARK_AGENT_MALICIOUS, MARK_MALICIOUS, MARK_SUSPICIOUS};
 pub use sql::{
     describe, query_sql, query_sql_within, Described, DescribedColumn, SqlResult, SQL_MEMORY_LIMIT,
     SQL_TEXT_MAX, SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
@@ -44,13 +44,14 @@ pub use stack::{stack, Stack, StackOrder, StackRow};
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo, RelationInfo};
 use crate::error::{EngineError, Result};
-use crate::filter::{compile_filter, FilterNode, Op, SqlFragment};
+use crate::filter::{compile_filter_over, FilterNode, Op, SqlFragment};
 use crate::load::stage::view_columns;
+use crate::record::marks_relation;
 use crate::search::{compile_search, parse_search, Search, SearchOptions};
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection};
 use std::collections::BTreeSet;
-use triage_core::output::duckdb::sql::{quote_ident, quote_literal};
+use triage_core::output::duckdb::sql::quote_ident;
 
 /// One grid request: a relation and what narrows, orders and shows it.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -106,6 +107,8 @@ pub(crate) struct Scope {
     /// not: what a sort, group or stack column is looked up in.
     pub all: Vec<ColumnInfo>,
     pub relation: RelationInfo,
+    /// The relation of marks this case's readers use (`marks_relation`).
+    pub marks: &'static str,
 }
 
 /// The offset rule every paged call shares: DuckDB's `OFFSET` is a signed
@@ -139,14 +142,10 @@ pub(crate) fn check_zone(zone: &str) -> Result<()> {
 /// `strftime` format. A constant, never a value.
 pub(crate) const ISO_FORMAT: &str = "%Y-%m-%dT%H:%M:%S.%fZ";
 
-/// True for a row in scope that carries a mark. The mark's spelling is the
-/// engine's own constant, never outside input, so it is a quoted literal.
-pub(crate) fn marked_sql() -> String {
-    format!(
-        "EXISTS (SELECT 1 FROM ox.row_mark AS ox_gm \
-         WHERE ox_gm.row_id = {ROW_ALIAS}._ox_row AND ox_gm.mark = {})",
-        quote_literal(MARK_SUSPICIOUS)
-    )
+/// True for a row in scope that carries a mark, of any state, in `marks`
+/// (`Scope::marks`).
+pub(crate) fn marked_sql(marks: &str) -> String {
+    format!("EXISTS (SELECT 1 FROM {marks} AS ox_gm WHERE ox_gm.row_id = {ROW_ALIAS}._ox_row)")
 }
 
 /// The alias of the projection `Scope::from_sql` reads from.
@@ -290,7 +289,7 @@ pub(crate) fn scope_of(case: &Case, subject: &Subject, q: &GridQuery) -> Result<
     }
     let mut patterns = Vec::new();
     if let Some(filter) = &q.filter {
-        let fragment = compile_filter(filter, all)?;
+        let fragment = compile_filter_over(filter, all, marks_relation(case))?;
         regex_leaves(filter, &mut patterns);
         parts.push(fragment.sql);
         params.extend(fragment.params);
@@ -321,6 +320,7 @@ pub(crate) fn scope_of(case: &Case, subject: &Subject, q: &GridQuery) -> Result<
         columns,
         all: all.clone(),
         relation,
+        marks: marks_relation(case),
     })
 }
 

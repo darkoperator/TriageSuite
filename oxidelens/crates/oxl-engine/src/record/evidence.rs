@@ -10,6 +10,7 @@
 
 use super::entry::{changeable, next_ids, read_stored, Stored, INSERT_ROW, INSERT_SQL};
 use super::hosts::{ensure_host, link_hosts};
+use super::state::{holders, Holder};
 use super::{has_records, require_records, MAX_DESCRIPTION, MAX_TITLE};
 use crate::actor::Actor;
 use crate::annot::{
@@ -205,54 +206,6 @@ fn read_facts(conn: &Connection, rows: &[&LocatedRow]) -> Result<HashMap<i64, Ro
         }
     }
     Ok(out)
-}
-
-/// An entry the row is evidence on, by the mark `ox.row_state` gives it.
-enum Holder {
-    /// The lowest-numbered live entry an analyst created or reviewed.
-    Analysts(i64),
-    /// The lowest-numbered live entry, every one an agent's unreviewed.
-    Agents(i64),
-}
-
-/// For each of `rows` that is evidence on a live entry, the entry that
-/// gives its mark, decided as `ox.row_state` decides it.
-fn holders(conn: &Connection, rows: &[i64]) -> Result<HashMap<i64, Holder>> {
-    let mut found: HashMap<i64, (Option<i64>, i64)> = HashMap::new();
-    for chunk in rows.chunks(IDS_PER_STATEMENT) {
-        let mut stmt = conn.prepare(&format!(
-            "SELECT v.row_id, e.id, \
-                    NOT starts_with(e.created_by, 'agent:') OR e.status = 'reviewed' \
-             FROM ox.evidence v JOIN ox.entry e ON e.id = v.entry_id \
-             WHERE NOT e.deleted AND v.row_id IN ({})",
-            id_list(chunk)
-        ))?;
-        let read = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, bool>(2)?,
-            ))
-        })?;
-        for row in read {
-            let (row, entry, analysts) = row?;
-            let held = found.entry(row).or_insert((None, entry));
-            held.1 = held.1.min(entry);
-            if analysts {
-                held.0 = Some(held.0.map_or(entry, |e: i64| e.min(entry)));
-            }
-        }
-    }
-    Ok(found
-        .into_iter()
-        .map(|(row, (analysts, any))| {
-            let holder = match analysts {
-                Some(entry) => Holder::Analysts(entry),
-                None => Holder::Agents(any),
-            };
-            (row, holder)
-        })
-        .collect())
 }
 
 /// One evidence row to insert, and its history.

@@ -23,4 +23,9 @@ full_key: string | null, count: number,
  * in the zone with the fraction as written for a `utc` time, as written
  * for any other; `None` without a typed primary time or a timed row.
  */
-first: string | null, last: string | null, suspicious: number, };
+first: string | null, last: string | null, 
+/**
+ * Rows with a mark of any state (`ox.row_state`). The name predates
+ * the derived marks; it counts Malicious and Agent: malicious rows too.
+ */
+suspicious: number, };
