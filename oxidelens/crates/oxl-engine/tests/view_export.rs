@@ -321,6 +321,63 @@ fn export_cancel_removes_the_partial() {
     );
 }
 
+/// The cancel flag is looked at every 10,000 rows, not only before the
+/// first: set from another thread once the partial file has its first
+/// bytes (the CSV writer's buffer is flushed only after the row-0 check),
+/// the export stops part way, removes its partial file and leaves no file at
+/// the path. The partial file is watched while it grows: an export that only
+/// looked at the flag before the first row and after the last would write
+/// all 400,000 rows first, far past the bound asserted on what was seen.
+#[test]
+fn export_stops_mid_file() {
+    use std::sync::atomic::Ordering;
+    const ROWS: u32 = 400_000;
+    let d = tempfile::tempdir().unwrap();
+    let mut case = oxl_fixtures::new_case(d.path());
+    let mut text = String::from("n\n");
+    for i in 0..ROWS {
+        text.push_str(&format!("{i:07}\n"));
+    }
+    let (_, rel) = loose(&mut case, d.path(), "many.csv", &text);
+    let mut st = state(&rel, Vec::new());
+    st.columns = Some(vec!["n".into()]);
+    let out = d.path().join("stopped.csv");
+    let cancel = AtomicBool::new(false);
+    let done = AtomicBool::new(false);
+    let (result, largest) = std::thread::scope(|s| {
+        let watcher = s.spawn(|| {
+            let mut largest = 0u64;
+            while !done.load(Ordering::SeqCst) {
+                if let Ok(meta) = std::fs::metadata(partial(&out)) {
+                    largest = largest.max(meta.len());
+                    if meta.len() > 0 {
+                        cancel.store(true, Ordering::SeqCst);
+                    }
+                }
+                std::thread::yield_now();
+            }
+            largest
+        });
+        let result = export_csv(&case, &st, &out, None, &cancel);
+        done.store(true, Ordering::SeqCst);
+        (result, watcher.join().unwrap())
+    });
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, EngineError::Invalid(m) if m.contains("cancelled")),
+        "{err}"
+    );
+    assert!(
+        cancel.load(Ordering::SeqCst),
+        "the watcher never saw a byte"
+    );
+    assert!(!partial(&out).exists());
+    assert!(!out.exists());
+    // Eight bytes a row: what was seen stayed far below the whole file.
+    let whole = u64::from(ROWS) * 8;
+    assert!(largest < whole / 2, "{largest} of {whole} bytes written");
+}
+
 #[test]
 fn export_hostile_text_is_unchanged() {
     let d = tempfile::tempdir().unwrap();

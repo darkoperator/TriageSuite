@@ -403,24 +403,6 @@ impl AppState {
         }
     }
 
-    /// Run `work` on the writer with the write gate held, waiting for a
-    /// write that is running to end rather than answering `busy`, and
-    /// without announcing a change: for work that must not interleave with a
-    /// write but changes nothing in the case (an exported view's last check
-    /// of its target, and its rename). The caller must hold no reader, or a
-    /// close (which holds the gate while it waits for readers) could not
-    /// end. `no_case` when no case is open.
-    pub fn serialized<T>(
-        &self,
-        work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
-    ) -> Result<T, CmdError> {
-        let _gate = lock(&self.write_gate);
-        let open = self.current()?;
-        let writer = lock(&open.writer);
-        let case = writer.as_ref().ok_or_else(CmdError::no_case)?;
-        Ok(work(case)?)
-    }
-
     /// Run `work` on the writer; the caller holds the gate. The new
     /// generation on success.
     fn on_writer<T>(

@@ -67,8 +67,9 @@ pub struct Provenance {
     /// file is matched by its path below the run root, separators
     /// normalised and letters compared without regard to case, as Windows
     /// paths are, so a run moved after it was written still matches. `None`
-    /// for a loose file, a run without a manifest or with one that does not
-    /// parse, and a row without an output file. The suite's manifest records
+    /// for a loose file, a run without a manifest, with one that does not
+    /// parse or with one that has no host list, and a row without an output
+    /// file. Paths are compared with `.` and `..` folded. The suite's manifest records
     /// paths, not hashes, so this says the run published the file, not that
     /// its content is unchanged.
     pub output_file_listed: Option<bool>,
@@ -241,11 +242,13 @@ fn provenance(case: &Case, detail: &RowDetail) -> Result<Provenance> {
 
 /// The part of a run manifest this reads: each host's tools' output paths.
 /// Every other field is ignored, so the manifest's own additions do not
-/// matter.
+/// matter. A manifest without a host list (written in part, or by something
+/// else) has `hosts` `None`: it says nothing about which files the run
+/// published.
 #[derive(serde::Deserialize)]
 struct RunManifest {
     #[serde(default)]
-    hosts: Vec<ManifestHost>,
+    hosts: Option<Vec<ManifestHost>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -268,14 +271,14 @@ struct ManifestTool {
 /// `host`'s tools, or any host's when the row has none. The file is taken
 /// below `root`, the run root it was loaded from, and a manifest path names
 /// it when it ends with those components. `None` when the manifest does not
-/// parse.
+/// parse or has no host list.
 fn listed_in_manifest(
     manifest: &str,
     root: &str,
     host: Option<&str>,
     output_file: &str,
 ) -> Option<bool> {
-    let manifest: RunManifest = serde_json::from_str(manifest).ok()?;
+    let hosts = serde_json::from_str::<RunManifest>(manifest).ok()?.hosts?;
     let file = components(output_file);
     let root = components(root);
     let wanted = match file.strip_prefix(root.as_slice()) {
@@ -285,8 +288,7 @@ fn listed_in_manifest(
     if wanted.is_empty() {
         return Some(false);
     }
-    let listed = manifest
-        .hosts
+    let listed = hosts
         .iter()
         .filter(|h| match host {
             Some(host) => h.host.eq_ignore_ascii_case(host),
@@ -299,12 +301,21 @@ fn listed_in_manifest(
 }
 
 /// A path's components, split at either separator, lower-cased; empty,
-/// `.` and the `\\?\` prefix's `?` components dropped.
+/// `.` and the `\\?\` prefix's `?` components dropped, and each `..` folded
+/// into the component before it (`a/../b` is `b`). A `..` with nothing
+/// before it to fold is kept, so it matches no file's component.
 fn components(path: &str) -> Vec<String> {
-    path.split(['/', '\\'])
-        .filter(|c| !c.is_empty() && *c != "." && *c != "?")
-        .map(str::to_ascii_lowercase)
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    for c in path.split(['/', '\\']) {
+        match c {
+            "" | "." | "?" => {}
+            ".." if out.last().is_some_and(|last| last != "..") => {
+                out.pop();
+            }
+            _ => out.push(c.to_ascii_lowercase()),
+        }
+    }
+    out
 }
 
 /// One cell's whole value.
@@ -457,6 +468,13 @@ mod tests {
     }"#;
 
     #[test]
+    fn dot_dot_folds_into_the_component_before_it() {
+        assert_eq!(components(r"a\b/../C/./d"), ["a", "c", "d"]);
+        // Nothing before it to fold: kept, so it matches no real component.
+        assert_eq!(components("../a/../../b"), ["..", "..", "b"]);
+    }
+
+    #[test]
     fn a_manifest_names_a_file_by_its_place_below_the_run_root() {
         let root = r"\\?\E:\cases\run";
         let evtx = r"\\?\E:\cases\run\Processed-WS01/EventLogs/evtx.csv";
@@ -499,9 +517,14 @@ mod tests {
             listed_in_manifest(r#"{"hosts": 5}"#, root, Some("WS01"), evtx),
             None
         );
-        // One without hosts names nothing.
+        // One without a host list says nothing either; an empty one names
+        // nothing.
         assert_eq!(
             listed_in_manifest(r#"{"schema_version": 3}"#, root, Some("WS01"), evtx),
+            None
+        );
+        assert_eq!(
+            listed_in_manifest(r#"{"hosts": []}"#, root, Some("WS01"), evtx),
             Some(false)
         );
     }

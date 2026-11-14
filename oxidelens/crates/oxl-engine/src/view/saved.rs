@@ -130,6 +130,39 @@ impl SavedView {
     }
 }
 
+/// A saved view a listing left out because its stored row does not decode
+/// (a document or kind the engine never writes: the case was edited by
+/// hand, or a later engine wrote it), and why.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SkippedView {
+    pub id: i64,
+    pub reason: String,
+}
+
+/// Up to a page of saved views, whether more follow, and the views left out
+/// because they do not decode. A skipped view takes no place in the page:
+/// `skipped` names every one the listing would have considered, on every
+/// page, so a caller can report them whichever page it reads.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ViewListing<T> {
+    pub items: Vec<T>,
+    /// More items exist past this page.
+    pub truncated: bool,
+    pub skipped: Vec<SkippedView>,
+}
+
+impl<T> ViewListing<T> {
+    fn new(page: Listing<T>, skipped: Vec<SkippedView>) -> ViewListing<T> {
+        ViewListing {
+            items: page.items,
+            truncated: page.truncated,
+            skipped,
+        }
+    }
+}
+
 /// Part of a view that could not apply to a dataset, and why.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -266,22 +299,27 @@ pub fn save_view(
 
 /// Up to `limit` of the views and presets that are not deleted, from
 /// `offset`: views first, then presets, each by name. With a relation, only
-/// those whose pattern matches it. A format-1 case has none. `Invalid` for a
-/// `limit` of 0 or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
+/// those whose pattern matches it. A view that does not decode is left out
+/// and named in `skipped`, whatever the relation (its pattern is unread with
+/// the rest of it). A format-1 case has none. `Invalid` for a `limit` of 0
+/// or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
 pub fn views(
     case: &Case,
     relation: Option<&str>,
     limit: u32,
     offset: u64,
-) -> Result<Listing<SavedView>> {
+) -> Result<ViewListing<SavedView>> {
     check_limit(limit)?;
     check_offset(offset)?;
     if case.format() < CASE_FORMAT {
-        return Ok(Listing::from_fetched(Vec::new(), limit));
+        return Ok(ViewListing::new(
+            Listing::from_fetched(Vec::new(), limit),
+            Vec::new(),
+        ));
     }
     // The pattern is matched here rather than in SQL, where `_` is a
     // wildcard and case folding is not only ASCII's; the page is cut after.
-    let all = read_views(case.conn(), "NOT deleted", &[])?;
+    let (all, skipped) = read_views_skipping(case.conn())?;
     let skip = usize::try_from(offset).unwrap_or(usize::MAX);
     let fetched: Vec<SavedView> = all
         .into_iter()
@@ -289,7 +327,10 @@ pub fn views(
         .skip(skip)
         .take(limit as usize + 1)
         .collect();
-    Ok(Listing::from_fetched(fetched, limit))
+    Ok(ViewListing::new(
+        Listing::from_fetched(fetched, limit),
+        skipped,
+    ))
 }
 
 /// A saved view with the case's relations its pattern matches.
@@ -306,19 +347,23 @@ pub struct MatchingView {
 /// pattern matches at least one active relation of the case, from `offset`,
 /// each with the relations it matches (sorted). Ordered as `views` orders
 /// them; the page is cut after the matching, so a view matching nothing never
-/// uses up a place. A format-1 case has none. `Invalid` for a `limit` of 0
-/// or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
-pub fn views_matching(case: &Case, limit: u32, offset: u64) -> Result<Listing<MatchingView>> {
+/// uses up a place. A view that does not decode is left out and named in
+/// `skipped`, as `views` does. A format-1 case has none. `Invalid` for a
+/// `limit` of 0 or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
+pub fn views_matching(case: &Case, limit: u32, offset: u64) -> Result<ViewListing<MatchingView>> {
     check_limit(limit)?;
     check_offset(offset)?;
     if case.format() < CASE_FORMAT {
-        return Ok(Listing::from_fetched(Vec::new(), limit));
+        return Ok(ViewListing::new(
+            Listing::from_fetched(Vec::new(), limit),
+            Vec::new(),
+        ));
     }
     let relations: Vec<String> = catalog::relations(case)?
         .into_iter()
         .map(|r| r.name)
         .collect();
-    let all = read_views(case.conn(), "NOT deleted", &[])?;
+    let (all, skipped) = read_views_skipping(case.conn())?;
     let skip = usize::try_from(offset).unwrap_or(usize::MAX);
     let fetched: Vec<MatchingView> = all
         .into_iter()
@@ -336,7 +381,10 @@ pub fn views_matching(case: &Case, limit: u32, offset: u64) -> Result<Listing<Ma
         .skip(skip)
         .take(limit as usize + 1)
         .collect();
-    Ok(Listing::from_fetched(fetched, limit))
+    Ok(ViewListing::new(
+        Listing::from_fetched(fetched, limit),
+        skipped,
+    ))
 }
 
 /// Delete view `id`, leaving a tombstone (history `view_delete`).
@@ -790,6 +838,37 @@ fn read_views(
     condition: &str,
     values: &[&dyn duckdb::ToSql],
 ) -> Result<Vec<SavedView>> {
+    read_raw(conn, condition, values)?
+        .into_iter()
+        .map(RawView::decode)
+        .collect()
+}
+
+/// The views that are not deleted, ordered as `read_views` orders them, with
+/// each one that does not decode left out and named instead. Only the
+/// listings read this way: a call about one view still answers `Internal`
+/// for it, since that is the view it was asked about.
+fn read_views_skipping(conn: &Connection) -> Result<(Vec<SavedView>, Vec<SkippedView>)> {
+    let (mut views, mut skipped) = (Vec::new(), Vec::new());
+    for raw in read_raw(conn, "NOT deleted", &[])? {
+        let id = raw.id;
+        match raw.decode() {
+            Ok(view) => views.push(view),
+            Err(e) => skipped.push(SkippedView {
+                id,
+                reason: e.to_string(),
+            }),
+        }
+    }
+    Ok((views, skipped))
+}
+
+/// The rows `condition` selects, undecoded, in `read_views`' order.
+fn read_raw(
+    conn: &Connection,
+    condition: &str,
+    values: &[&dyn duckdb::ToSql],
+) -> Result<Vec<RawView>> {
     let rows: Vec<(RawView, bool)> = conn
         .prepare(&format!(
             "SELECT {VIEW_COLUMNS} FROM ox.saved_view WHERE {condition} \
@@ -797,7 +876,7 @@ fn read_views(
         ))?
         .query_map(values, raw_row)?
         .collect::<std::result::Result<_, _>>()?;
-    rows.into_iter().map(|(raw, _)| raw.decode()).collect()
+    Ok(rows.into_iter().map(|(raw, _)| raw).collect())
 }
 
 /// View `id`, deleted or not. `NotFound` for an unknown id.

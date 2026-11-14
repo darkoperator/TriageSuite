@@ -736,6 +736,55 @@ fn export_import_round_trip() {
     assert_eq!(back.doc, preset.doc);
 }
 
+/// A view whose stored document no longer decodes (the case was edited by
+/// hand, or a later engine wrote a shape this one does not know) is left out
+/// of both listings and named in `skipped`, instead of failing them whole.
+/// The bad view sorts between the good ones, so a listing that stopped at it
+/// would lose the one after it.
+#[test]
+fn views_listing_skips_an_undecodable_view() {
+    let (d, mut case) = loaded();
+    let mut save = |name: &str| {
+        save_view(
+            &mut case,
+            name,
+            ViewKind::View,
+            "*",
+            &chips_doc(Vec::new()),
+            &analyst(),
+        )
+        .unwrap()
+        .id
+    };
+    let (a, b, c) = (save("A"), save("B"), save("C"));
+    let path = d.path().join("t.case.duckdb");
+    drop(case);
+    {
+        let conn = duckdb::Connection::open(&path).unwrap();
+        conn.execute("UPDATE ox.saved_view SET doc_json = '{' WHERE id = ?", [b])
+            .unwrap();
+    }
+    let case = Case::open(&path).unwrap();
+
+    let listed = views(&case, None, 50, 0).unwrap();
+    let ids: Vec<i64> = listed.items.iter().map(|v| v.id).collect();
+    assert_eq!(ids, [a, c]);
+    assert!(!listed.truncated);
+    assert_eq!(listed.skipped.len(), 1, "{:?}", listed.skipped);
+    assert_eq!(listed.skipped[0].id, b);
+    assert!(
+        listed.skipped[0].reason.contains("does not decode"),
+        "{}",
+        listed.skipped[0].reason
+    );
+
+    let matching = views_matching(&case, 50, 0).unwrap();
+    let ids: Vec<i64> = matching.items.iter().map(|m| m.view.id).collect();
+    assert_eq!(ids, [a, c]);
+    let skipped: Vec<i64> = matching.skipped.iter().map(|s| s.id).collect();
+    assert_eq!(skipped, [b]);
+}
+
 #[test]
 fn views_on_format1_read_only_are_empty() {
     let d = tempfile::tempdir().unwrap();

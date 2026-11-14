@@ -13,11 +13,13 @@ use super::At;
 use crate::error::CmdError;
 use crate::state::{AppState, Point};
 use oxl_engine::{
-    AppliedView, EngineError, Listing, MatchingView, SavedView, ViewDoc, ViewKind,
+    AppliedView, EngineError, MatchingView, SavedView, ViewDoc, ViewKind, ViewListing,
     MAX_VIEW_FILE_BYTES,
 };
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 /// What a saved-view write changes.
 const VIEWS: &[&str] = &["views"];
@@ -30,7 +32,7 @@ pub fn views_list(
     relation: Option<&str>,
     limit: u32,
     offset: u64,
-) -> Result<Listing<SavedView>, CmdError> {
+) -> Result<ViewListing<SavedView>, CmdError> {
     at.read(state, |c| oxl_engine::views(c, relation, limit, offset))
 }
 
@@ -42,7 +44,7 @@ pub fn views_matching(
     at: At<'_>,
     limit: u32,
     offset: u64,
-) -> Result<Listing<MatchingView>, CmdError> {
+) -> Result<ViewListing<MatchingView>, CmdError> {
     at.read(state, |c| oxl_engine::views_matching(c, limit, offset))
 }
 
@@ -79,28 +81,37 @@ pub fn view_apply(
 }
 
 /// Write view `id` to the file `path` (`export_view`). The path is checked
-/// as an export's is (`check_export_target`) on the case the read sees, and
-/// again, with the write gate held, just before the file is renamed into
-/// place (`AppState::serialized`), so a load that made the path part of a
-/// source in between is seen: `refused`, and the partial file is removed.
-/// The file is written whole or not at all.
+/// as an export's is (`check_export_target`), and again, with the write gate
+/// held (`AppState::wait_for_gate`), just before the file is renamed into
+/// place, so a load that made the path part of a source in between is seen:
+/// `refused`, and the partial file is removed. The file is written whole or
+/// not at all.
+///
+/// The export stays registered as its query until the file is in place, as
+/// `grid_export` does (`AppState::read_to_completion`): `query_cancel` with
+/// its id, a newer query on its slot, or the case closing, before the rename,
+/// answers `interrupted` (or `superseded`) and removes the partial file;
+/// stopped after, it answers success, because the file is there.
 pub fn view_export(state: &AppState, at: At<'_>, id: i64, path: &Path) -> Result<(), CmdError> {
-    let json = at.read(state, |c| {
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.read_to_completion(at.slot, at.query_id, cancel.clone(), |c| {
         oxl_engine::check_export_target(c, path)?;
-        oxl_engine::export_view(c, id)
-    })?;
-    let partial = write_partial(path, json.as_bytes())?;
-    state.hook(Point::BeforeRename);
-    let renamed = state.serialized(|c| {
-        oxl_engine::check_export_target(c, path)?;
-        Ok(std::fs::rename(&partial, path)?)
-    });
-    if renamed.is_err() {
-        // The partial file is this export's own; the error that ended the
-        // export is the one worth reporting.
-        let _ = std::fs::remove_file(&partial);
-    }
-    renamed
+        let json = oxl_engine::export_view(c, id)?;
+        let partial = write_partial(path, json.as_bytes())?;
+        state.hook(Point::BeforeRename);
+        let renamed = state.wait_for_gate(&cancel).and_then(|gate| {
+            oxl_engine::check_export_target(c, path)?;
+            std::fs::rename(&partial, path)?;
+            drop(gate);
+            Ok(())
+        });
+        if renamed.is_err() {
+            // The partial file is this export's own; the error that ended
+            // the export is the one worth reporting.
+            let _ = std::fs::remove_file(&partial);
+        }
+        renamed
+    })
 }
 
 /// Save the view in the file `path`, replacing one of the same name and
@@ -116,7 +127,7 @@ pub fn view_import(state: &AppState, path: &Path) -> Result<SavedView, CmdError>
 /// Write `bytes` to `<path>.partial` (made new: anything already at that
 /// name is refused), synced and closed, ready to be renamed over `path`;
 /// its path. On any failure the partial file is removed.
-fn write_partial(path: &Path, bytes: &[u8]) -> Result<PathBuf, CmdError> {
+fn write_partial(path: &Path, bytes: &[u8]) -> oxl_engine::Result<PathBuf> {
     let (partial, mut file) = oxl_engine::create_export_partial(path)?;
     // Closed (dropped) before the rename, which Windows needs.
     let written = file.write_all(bytes).and_then(|()| file.sync_all());
@@ -125,13 +136,15 @@ fn write_partial(path: &Path, bytes: &[u8]) -> Result<PathBuf, CmdError> {
         Ok(()) => Ok(partial),
         Err(e) => {
             let _ = std::fs::remove_file(&partial);
-            Err(EngineError::Io(e).into())
+            Err(EngineError::Io(e))
         }
     }
 }
 
-/// The text of the regular file at `path`, read up to `MAX_VIEW_FILE_BYTES`
-/// and refused past it.
+/// The text of the regular file at `path`, refused past
+/// `MAX_VIEW_FILE_BYTES`: by its size before it is opened, and by what is
+/// read (at most one byte past the cap), since a file can grow between the
+/// two.
 fn read_capped(path: &Path) -> Result<String, CmdError> {
     let meta = std::fs::metadata(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -148,16 +161,16 @@ fn read_capped(path: &Path) -> Result<String, CmdError> {
             path.display()
         )));
     }
+    if meta.len() > MAX_VIEW_FILE_BYTES as u64 {
+        return Err(too_big(path));
+    }
     let file = std::fs::File::open(path).map_err(EngineError::Io)?;
     let mut bytes = Vec::new();
     file.take(MAX_VIEW_FILE_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(EngineError::Io)?;
     if bytes.len() > MAX_VIEW_FILE_BYTES {
-        return Err(CmdError::invalid(format!(
-            "a view file is at most {MAX_VIEW_FILE_BYTES} bytes; {} is larger",
-            path.display()
-        )));
+        return Err(too_big(path));
     }
     String::from_utf8(bytes).map_err(|_| {
         CmdError::invalid(format!(
@@ -167,11 +180,18 @@ fn read_capped(path: &Path) -> Result<String, CmdError> {
     })
 }
 
+fn too_big(path: &Path) -> CmdError {
+    CmdError::invalid(format!(
+        "a view file is at most {MAX_VIEW_FILE_BYTES} bytes; {} is larger",
+        path.display()
+    ))
+}
+
 pub mod commands {
     use crate::cmd::At;
     use crate::error::CmdError;
     use crate::state::AppState;
-    use oxl_engine::{AppliedView, Listing, MatchingView, SavedView, ViewDoc, ViewKind};
+    use oxl_engine::{AppliedView, MatchingView, SavedView, ViewDoc, ViewKind, ViewListing};
     use std::path::PathBuf;
     use tauri::State;
 
@@ -183,7 +203,7 @@ pub mod commands {
         relation: Option<String>,
         limit: u32,
         offset: u64,
-    ) -> Result<Listing<SavedView>, CmdError> {
+    ) -> Result<ViewListing<SavedView>, CmdError> {
         let at = At::new(&query_id, &slot);
         super::views_list(&app, at, relation.as_deref(), limit, offset)
     }
@@ -195,7 +215,7 @@ pub mod commands {
         slot: String,
         limit: u32,
         offset: u64,
-    ) -> Result<Listing<MatchingView>, CmdError> {
+    ) -> Result<ViewListing<MatchingView>, CmdError> {
         let at = At::new(&query_id, &slot);
         super::views_matching(&app, at, limit, offset)
     }

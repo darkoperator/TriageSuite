@@ -185,6 +185,57 @@ fn a_manifest_that_does_not_name_the_file_says_so() {
     );
 }
 
+/// A copy of the two-host run whose `run_manifest.json` is `text`, loaded,
+/// and its first WS01 event's `output_file_listed`.
+fn listed_under_manifest(text: &str) -> Option<bool> {
+    let d = tempfile::tempdir().unwrap();
+    let built = two_hosts(&d.path().join("a"));
+    let root = d.path().join("b");
+    copy_tree(&built, &root);
+    std::fs::write(root.join("run_manifest.json"), text).unwrap();
+    let case = loaded_from(&root, d.path());
+    let view = row_view(&case, first_ws01_event(&case), NY).unwrap();
+    view.provenance.output_file_listed
+}
+
+/// A manifest with no host list (a partial or foreign write) says nothing
+/// about which files the run published: unknown, not "not listed". One that
+/// lists hosts, none of them naming the file, is a real "no".
+#[test]
+fn incomplete_manifest_is_unknown() {
+    assert_eq!(listed_under_manifest(r#"{"schema_version":3}"#), None);
+    assert_eq!(
+        listed_under_manifest(r#"{"schema_version":3,"hosts":[]}"#),
+        Some(false)
+    );
+}
+
+/// A manifest path is compared after `.` and `..` are folded, so
+/// `x/../EventLogs/./evtx.csv` names `EventLogs/evtx.csv`; a `..` that
+/// leads elsewhere does not.
+#[test]
+fn manifest_paths_are_normalised() {
+    let manifest = |path: &str| {
+        serde_json::json!({
+            "schema_version": 3,
+            "hosts": [{"host": "WS01", "tools": [{"output_paths": [path]}]}],
+        })
+        .to_string()
+    };
+    assert_eq!(
+        listed_under_manifest(&manifest(
+            "Processed-WS01-20260101000000/Junk/../EventLogs/./evtx.csv"
+        )),
+        Some(true)
+    );
+    assert_eq!(
+        listed_under_manifest(&manifest(
+            "Processed-WS01-20260101000000/EventLogs/../Junk/evtx.csv"
+        )),
+        Some(false)
+    );
+}
+
 #[test]
 fn a_manifest_written_before_the_run_moved_still_lists_its_files() {
     // The manifest's absolute paths name where the run was written; the

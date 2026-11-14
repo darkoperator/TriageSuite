@@ -580,6 +580,35 @@ fn sql_refusals_name_their_reason() {
     }
 }
 
+/// The sequence functions are refused however the call is spelled: quoted,
+/// upper case, schema-qualified. `currval` only reads the sequence, but what
+/// it reads is the case's id allocation state, not case data, so it goes with
+/// `nextval`. A `?` or `$1` inside a string literal is text, not a parameter.
+#[test]
+fn sequence_functions_are_refused_in_every_spelling() {
+    let (_d, path) = closed();
+    for (sql, function) in [
+        ("select nextval('ox.note_seq')", "nextval"),
+        (r#"select NEXTVAL("ox"."note_seq")"#, "nextval"),
+        (r#"select "nextval"('ox.note_seq')"#, "nextval"),
+        ("select main.nextval('x')", "nextval"),
+        ("select currval('ox.note_seq')", "currval"),
+        (r#"select "CURRVAL"('ox.note_seq')"#, "currval"),
+        ("select system.main.currval('ox.note_seq')", "currval"),
+    ] {
+        let e = query_sql(&path, sql, 10, 0).unwrap_err();
+        assert_eq!(e.code(), "invalid", "{sql}: {e}");
+        assert!(
+            e.to_string().contains(&format!("may not call {function}")),
+            "{sql}: expected {function} named in: {e}"
+        );
+    }
+    for sql in ["select '?'", "select '$1'"] {
+        let r = query_sql(&path, sql, 10, 0).unwrap_or_else(|e| panic!("{sql}: {e}"));
+        assert_eq!(r.rows.len(), 1, "{sql}");
+    }
+}
+
 /// A page of an ordered result is a slice of one order: pages drawn at
 /// different times from the same query stay descending and contiguous.
 #[test]

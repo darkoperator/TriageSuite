@@ -337,6 +337,40 @@ fn buckets_across_fall_back_and_in_a_half_hour_zone() {
     );
 }
 
+/// Lord Howe moves its clock by thirty minutes: on 2026-04-05 at 02:00
+/// (+11:00, 15:00Z on Apr 4) it goes back to 01:30 (+10:30). Apr 5 is then
+/// 24.5 hours long and Apr 6 starts at 13:30Z, not 13:00Z. A row at exactly
+/// that midnight is Apr 6's; a row half an hour earlier (23:30 local) is
+/// still Apr 5's, which an edge drawn with the summer offset would miss.
+#[test]
+fn lord_howe_half_hour_change_on_a_bucket_edge() {
+    let d = tempfile::tempdir().unwrap();
+    let (case, rel) = loose_utc(
+        d.path(),
+        "time,n\n2026-04-04T01:00:00Z,1\n2026-04-05T13:00:00Z,2\n2026-04-05T13:30:00Z,3\n",
+    );
+    let h = histogram(&case, &q(&rel), None, 3, "Australia/Lord_Howe").unwrap();
+    assert_eq!(h.bucket_seconds, 86_400);
+    assert_eq!(
+        starts(&h.buckets),
+        [
+            "2026-04-03T13:00:00.000000Z",
+            "2026-04-04T13:00:00.000000Z",
+            "2026-04-05T13:30:00.000000Z"
+        ]
+    );
+    assert_eq!(counts(&h.buckets), [1, 1, 1]);
+    assert_eq!(indexes(&h.buckets), [0, 1, 2]);
+    assert_eq!(
+        labels(&h.buckets),
+        [
+            ("2026-04-04 00:00:00", "2026-04-04 23:59:59"),
+            ("2026-04-05 00:00:00", "2026-04-05 23:59:59"),
+            ("2026-04-06 00:00:00", "2026-04-06 23:59:59")
+        ]
+    );
+}
+
 #[test]
 fn unknown_columns_bucket_as_written() {
     let d = tempfile::tempdir().unwrap();

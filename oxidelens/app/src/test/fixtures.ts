@@ -18,6 +18,7 @@ import type { RowView } from "../contract/generated/RowView";
 import type { SavedView } from "../contract/generated/SavedView";
 import type { Session } from "../contract/generated/Session";
 import type { ValueCount } from "../contract/generated/ValueCount";
+import type { ViewListing } from "../contract/generated/ViewListing";
 import caseSummaryJson from "./fixtures/case_summary.json";
 import gridCountsEventsJson from "./fixtures/grid_counts_events.json";
 import gridGroupsChannelJson from "./fixtures/grid_groups_channel.json";
@@ -64,7 +65,7 @@ export const FIXTURES = {
   host_zones: () => copy<HostZone[]>(hostZonesJson),
   row_view_first: () => copy<RowView>(rowViewFirstJson),
   sessions: () => copy<Session[]>(sessionsJson),
-  views_list: () => copy<Listing<SavedView>>(viewsListJson),
+  views_list: () => copy<ViewListing<SavedView>>(viewsListJson),
 } as const;
 
 export const caseSummary = FIXTURES.case_summary;

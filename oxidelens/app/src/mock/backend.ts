@@ -708,7 +708,7 @@ const handlers: Handlers = {
   views_list: (a) =>
     read(a.slot, a.queryId, () => {
       const all = theCase().views.filter((v) => !a.relation || globMatches(v.pattern, a.relation));
-      return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length };
+      return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length, skipped: [] };
     }),
   views_matching: (a) =>
     read(a.slot, a.queryId, () => {
@@ -717,7 +717,7 @@ const handlers: Handlers = {
         .views.map((view) => ({ view, relations: names.filter((n) => globMatches(view.pattern, n)) }))
         .filter((m) => m.relations.length > 0)
         .sort((x, y) => Number(x.view.kind === "preset") - Number(y.view.kind === "preset") || (x.view.name < y.view.name ? -1 : x.view.name > y.view.name ? 1 : 0));
-      return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length };
+      return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length, skipped: [] };
     }),
   view_save: (a) =>
     write(["views"], () => {

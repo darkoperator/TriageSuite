@@ -35,6 +35,7 @@ import type { ValueCount } from "./ValueCount";
 import type { ValueOrder } from "./ValueOrder";
 import type { ViewDoc } from "./ViewDoc";
 import type { ViewKind } from "./ViewKind";
+import type { ViewListing } from "./ViewListing";
 import type { WindowTotal } from "./WindowTotal";
 
 /** Every command the app answers, in the contract's order. */
@@ -163,8 +164,8 @@ export type CommandResult = {
   cell_value: CellValue;
   around_totals: Array<WindowTotal>;
   merged_page: Listing<MergedView>;
-  views_list: Listing<SavedView>;
-  views_matching: Listing<MatchingView>;
+  views_list: ViewListing<SavedView>;
+  views_matching: ViewListing<MatchingView>;
   view_save: SavedView;
   view_delete: null;
   view_apply: AppliedView;

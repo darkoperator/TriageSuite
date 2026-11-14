@@ -62,8 +62,8 @@ pub use view::{
     views_matching, AppliedView, CellValue, Chip, ChipOrigin, ColourRule, ColumnLayout, ColumnMeta,
     ExportReport, FieldView, GridCell, GridCounts, GridPage, GridState, GroupView, MatchPos,
     MatchingView, MergedView, PageOptions, Provenance, RowView, RuleColour, RuleScope, SavedView,
-    SearchMode, SearchState, ValueCount, ValueOrder, ValuePart, ViewDoc, ViewKind, ViewWarning,
-    WindowTotal, MAX_CHIPS, MAX_CHIP_ID, MAX_CHIP_LABEL, MAX_COLUMN_WIDTH, MAX_PARTS,
-    MAX_PIVOT_WINDOWS, MAX_RULES, MAX_RULE_NAME, MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES,
-    MAX_VIEW_NAME, MAX_VIEW_PATTERN, MAX_WINDOW_SECONDS, MIN_COLUMN_WIDTH,
+    SearchMode, SearchState, SkippedView, ValueCount, ValueOrder, ValuePart, ViewDoc, ViewKind,
+    ViewListing, ViewWarning, WindowTotal, MAX_CHIPS, MAX_CHIP_ID, MAX_CHIP_LABEL,
+    MAX_COLUMN_WIDTH, MAX_PARTS, MAX_PIVOT_WINDOWS, MAX_RULES, MAX_RULE_NAME, MAX_VIEW_BYTES,
+    MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN, MAX_WINDOW_SECONDS, MIN_COLUMN_WIDTH,
 };

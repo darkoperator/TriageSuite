@@ -434,6 +434,38 @@ fn a_panic_prints_an_engine_envelope() {
     assert!(inner(&v["error"]["untrusted"])["message"].is_string());
 }
 
+/// The random source failing while the panic reply is built (forced by a
+/// debug-only switch) still ends in one envelope, with the fixed fallback
+/// boundary and no panic text, instead of a second panic and empty stdout.
+#[cfg(debug_assertions)]
+#[test]
+fn a_panic_in_the_panic_hook_still_prints_an_envelope() {
+    let out = assert_cmd::Command::cargo_bin("oxidelens")
+        .unwrap()
+        .env("OXIDELENS_TEST_PANIC", "1")
+        .env("OXIDELENS_TEST_BOUNDARY_FAIL", "1")
+        .args(["--json", "capabilities"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(10));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(stdout.trim_end().lines().count(), 1, "{stdout}");
+    let v: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["command"], "capabilities");
+    assert_eq!(v["error"]["code"], "engine");
+    assert_eq!(
+        common::boundary_of(&v["error"]["untrusted"]),
+        oxl_cli::envelope::FALLBACK_BOUNDARY
+    );
+    let message = inner(&v["error"]["untrusted"])["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // The fixed boundary is predictable, so the panic's own text stays out.
+    assert!(!message.contains("OXIDELENS_TEST_PANIC"), "{message}");
+}
+
 #[test]
 fn capabilities_lists_error_codes() {
     let (_, v) = ox(&["capabilities"]);

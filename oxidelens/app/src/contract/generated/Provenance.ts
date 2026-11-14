@@ -28,8 +28,9 @@ output_file: string | null,
  * file is matched by its path below the run root, separators
  * normalised and letters compared without regard to case, as Windows
  * paths are, so a run moved after it was written still matches. `None`
- * for a loose file, a run without a manifest or with one that does not
- * parse, and a row without an output file. The suite's manifest records
+ * for a loose file, a run without a manifest, with one that does not
+ * parse or with one that has no host list, and a row without an output
+ * file. Paths are compared with `.` and `..` folded. The suite's manifest records
  * paths, not hashes, so this says the run published the file, not that
  * its content is unchanged.
  */

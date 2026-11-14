@@ -113,8 +113,10 @@ impl Case {
     /// step 1 made one, and left open at format 1 to change: only the
     /// upgrade tests make one, to have a step 1 case to load, annotate and
     /// then upgrade. Every other way to open a format-1 case to change it
-    /// upgrades it.
-    #[doc(hidden)]
+    /// upgrades it. Built only with feature `test-support`, which this
+    /// crate's tests turn on through its dev-dependency on itself; no build
+    /// of the app or the CLI has it.
+    #[cfg(feature = "test-support")]
     pub fn create_at_format_1(path: &Path, ddl: &str, name: &str, actor: &Actor) -> Result<Case> {
         check_new_path(path)?;
         Case::create_with(

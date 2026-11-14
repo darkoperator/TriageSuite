@@ -10,11 +10,22 @@ use serde_json::{json, Value};
 
 /// 16 hex characters from the OS random source, new on every call.
 pub fn boundary() -> String {
-    let mut bytes = [0u8; 8];
     // An unpredictable boundary is the whole point; a clock or pid fallback
     // would be guessable, so failure here stops the process.
-    getrandom::fill(&mut bytes).expect("the operating system's random source is unavailable");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    try_boundary().expect("the operating system's random source is unavailable")
+}
+
+/// `boundary`, or `None` when the operating system's random source fails.
+/// A debug build fails it on purpose while `OXIDELENS_TEST_BOUNDARY_FAIL` is
+/// set, so the tests can reach that path.
+fn try_boundary() -> Option<String> {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("OXIDELENS_TEST_BOUNDARY_FAIL").is_some() {
+        return None;
+    }
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// `value` as compact JSON between boundary-tagged markers.
@@ -42,12 +53,32 @@ pub fn err(command: &str, e: &EngineError) -> Value {
 
 /// The reply to a command that panicked: the code `engine`, like any other
 /// fault of the program, and the panic's text inside the wrapper.
+///
+/// It runs after the command's panic was caught, where a second panic would
+/// end the process with nothing printed, so it never panics: when the random
+/// source fails it wraps a fixed message in `FALLBACK_BOUNDARY`. The panic's
+/// text is left out of that reply, because a boundary anyone can predict
+/// must not enclose text that may quote evidence.
 pub fn panicked(command: &str, what: &str) -> Value {
+    let untrusted = match try_boundary() {
+        Some(b) => untrusted(
+            &json!({"message": format!("engine: the command stopped on a fault: {what}")}),
+            &b,
+        ),
+        None => untrusted(
+            &json!({"message": "engine: the command stopped on a fault, and the random \
+                                source the reply's wrapper needs failed too"}),
+            FALLBACK_BOUNDARY,
+        ),
+    };
     json!({"ok": false, "command": command, "error": {
         "code": "engine",
-        "untrusted": wrap(&json!({"message": format!("engine: the command stopped on a fault: {what}")})),
+        "untrusted": untrusted,
     }})
 }
+
+/// The boundary of the panic reply when the random source cannot give one.
+pub const FALLBACK_BOUNDARY: &str = "oxidelens-fixed-fallback";
 
 /// The exit code of a panic: that of the `engine` code.
 pub const PANIC_EXIT: i32 = 10;

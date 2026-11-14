@@ -34,6 +34,9 @@ libc.workspace = true
 # a build that asks for them: oxl-app does, because it generates and checks
 # the contract; a build of the CLI alone never sees them.
 ts = ["dep:ts-rs"]
+# Constructors only tests may call (`Case::create_at_format_1`): this crate's
+# own tests turn it on through the dev-dependency on itself below.
+test-support = []
 
 [dev-dependencies]
 # Integration tests (files under tests/). oxl-fixtures depends on this crate,
@@ -42,6 +45,8 @@ ts = ["dep:ts-rs"]
 oxl-fixtures.workspace = true
 tempfile.workspace = true
 triage-testkit.workspace = true
+# This crate again, with the test-only constructors (`test-support`).
+oxl-engine = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

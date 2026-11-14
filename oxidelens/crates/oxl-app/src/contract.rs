@@ -35,7 +35,7 @@ use oxl_engine::{
     AppliedView, CellValue, Chip, ColourRule, ColumnMeta, ExportReport, FileOptions, GridCounts,
     GridPage, GridState, GroupView, Histogram, HostZone, Listing, LoadReport, MatchPos,
     MatchingView, MergedSource, MergedView, PageOptions, RowView, SavedView, Session, ValueCount,
-    ValueOrder, ViewDoc, ViewKind, WindowTotal,
+    ValueOrder, ViewDoc, ViewKind, ViewListing, WindowTotal,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -290,11 +290,11 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         ),
         read!(
             c,
-            views_list(relation: Option<String>, limit: u32, offset: u64) -> Listing<SavedView>
+            views_list(relation: Option<String>, limit: u32, offset: u64) -> ViewListing<SavedView>
         ),
         read!(
             c,
-            views_matching(limit: u32, offset: u64) -> Listing<MatchingView>
+            views_matching(limit: u32, offset: u64) -> ViewListing<MatchingView>
         ),
         cmd!(
             c,

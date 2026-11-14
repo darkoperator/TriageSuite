@@ -34,10 +34,13 @@
 //!      `arrow_scan`, or one of `getenv`, `glob`, `sniff_csv`, `query`,
 //!      `query_table`, `json_execute_serialized_sql`, `enable_logging`,
 //!      `disable_logging`, `truncate_duckdb_logs`, `enable_profiling`,
-//!      `disable_profiling`, `checkpoint`, `force_checkpoint`, `nextval`. They
-//!      read files or the environment, hide a statement in a value, advance a
-//!      sequence, or change the instance's state. A scalar of one of these
-//!      names is refused like the table function.
+//!      `disable_profiling`, `checkpoint`, `force_checkpoint`, `nextval`,
+//!      `currval`. They read files or the environment, hide a statement in a
+//!      value, advance or read a sequence (the case's id allocation, not its
+//!      data), or change the instance's state. A scalar of one of these names
+//!      is refused like the table function. The name is the parser's: quotes
+//!      removed and any schema or catalog qualifier apart, so `"NEXTVAL"(…)`
+//!      and `main.nextval(…)` are refused as `nextval(…)` is.
 //!    - It names a table that is not the case's own. DuckDB answers a name
 //!      it cannot find with a replacement scan of the file that the whole
 //!      qualified name spells (`one.duckdb`, `"C:\dir\one"."duckdb"`), so:
@@ -169,11 +172,12 @@ const REFUSED_PREFIXES: [&str; 3] = ["read_", "parquet_", "arrow_scan"];
 
 /// Functions no call may name, in any position, besides `REFUSED_PREFIXES`:
 /// they read files or the environment, run a statement hidden in a value,
-/// or change the instance's state. A table function is already refused by
+/// touch a sequence, or change the instance's state. A table function is already refused by
 /// the allowlist; these are refused by name as well so that a scalar of the
 /// same name, now or after an upgrade, is refused too.
-const REFUSED_FUNCTIONS: [&str; 14] = [
+const REFUSED_FUNCTIONS: [&str; 15] = [
     "nextval",
+    "currval",
     "getenv",
     "glob",
     "sniff_csv",

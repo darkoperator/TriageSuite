@@ -36,9 +36,9 @@ pub use rules::{
 };
 pub use saved::{
     apply_view, delete_view, export_view, import_view, save_view, views, views_matching,
-    AppliedView, ColumnLayout, MatchingView, SavedView, ViewDoc, ViewKind, ViewWarning,
-    MAX_COLUMN_WIDTH, MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME, MAX_VIEW_PATTERN,
-    MIN_COLUMN_WIDTH,
+    AppliedView, ColumnLayout, MatchingView, SavedView, SkippedView, ViewDoc, ViewKind,
+    ViewListing, ViewWarning, MAX_COLUMN_WIDTH, MAX_VIEW_BYTES, MAX_VIEW_FILE_BYTES, MAX_VIEW_NAME,
+    MAX_VIEW_PATTERN, MIN_COLUMN_WIDTH,
 };
 pub use split::{split_value, ValuePart, MAX_PARTS};
 pub use time::{date_range_chip, groups_view, histogram_view, GroupView};

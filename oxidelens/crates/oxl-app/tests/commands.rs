@@ -682,6 +682,88 @@ fn view_export_and_import_round_trip_through_a_file() {
     );
 }
 
+/// A view export stays registered as its query until its file is in place:
+/// cancelled while it waits for the write gate to rename (a write holds the
+/// gate), it answers `interrupted`, removes its partial file and leaves
+/// nothing at the path. Registered only while it read the case, its cancel
+/// would be remembered for a query that never comes, and the file would
+/// land once the write ended.
+#[test]
+fn view_export_can_be_cancelled() {
+    use std::sync::mpsc;
+    let l = loaded();
+    let saved = views::view_save(&l.state, "Logons", ViewKind::View, "*", &logons()).unwrap();
+    let file = l.dir.path().join("cancelled.oxlview.json");
+    let mut partial = file.as_os_str().to_os_string();
+    partial.push(".partial");
+    let partial = std::path::PathBuf::from(partial);
+
+    let (holding, held) = mpsc::channel::<()>();
+    let (release, released) = mpsc::channel::<()>();
+    std::thread::scope(|s| {
+        let state = &l.state;
+        let writer = s.spawn(move || {
+            state.write(&[], |_| {
+                holding.send(()).unwrap();
+                released.recv().unwrap();
+                Ok(())
+            })
+        });
+        held.recv().unwrap();
+        let export =
+            s.spawn(|| views::view_export(state, At::new("vexport-1", "vexport"), saved.id, &file));
+        // The partial file is written before the export waits for the gate.
+        let start = std::time::Instant::now();
+        while !partial.exists() {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(30),
+                "the export never wrote its partial file"
+            );
+            std::thread::yield_now();
+        }
+        cmd::query_cancel(state, &["vexport-1".to_string()]).unwrap();
+        // The write ends after the cancel, so an export the cancel missed
+        // gets the gate and lands its file.
+        release.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        let answer = export.join().unwrap();
+        assert_eq!(answer.unwrap_err().code, "interrupted");
+    });
+    assert!(!partial.exists());
+    assert!(!file.exists());
+}
+
+/// A view file over the cap is refused from its size alone, before it is
+/// opened: here the file cannot be opened at all (another handle denies
+/// reading it on Windows; no read permission on Unix), so an import that
+/// opened it first would fail on the open rather than refuse its size.
+#[test]
+fn view_import_checks_size_before_reading() {
+    let l = loaded();
+    let big = l.dir.path().join("big.oxlview.json");
+    let f = std::fs::File::create(&big).unwrap();
+    f.set_len(oxl_engine::MAX_VIEW_FILE_BYTES as u64 + 1)
+        .unwrap();
+    drop(f);
+    #[cfg(windows)]
+    let _held = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&big)
+            .unwrap()
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&big, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    let err = views::view_import(&l.state, &big).unwrap_err();
+    assert_eq!(err.code, "invalid", "{}", err.message);
+    assert!(err.message.contains("at most"), "{}", err.message);
+}
+
 #[test]
 fn settings_get_and_update_answer_the_reply() {
     let l = loaded();

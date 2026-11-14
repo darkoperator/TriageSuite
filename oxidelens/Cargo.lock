@@ -2981,6 +2981,7 @@ dependencies = [
  "duckdb",
  "getrandom 0.3.4",
  "libc",
+ "oxl-engine",
  "oxl-fixtures",
  "regex",
  "serde",
