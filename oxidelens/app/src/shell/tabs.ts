@@ -20,9 +20,21 @@ export interface TabSeed {
   by: string[];
 }
 
+/** The four case sheets, pinned after the Overview. */
+export type SheetKind = "timeline" | "hosts" | "accounts" | "iocs";
+export const SHEETS: readonly { kind: SheetKind; title: string }[] = [
+  { kind: "timeline", title: "Timeline" },
+  { kind: "hosts", title: "Hosts" },
+  { kind: "accounts", title: "Accounts" },
+  { kind: "iocs", title: "IOCs" },
+];
+export const sheetTabId = (kind: SheetKind) => `sheet:${kind}`;
+
 export interface Tab {
   id: string;
-  kind: "overview" | "dataset" | "merged";
+  kind: "overview" | "sheet" | "dataset" | "merged";
+  /** A pinned case sheet: which one. It is never saved (the sheets always exist) and never closed. */
+  sheet?: SheetKind;
   /** The relation a dataset tab shows; `null` for the Overview. */
   relation: string | null;
   /** A tab opened from a group: its own title and starting state. It is saved and restored with the case's tabs. */
@@ -35,7 +47,7 @@ export interface Tab {
 }
 
 export interface TabsState {
-  /** The Overview first, then dataset tabs in the order they were opened. */
+  /** The Overview, the four pinned case sheets, then dataset tabs in the order they were opened. */
   tabs: Tab[];
   active: string;
 }
@@ -46,7 +58,12 @@ const OVERVIEW: Tab = { id: OVERVIEW_ID, kind: "overview", relation: null };
 export const storageKey = (caseId: string) => `oxl.tabs.v1.${caseId}`;
 export const datasetTabId = (relation: string) => `dataset:${relation}`;
 
-export const initialTabs = (): TabsState => ({ tabs: [OVERVIEW], active: OVERVIEW_ID });
+const PINNED: Tab[] = SHEETS.map((s) => ({ id: sheetTabId(s.kind), kind: "sheet", relation: null, sheet: s.kind }));
+
+/** The Overview and the sheets stay open for good. */
+export const isPinned = (t: Tab): boolean => t.kind === "overview" || t.kind === "sheet";
+
+export const initialTabs = (): TabsState => ({ tabs: [OVERVIEW, ...PINNED], active: OVERVIEW_ID });
 
 export function openDataset(s: TabsState, relation: string): TabsState {
   const id = datasetTabId(relation);
@@ -64,10 +81,10 @@ export function activate(s: TabsState, id: string): TabsState {
   return s.tabs.some((t) => t.id === id) ? { ...s, active: id } : s;
 }
 
-/** Closes a dataset tab (the Overview stays); the active tab becomes its left neighbour when it was the one closed. */
+/** Closes a dataset tab (the Overview and the sheets stay); the active tab becomes its left neighbour when it was the one closed. */
 export function closeTab(s: TabsState, id: string): TabsState {
   const ix = s.tabs.findIndex((t) => t.id === id);
-  if (ix <= 0) return s;
+  if (ix < 0 || isPinned(s.tabs[ix])) return s;
   const tabs = s.tabs.filter((t) => t.id !== id);
   return { tabs, active: s.active === id ? tabs[ix - 1].id : s.active };
 }

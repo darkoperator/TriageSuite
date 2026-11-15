@@ -373,12 +373,12 @@ function select(state: GridState, skipChips: readonly string[] = []): Selection 
   return { rel, rows, hits };
 }
 
-/** The cell a page carries: the text cut to the engine's 2,000 characters, a utc time also as display text. The mock
- *  case has no IOCs, so no cell is flagged as one. */
-function gridCell(col: ColumnMeta, v: string | null): GridCell {
+/** The cell a page carries: the text cut to the engine's 2,000 characters, a utc time also as display text. A cell is
+ *  flagged as an IOC when its whole text equals a live IOC's value (the engine's rule is exact, case ignored). */
+function gridCell(col: ColumnMeta, v: string | null, iocs: ReadonlySet<string>): GridCell {
   const clipped = v !== null && v.length > 2000;
   const text = clipped ? v.slice(0, 2000) : v;
-  return { text, display: isUtc(col) && text !== null ? shown(col, text) : null, failed: false, clipped, ioc: false };
+  return { text, display: isUtc(col) && text !== null ? shown(col, text) : null, failed: false, clipped, ioc: v !== null && iocs.has(v.toLowerCase()) };
 }
 
 const rowIdOf = (rel: MockRelation, index: number) => rel.firstId + index;
@@ -566,11 +566,12 @@ const handlers: Handlers = {
         return r.enabled && !missing;
       });
       const marks = theCase().marks;
+      const iocs = new Set(theCase().records.iocs.filter((x) => !x.deleted).map((x) => x.value.toLowerCase()));
       return {
         columns: cols.map((i) => sel.rel.columns[i]),
         row_ids: picked.map((i) => rowIdOf(sel.rel, i)),
         marks: picked.map((i) => marks.get(rowIdOf(sel.rel, i)) ?? null),
-        cells: picked.map((i) => cols.map((c) => gridCell(sel.rel.columns[c], sel.rel.rows[i][c]))),
+        cells: picked.map((i) => cols.map((c) => gridCell(sel.rel.columns[c], sel.rel.rows[i][c], iocs))),
         row_rule: picked.map((i) => {
           const at = rules.findIndex((r, n) => usable[n] && nodeMatches(r.filter, sel.rel, sel.rel.rows[i], marks.get(rowIdOf(sel.rel, i)) ?? null));
           return at < 0 ? null : at;

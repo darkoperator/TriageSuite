@@ -28,6 +28,7 @@ export interface TabBodyProps {
 
 export function TabBody(props: TabBodyProps): ReactNode {
   if (props.tab.kind === "overview") return <Overview />;
+  if (props.tab.kind === "sheet") return <p className="tab-placeholder">The {props.tab.sheet} sheet arrives in the next step.</p>;
   if (props.tab.kind === "merged") return <MergedTab tab={props.tab} active={props.active} />;
   return <Grid {...props} />;
 }

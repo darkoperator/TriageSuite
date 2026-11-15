@@ -31,10 +31,11 @@ import TabPanel from "./TabPanel";
 import StatusBar from "./StatusBar";
 import TabStrip from "./TabStrip";
 import {
-  activate, closeTab, datasetTabId, initialTabs, loadTabs, openDataset, openScoped, saveTabs, OVERVIEW_ID, ScrollStore, type Tab, type TabsState,
+  activate, closeTab, datasetTabId, initialTabs, loadTabs, SHEETS, openDataset, openScoped, saveTabs, OVERVIEW_ID, ScrollStore, type Tab, type TabsState,
 } from "./tabs";
 import TopBar from "./TopBar";
 import { useCaseChanged } from "./useCaseChanged";
+import { useSheetCounts } from "./useSheetCounts";
 import { useZoneOffset } from "./useZoneOffset";
 import "./shell.css";
 
@@ -335,6 +336,7 @@ export default function Shell() {
   }, [tabs, tabsCase, summary, store]);
 
   const caseId = summary?.case_id ?? null;
+  const sheetCounts = useSheetCounts(caseId, reportError);
   const scroll = useMemo(
     () => ({
       get: (id: string) => store.get(id),
@@ -430,7 +432,12 @@ export default function Shell() {
   }
 
   const activeKind = tabs.tabs.find((t) => t.id === tabs.active)?.kind ?? null;
-  const titleOf = (id: string) => (id === OVERVIEW_ID ? "Overview" : (tabs.tabs.find((t) => t.id === id)?.title ?? tabs.tabs.find((t) => t.id === id)?.relation ?? id));
+  const titleOf = (id: string) => {
+    const t = tabs.tabs.find((x) => x.id === id);
+    if (id === OVERVIEW_ID) return "Overview";
+    if (t?.sheet) return SHEETS.find((x) => x.kind === t.sheet)?.title ?? id;
+    return t?.title ?? t?.relation ?? id;
+  };
   const left = settings!.left_pane;
   const right = settings!.right_pane;
 
@@ -463,6 +470,10 @@ export default function Shell() {
             <TabStrip
               state={tabs}
               title={titleOf}
+              count={(id) => {
+                const kind = tabs.tabs.find((t) => t.id === id)?.sheet;
+                return kind ? (sheetCounts[kind] ?? null) : null;
+              }}
               onSelect={(id) => setTabs((t) => activate(t, id))}
               onClose={(id) => setTabs((t) => closeTab(t, id))}
             />

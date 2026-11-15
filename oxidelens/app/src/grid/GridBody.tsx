@@ -34,23 +34,14 @@ export interface GridBodyProps {
 
 export function CellText({ cell }: { cell: GridCell }): ReactNode {
   const text = displaySafe(cell.display ?? cell.text ?? "");
-  if (cell.failed) {
-    return (
-      <span className="cell-text cell-failed" title="did not convert" data-clipped={cell.clipped ? "true" : undefined}>
-        {text}
-        {cell.clipped ? "…" : ""}
-      </span>
-    );
-  }
-  if (cell.clipped) {
-    return (
-      <span className="cell-text" data-clipped="true">
-        {text}
-        {"…"}
-      </span>
-    );
-  }
-  return <span className="cell-text">{text}</span>;
+  // An IOC cell is underlined in the accent (grid.css). Never a mark colour: those are reserved for marks.
+  const cls = ["cell-text", cell.failed ? "cell-failed" : "", cell.ioc ? "cell-ioc" : ""].filter(Boolean).join(" ");
+  return (
+    <span className={cls} title={cell.failed ? "did not convert" : undefined} data-clipped={cell.clipped ? "true" : undefined}>
+      {text}
+      {cell.clipped ? "…" : ""}
+    </span>
+  );
 }
 
 export default function GridBody(p: GridBodyProps): ReactNode {

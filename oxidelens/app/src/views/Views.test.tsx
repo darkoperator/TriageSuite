@@ -433,7 +433,7 @@ describe("sessions", () => {
     // One tab per relation, the first of them showing, each scoped to the hosts the session names for it.
     await screen.findByRole("tab", { name: "Execution_Analysis · mock_events" });
     await screen.findByRole("tab", { name: "Execution_Analysis · mock_hayabusa" });
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tab")).toHaveLength(7);
     expect(screen.getByRole("tab", { name: "Execution_Analysis · mock_events" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(callsOf("grid_page").length).toBeGreaterThan(0));
     const hostsOf = (rel: string) =>

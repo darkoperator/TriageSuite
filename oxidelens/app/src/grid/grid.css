@@ -21,6 +21,7 @@
 .grid-row.row-hit { background: var(--search-hit); }
 .cell { box-sizing: border-box; flex: none; display: flex; align-items: center; padding: 0 8px; overflow: hidden; white-space: nowrap; }
 .cell-text { overflow: hidden; text-overflow: ellipsis; }
+.cell-ioc { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .cell-failed { text-decoration: underline dotted; text-underline-offset: 3px; }
 .cell[data-focused="true"] { outline: 1px solid var(--cell-focus); outline-offset: -1px; }
 .cell-mark { position: sticky; left: 0; z-index: 2; justify-content: center; padding: 0; background: inherit; }

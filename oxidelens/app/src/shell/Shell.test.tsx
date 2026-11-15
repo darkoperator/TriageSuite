@@ -355,7 +355,7 @@ describe("the open case", () => {
     localStorage.setItem(storageKey(caseSummaryId()), '{"v":1,"tabs":[{"relation":"gone"},7,null],"active":"dataset:gone","scroll":{"a":"x"}}');
     await openRecent();
     expect(screen.getByRole("tab", { name: "Overview", selected: true })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getAllByRole("tab")).toHaveLength(5); // the Overview and the four pinned sheets
   });
 
   it("case_changed_rereads_without_losing_tabs", async () => {
@@ -385,7 +385,57 @@ describe("the open case", () => {
     expect(within(screen.getByRole("complementary", { name: "Case" })).getByText("9")).toBeInTheDocument();
     // The tab strip is untouched: both tabs, and the same one active.
     expect(screen.getByRole("tab", { name: /mock_hayabusa/, selected: true })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getAllByRole("tab")).toHaveLength(6);
+  });
+});
+
+describe("pinned sheet tabs", () => {
+  const SHEETS = ["Timeline", "Hosts", "Accounts", "IOCs"];
+
+  it("sheet_tabs_are_pinned_and_counted", async () => {
+    const user = await openRecent();
+    const names = () => screen.getAllByRole("tab").map((t) => t.textContent);
+    // After Overview, in order, each with the number its list holds (the mock case seeds records).
+    const want = async (q: object) =>
+      (await mockCall<{ items: unknown[] }>("records_list", { queryId: "c", slot: "c", query: q, limit: 1000, offset: 0 })).items.length;
+    const hosts = await want({ kind: "host" });
+    const accounts = await want({ kind: "account" });
+    const iocs = await want({ kind: "ioc", ioc_type: null, tool: null, text: null });
+    const entries = (await mockCall<{ items: unknown[] }>("entries_list", { queryId: "c", slot: "c", query: { status: [], host: null, tactic: null, text: null, row: null, order: null }, limit: 1000, offset: 0 })).items.length;
+    expect(hosts).toBeGreaterThan(0);
+    await waitFor(() => expect(names()).toEqual(["Overview", `Timeline ${entries}`, `Hosts ${hosts}`, `Accounts ${accounts}`, `IOCs ${iocs}`]));
+
+    // Never closed: no close button, and Delete on the focused tab does nothing.
+    for (const n of SHEETS) expect(screen.queryByRole("button", { name: new RegExp(`^Close ${n}`) })).toBeNull();
+    const tl = screen.getByRole("tab", { name: /^Timeline/ });
+    await user.click(tl);
+    expect(tl).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Delete}");
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    // Dataset tabs follow the pinned ones.
+    await user.click(screen.getByRole("tab", { name: "Overview" }));
+    await user.click(within(screen.getByRole("complementary", { name: "Case" })).getByRole("button", { name: /mock_hayabusa/ }));
+    await screen.findByRole("tab", { name: /mock_hayabusa/, selected: true });
+    expect(names().at(-1)).toMatch(/mock_hayabusa/);
+  });
+
+  it("recounts on case-changed, and a late answer for the old read is not drawn", async () => {
+    await openRecent();
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^Hosts \d/ })).toBeInTheDocument());
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("records_list", async (a) => {
+      const q = a?.query as { kind: string };
+      if (q.kind === "host") await gate;
+      return { items: q.kind === "host" ? [{}, {}, {}, {}, {}, {}, {}] : [], truncated: false };
+    });
+    act(() => emitEvent("case-changed", { kinds: ["records"], generation: 60 }));
+    overrideCommand("records_list", (a) => ({ items: (a?.query as { kind: string }).kind === "host" ? [{}, {}] : [], truncated: false }));
+    act(() => emitEvent("case-changed", { kinds: ["records"], generation: 61 }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Hosts 2" })).toBeInTheDocument());
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("tab", { name: "Hosts 2" })).toBeInTheDocument();
   });
 });
 
