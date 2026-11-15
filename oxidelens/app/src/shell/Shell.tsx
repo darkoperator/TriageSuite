@@ -84,6 +84,8 @@ export default function Shell() {
   const [error, setError] = useState<string | null>(null);
   const [gridStatus, setGridStatus] = useState<ReactNode>(null);
   const [rightPane, setRightPane] = useState<ReactNode>(null);
+  // Whether the shown dataset tab is grouped, as it says (`setGrouped`): the key strip follows it.
+  const [grouped, setGrouped] = useState(false);
   const [store] = useState(() => new ScrollStore());
   const zoneOffset = useZoneOffset(summary, change.generation);
   const readSeq = useRef(0);
@@ -391,7 +393,7 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, pendingRow, clearPendingRow, setGridStatus, setRightPane, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, pendingRow, clearPendingRow, setGridStatus, setRightPane, setGrouped, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
             activeTab: tabs.tabs.find((t) => t.id === tabs.active) ?? null, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport,
           }
         : null,
@@ -427,6 +429,7 @@ export default function Shell() {
     );
   }
 
+  const activeKind = tabs.tabs.find((t) => t.id === tabs.active)?.kind ?? null;
   const titleOf = (id: string) => (id === OVERVIEW_ID ? "Overview" : (tabs.tabs.find((t) => t.id === id)?.title ?? tabs.tabs.find((t) => t.id === id)?.relation ?? id));
   const left = settings!.left_pane;
   const right = settings!.right_pane;
@@ -482,7 +485,7 @@ export default function Shell() {
           )}
         </div>
         <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
-        <KeyStrip kind={tabs.tabs.find((t) => t.id === tabs.active)?.kind ?? null} />
+        <KeyStrip kind={activeKind === "dataset" && grouped ? "grouped" : activeKind} />
       </div>
     </ShellCtx.Provider>
   );

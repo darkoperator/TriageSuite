@@ -1049,43 +1049,49 @@ fn a_batch_takes_at_most_max_action_rows_from_anyone() {
 /// first, whatever the entries' times; the Timeline's order is unchanged.
 #[test]
 fn entries_list_newest_first_on_request() {
-    let (_d, mut case) = loaded();
+    let (d, mut case) = loaded();
     let early = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
     let late = promote_at(&mut case, SHARE_SRV01, &analyst());
     let undated = new_entry(&mut case, &titled("Undated"), &analyst())
         .unwrap()
         .id;
+    let tied = new_entry(&mut case, &titled("Tied"), &analyst())
+        .unwrap()
+        .id;
     std::thread::sleep(std::time::Duration::from_millis(5));
     // The first entry is changed last: it is the most recent.
     edit_entry(&mut case, early, &titled("Changed last"), &analyst()).unwrap();
-    let ids = |q: EntryQuery| -> Vec<i64> {
-        entries(&case, &q, 100, 0)
+    // `late` and `tied` are given one change time, older than every other: the tie goes to the newer id.
+    let path = case.path().to_path_buf();
+    drop(case);
+    {
+        let conn = duckdb::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE ox.entry SET modified_at = '2026-01-01T00:00:00.000000Z' WHERE id IN (?, ?)",
+            duckdb::params![late, tied],
+        )
+        .unwrap();
+    }
+    let case = Case::open(&path).unwrap();
+    let ids = |q: EntryQuery, limit: u32| -> Vec<i64> {
+        entries(&case, &q, limit, 0)
             .unwrap()
             .items
             .into_iter()
             .map(|e| e.id)
             .collect()
     };
-    let recent = ids(EntryQuery {
+    let recent = || EntryQuery {
         order: Some(EntryOrder::Recent),
         ..Default::default()
-    });
-    assert_eq!(recent[0], early);
-    assert_eq!(recent.len(), 3);
-    let timeline = ids(EntryQuery::default());
-    assert_eq!(*timeline.last().unwrap(), undated);
-    assert_ne!(timeline, recent);
-    assert!(timeline.contains(&late));
-    // The order is applied before the page: one row of the recent order is the newest.
-    let first = entries(
-        &case,
-        &EntryQuery {
-            order: Some(EntryOrder::Recent),
-            ..Default::default()
-        },
-        1,
-        0,
-    )
-    .unwrap();
-    assert_eq!(first.items[0].id, early);
+    };
+    assert!(late < tied);
+    // Newest change first (early, then undated), then the tied pair by id descending.
+    assert_eq!(ids(recent(), 100), [early, undated, tied, late]);
+    // The Timeline's order is unchanged: dated by time, the undated last by id.
+    let timeline = ids(EntryQuery::default(), 100);
+    assert_eq!(timeline[2..], [undated, tied]);
+    // The order is applied before the page.
+    assert_eq!(ids(recent(), 1), [early]);
+    drop(d);
 }

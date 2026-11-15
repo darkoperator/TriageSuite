@@ -869,3 +869,49 @@ describe("fix round 1", () => {
     expect(within(dialog).getByRole("textbox", { name: "Tag" })).not.toHaveAttribute("maxlength");
   });
 });
+
+describe("fix round 2", () => {
+  it("the_grouped_strip_lists_only_its_live_keys", async () => {
+    const user = await openShell();
+    const strip = () => screen.getByLabelText("Keys").textContent;
+    fireEvent.contextMenu(header("Channel"));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Group by this column" }));
+    await waitFor(() => expect(strip()).toBe("S suspicious · U clear mark · M malicious → timeline · T tag · N note · A attach · I add as IOC · Ctrl+[ Ctrl+] panes"));
+    // Ungrouped again, the flat grid's keys come back.
+    await user.click(screen.getByRole("button", { name: "Remove grouping Channel" }));
+    await waitFor(() => expect(strip()).toContain("Space full value · Enter row detail · Ctrl+C copy · Ctrl+Shift+C copy rows"));
+  });
+
+  it("a_grouped_i_read_for_another_column_is_dropped_and_cancelled", async () => {
+    // Every cell is clipped, so I reads the whole value; the read is held while the focus moves to another column.
+    overrideCommand("grid_page", async (args) => {
+      const page = (await mockCall("grid_page", args)) as GridPage;
+      return { ...page, cells: page.cells.map((row) => row.map((c) => (c === null ? c : { ...c, clipped: true }))) };
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("cell_value", async (args) => {
+      await gate;
+      return { text: `whole ${(args as { column: string }).column}`, parts: [] };
+    });
+    const grouped: Tab = {
+      id: "scoped:grouped", kind: "dataset", relation: "mock_events", title: "grouped",
+      seed: { state: initialGridState("mock_events"), by: ["Channel"] },
+    };
+    const { user } = await mountGrid(grouped);
+    await user.click((await screen.findAllByRole("button", { name: /^Expand Channel/ }))[0]);
+    await waitFor(() => expect(document.querySelectorAll("[data-kind='row']").length).toBeGreaterThan(2));
+    const first = document.querySelector<HTMLElement>("[data-kind='row']")!;
+    await user.click(within(first).getAllByRole("gridcell")[2]);
+    await user.keyboard("i");
+    await waitFor(() => expect(callsOf("cell_value")).toHaveLength(1));
+    const id = queryIdOf("cell_value");
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(cancelledIds()).toContain(id));
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.queryByRole("dialog", { name: "Add IOC" })).toBeNull();
+  });
+});

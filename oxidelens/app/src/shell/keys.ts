@@ -30,9 +30,11 @@ const CELL_KEYS: KeyLine = [
 ];
 const PANE_KEYS: KeyLine = [["Ctrl+[ Ctrl+]", "panes"]];
 
-/** The keys live on a tab of `kind`, in the order the key strip shows them: only what works there. */
-export function keyStrip(kind: "overview" | "dataset" | "merged" | null): KeyLine {
+/** The keys live on a tab of `kind`, in the order the key strip shows them: only what works there. A grouped grid
+ *  (`grouped`) takes the row keys and I on its focused data row, and none of the flat grid's cell keys. */
+export function keyStrip(kind: "overview" | "dataset" | "merged" | "grouped" | null): KeyLine {
   if (kind === "dataset") return [...ROW_KEYS, ...CELL_KEYS, ...PANE_KEYS];
+  if (kind === "grouped") return [...ROW_KEYS, CELL_KEYS[0], ...PANE_KEYS];
   if (kind === "merged") return [...ROW_KEYS, ...PANE_KEYS];
   return PANE_KEYS;
 }

@@ -55,6 +55,8 @@ export interface ShellContext {
   clearPendingRow?(): void;
   /** What the status bar's grid-status area shows (rows, filters, hidden columns...); `null` clears it. */
   setGridStatus(node: ReactNode): void;
+  /** The shown dataset tab is grouped (true) or flat: the key strip lists only the keys live on it. */
+  setGrouped?(grouped: boolean): void;
   /** What the right pane shows (row detail); `null` shows its empty hint. */
   setRightPane(node: ReactNode): void;
   /** What the right pane currently holds. */
