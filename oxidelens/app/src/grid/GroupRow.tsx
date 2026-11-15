@@ -6,6 +6,7 @@ import type { Virtualizer } from "@tanstack/react-virtual";
 import type { ReactNode } from "react";
 import { displaySafe } from "../text";
 import { CellText } from "./GridBody";
+import MarkGlyph from "../records/MarkGlyph";
 import { MARK_WIDTH } from "./GridHeader";
 import { MARK_COLUMN } from "./chips";
 import { GROUP_PAGE, type Item, type Key } from "./groupTree";
@@ -100,11 +101,7 @@ export default function GroupBody(p: GroupBodyProps): ReactNode {
                 style={style}
               >
                 <div role="gridcell" className="cell cell-mark" style={{ width: MARK_WIDTH }}>
-                  {mark === "suspicious" && (
-                    <span className="mark-suspicious" role="img" aria-label="suspicious">
-                      ●
-                    </span>
-                  )}
+                  <MarkGlyph mark={mark} />
                 </div>
                 {p.widths.map((w, c) => {
                   const at = item.page.columns.findIndex((col) => col.name === p.names[c]);

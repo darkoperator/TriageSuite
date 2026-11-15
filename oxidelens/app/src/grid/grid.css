@@ -27,6 +27,8 @@
 .grid-row .cell-mark { background: var(--bg); }
 .grid-row.row-odd .cell-mark { background: var(--bg); }
 .mark-suspicious { color: var(--suspicious); }
+.mark-malicious { color: var(--malicious); }
+.mark-agent { color: var(--agent); }
 
 /* Colour rules. The classes are the fixed set of ruleClasses.ts; no value from the data reaches a style. A row rule is a
    faint wash (a background-image over whatever the row's own state paints, so selection and hover still show) and a 3 px

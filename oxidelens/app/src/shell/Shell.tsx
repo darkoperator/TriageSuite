@@ -24,6 +24,8 @@ import KeyStrip from "./KeyStrip";
 import LeftPane from "./LeftPane";
 import { useShellKeys } from "./keys";
 import Rail from "./Rail";
+import type { MarkState } from "../contract/generated/MarkState";
+import { MARK_NAME } from "../records/MarkGlyph";
 import RightPane from "./RightPane";
 import TabPanel from "./TabPanel";
 import StatusBar from "./StatusBar";
@@ -366,6 +368,12 @@ export default function Shell() {
     });
   }, []);
 
+  // A mark count in the left pane: the worklist of every row with that mark, across the datasets (a merged tab).
+  const openWorklist = useCallback((mark: MarkState) => {
+    const source = { marked: { marks: [mark] } };
+    setTabs((t) => openScoped(t, { id: `worklist:${mark}`, kind: "merged", relation: null, title: `${MARK_NAME[mark]} rows`, merged: { source } }));
+  }, []);
+
   // ---- panes ------------------------------------------------------------------------------------------------------
   const togglePane = useCallback(
     (side: "left_pane" | "right_pane") => {
@@ -422,7 +430,6 @@ export default function Shell() {
   const titleOf = (id: string) => (id === OVERVIEW_ID ? "Overview" : (tabs.tabs.find((t) => t.id === id)?.title ?? tabs.tabs.find((t) => t.id === id)?.relation ?? id));
   const left = settings!.left_pane;
   const right = settings!.right_pane;
-  const suspicious = summary.mark_counts.suspicious;
 
   return (
     <ShellCtx.Provider value={ctx}>
@@ -445,9 +452,9 @@ export default function Shell() {
         )}
         <div className="shell-main">
           {left === "open" ? (
-            <LeftPane summary={summary} sessions={sessions} onOpenDataset={openTab} onOpenSession={openSession} onCollapse={() => togglePane("left_pane")} />
+            <LeftPane summary={summary} sessions={sessions} onOpenDataset={openTab} onOpenSession={openSession} onOpenWorklist={openWorklist} onCollapse={() => togglePane("left_pane")} />
           ) : (
-            <Rail side="left" suspicious={suspicious} onExpand={() => togglePane("left_pane")} />
+            <Rail side="left" counts={summary.mark_counts} onExpand={() => togglePane("left_pane")} />
           )}
           <div className="shell-center">
             <TabStrip
@@ -471,7 +478,7 @@ export default function Shell() {
           {right === "open" ? (
             <RightPane onCollapse={() => togglePane("right_pane")} />
           ) : (
-            <Rail side="right" suspicious={suspicious} onExpand={() => togglePane("right_pane")} />
+            <Rail side="right" counts={summary.mark_counts} onExpand={() => togglePane("right_pane")} />
           )}
         </div>
         <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />

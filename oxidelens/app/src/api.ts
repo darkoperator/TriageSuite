@@ -145,6 +145,8 @@ export const sessions = (slot: string, queryId = newQueryId()) =>
 export const hostZones = (slot: string, queryId = newQueryId()) =>
   call<CommandResult["host_zones"]>("host_zones", { queryId, slot } satisfies Args<"host_zones">);
 export const zoneNames = () => call<CommandResult["zone_names"]>("zone_names");
+/** The IOC type the engine guesses for `value` (the I key preselects it; the analyst confirms), or null. No case needed. */
+export const iocGuess = (value: string) => call<CommandResult["ioc_guess"]>("ioc_guess", { value } satisfies Args<"ioc_guess">);
 export const displayZoneSet = (zone: string) =>
   call<CommandResult["display_zone_set"]>("display_zone_set", { zone } satisfies Args<"display_zone_set">);
 

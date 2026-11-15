@@ -138,6 +138,7 @@ const OTHER_NON_READS: &[&str] = &[
     "load_run",
     "load_file",
     "zone_names",
+    "ioc_guess",
     "display_zone_set",
     "view_save",
     "view_delete",

@@ -137,6 +137,9 @@ pub struct EntryQuery {
     pub tactic: Option<String>,
     /// In the title or description, case ignored.
     pub text: Option<String>,
+    /// Holding row `row` (its `_ox_row`) as evidence: the entries a row's
+    /// detail lists.
+    pub row: Option<i64>,
 }
 
 /// An entry as stored, deleted or not: what history records and what a
@@ -763,6 +766,13 @@ pub fn entries(case: &Case, q: &EntryQuery, limit: u32, offset: u64) -> Result<L
         );
         params.push(SqlValue::Text(text.clone()));
         params.push(SqlValue::Text(text.clone()));
+    }
+    if let Some(row) = q.row {
+        filters.push(
+            "EXISTS (SELECT 1 FROM ox.evidence ev WHERE ev.entry_id = e.id AND ev.row_id = ?)"
+                .to_string(),
+        );
+        params.push(SqlValue::BigInt(row));
     }
     if !has_records(case) {
         return Ok(Listing {

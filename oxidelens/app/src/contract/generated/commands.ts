@@ -25,6 +25,7 @@ import type { GroupView } from "./GroupView";
 import type { Histogram } from "./Histogram";
 import type { HistoryRow } from "./HistoryRow";
 import type { HostZone } from "./HostZone";
+import type { IocType } from "./IocType";
 import type { JobFinished } from "./JobFinished";
 import type { JobStarted } from "./JobStarted";
 import type { Listing } from "./Listing";
@@ -68,6 +69,7 @@ export const COMMANDS = [
   "sessions",
   "host_zones",
   "zone_names",
+  "ioc_guess",
   "display_zone_set",
   "grid_page",
   "grid_counts",
@@ -154,6 +156,7 @@ export type CommandArgs = {
   sessions: { queryId: string; slot: string };
   host_zones: { queryId: string; slot: string };
   zone_names: Record<string, never>;
+  ioc_guess: { value: string };
   display_zone_set: { zone: string };
   grid_page: { queryId: string; slot: string; state: GridState; limit: number; offset: number; options: PageOptions };
   grid_counts: { queryId: string; slot: string; state: GridState };
@@ -237,6 +240,7 @@ export type CommandResult = {
   sessions: Array<Session>;
   host_zones: Array<HostZone>;
   zone_names: Array<string>;
+  ioc_guess: IocType | null;
   display_zone_set: null;
   grid_page: GridPage;
   grid_counts: GridCounts;

@@ -6,6 +6,7 @@ import type { MouseEvent, ReactNode } from "react";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { GridCell } from "../contract/generated/GridCell";
 import { displaySafe } from "../text";
+import MarkGlyph from "../records/MarkGlyph";
 import { MARK_WIDTH } from "./GridHeader";
 import { cellRuleClass, rowRuleClass } from "./ruleClasses";
 import type { GridRow } from "./useGridData";
@@ -82,11 +83,7 @@ export default function GridBody(p: GridBodyProps): ReactNode {
               style={{ width: MARK_WIDTH }}
               onClick={(e) => row && p.onCellClick(e, v.index, p.focus?.col ?? 0)}
             >
-              {row?.mark === "suspicious" && (
-                <span className="mark-suspicious" role="img" aria-label="suspicious">
-                  ●
-                </span>
-              )}
+              <MarkGlyph mark={row?.mark} />
             </div>
             {p.widths.map((w, c) => {
               const cell = p.cellIdx[c] >= 0 ? row?.cells[p.cellIdx[c]] : undefined;

@@ -1,0 +1,18 @@
+/* The record dialogs (T, N, A, I) and the entry card, on the theme tokens only. The mark colours are the grid's
+   `.mark-*` classes; nothing here uses the reserved mark colours. */
+.record-dialog { display: flex; flex-direction: column; width: min(460px, 94vw); max-height: 80vh; background: var(--card); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-pop); font: var(--ui-font); outline: none; }
+.record-dialog-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding: 8px 12px; }
+.record-dialog > .form-error { padding: 4px 12px 8px; }
+.record-picks { display: flex; flex-wrap: wrap; gap: 4px; }
+.record-picks .tag { border: 0; cursor: pointer; font: inherit; }
+.record-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; }
+.record-option { display: flex; gap: 8px; align-items: baseline; width: 100%; padding: 3px 6px; text-align: left; background: none; border: 1px solid transparent; border-radius: 4px; color: var(--text); font: inherit; cursor: pointer; }
+.record-option:hover, .record-option:focus { background: var(--accent-soft); border-color: var(--accent); outline: none; }
+.record-id { flex: none; color: var(--accent-text); font: var(--cell-font); }
+.record-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.record-meta { flex: none; color: var(--muted); font: var(--cell-font); }
+.entry-card { display: flex; flex-direction: column; gap: 6px; }
+.entry-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; }
+.entry-facts dt { color: var(--muted); }
+.entry-facts dd { margin: 0; overflow-wrap: anywhere; }
+.entry-description { white-space: pre-wrap; }

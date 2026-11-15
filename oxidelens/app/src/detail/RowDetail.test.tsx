@@ -145,7 +145,7 @@ describe("row detail", () => {
       </ShellCtx.Provider>,
     );
     await waitFor(() => expect(screen.getAllByRole("row").length).toBeGreaterThan(2));
-    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["", "Time", "Host", "Dataset", "Summary", ""]);
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["", "", "Time", "Host", "Dataset", "Summary", ""]);
     expect(callsOf("merged_page").at(-1)!.args).toMatchObject({ source: tab.merged!.source, zone: "UTC" });
     const first = screen.getAllByRole("row")[1];
     expect(within(first).getByText(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/)).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("row detail", () => {
     expect(await screen.findByText(/removed/i)).toBeInTheDocument();
   });
 
-  it("tags_and_notes_are_read_only", async () => {
+  it("tags_notes_and_the_mark_are_shown", async () => {
     viewOverride((v) => {
       v.detail.tags = ["lateral-movement"];
       v.detail.notes = [{ id: 1, row_id: 1, text: "seen on SRV01\nsecond line", written_by: "analyst:analyst01", written_at: "2026-01-06T10:00:00Z" }];
@@ -339,8 +339,10 @@ describe("row detail", () => {
     await mount();
     expect(await screen.findByText("lateral-movement")).toBeInTheDocument();
     expect(screen.getByText(/seen on SRV01/)).toBeInTheDocument();
-    expect(screen.getByText(/Suspicious/)).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    // Step 3 makes them editable (Marks.test.tsx): the mark is drawn with its glyph, and the tag and note boxes start empty.
+    expect(within(screen.getByRole("region", { name: "Marks" })).getByRole("img", { name: "suspicious" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "New tag" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "New note" })).toHaveValue("");
   });
 
   it("hostile_values_in_detail_render_inert", async () => {

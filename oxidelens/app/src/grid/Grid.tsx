@@ -26,7 +26,11 @@ import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import type { GridState } from "../contract/generated/GridState";
 import type { SearchState } from "../contract/generated/SearchState";
 import RowDetail from "../detail/RowDetail";
+import EntryCard from "../records/EntryCard";
+import { tooManyRows } from "../records/outcomes";
+import { useRowActions, type RowSource } from "../records/useRowActions";
 import { useShell } from "../shell/context";
+import { isTypingTarget } from "../shell/keys";
 import { displaySafe } from "../text";
 import type { TabBodyProps } from "../shell/slots";
 import AdvancedEditor from "./AdvancedEditor";
@@ -562,17 +566,25 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   // ---- the row detail: what the right pane shows while this tab is the active one ----------------------------------------
   // A single selection (a plain click) or Enter on the focused row shows that row; grouped lists have no rows to select.
+  // An entry (what M made, or one the row's detail links to) is shown in its place until another row is shown.
   const [detailRow, setDetailRow] = useState<number | null>(null);
+  const [detailEntry, setDetailEntry] = useState<number | null>(null);
+  const showRow = useCallback((rowId: number) => {
+    setDetailRow(rowId);
+    setDetailEntry(null);
+  }, []);
   const showDetailAt = (index: number) => {
     const row = rowAt(index);
-    if (row) setDetailRow(row.id);
+    if (row) showRow(row.id);
   };
   const detailNode = useMemo(
     () =>
-      detailRow === null ? null : (
-        <RowDetail rowId={detailRow} onFilter={(chip) => applyChips((chips) => [...chips, chip])} onShowRow={setDetailRow} />
+      detailEntry !== null ? (
+        <EntryCard entryId={detailEntry} onBack={detailRow === null ? null : () => setDetailEntry(null)} />
+      ) : detailRow === null ? null : (
+        <RowDetail rowId={detailRow} onFilter={(chip) => applyChips((chips) => [...chips, chip])} onShowRow={showRow} onShowEntry={setDetailEntry} />
       ),
-    [detailRow, applyChips],
+    [detailRow, detailEntry, applyChips, showRow],
   );
   useEffect(() => {
     if (!active) return;
@@ -591,7 +603,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const stateKey = useMemo(() => stableKey(state), [state]);
   const reveal = useCallback(
     async (rowId: number) => {
-      setDetailRow(rowId);
+      showRow(rowId);
       setHidden(null);
       setScrollTarget(null);
       const seq = ++revealSeq.current; // a newer request supersedes any older one still answering or waiting
@@ -608,7 +620,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         if (!(isCmdError(e) && (e.code === "superseded" || e.code === "interrupted" || e.code === "no_case"))) reportError(e);
       }
     },
-    [by.length, tab.id, reportError],
+    [by.length, tab.id, reportError, showRow],
   );
   useEffect(() => {
     if (pendingRow && pendingRow.tabId === tab.id) {
@@ -795,9 +807,56 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     gridRef.current?.focus();
   }, []);
 
+  // ---- the row keys (S, U, M, T, N, A, I) ------------------------------------------------------------------------------
+  // They act on the selection (or, with none, the focused row), resolved to row ids before anything is written: the ids
+  // the selection already holds, the rows in memory, or `grid_row_ids` under the state the indexes belong to. A
+  // selection past `MAX_ACTION_ROWS` is refused here, before any round trip; an answer that comes after the state or the
+  // selection changed acts on nothing.
+  const focusRef = useRef(focus);
+  useEffect(() => {
+    focusRef.current = focus;
+  });
+  const rowSource: RowSource = {
+    rows: async () => {
+      const sel = selectionRef.current;
+      const f = focusRef.current;
+      const picked = size(sel) > 0 ? sel : f ? selectOnly(f.row) : null;
+      if (picked === null) return null;
+      const n = size(picked);
+      if (n > MAX_ACTION_ROWS) return { refused: tooManyRows(n) };
+      if (picked.ids !== null) return picked.ids;
+      const inMemory = known(picked);
+      if (inMemory !== null) return inMemory;
+      const key = shownKeyRef.current;
+      const ranges = picked.ranges.map(([a, b]): [number, number] => [a, b]);
+      const ids = await gridRowIds(shownStateRef.current, ranges, `tab:${tab.id}:action`);
+      return shownKeyRef.current === key && selectionRef.current === sel ? ids : null;
+    },
+    noteRow: () => {
+      const f = focusRef.current;
+      if (f) return rowAt(f.row)?.id ?? null;
+      const sel = selectionRef.current;
+      if (size(sel) !== 1) return null;
+      return sel.ids?.[0] ?? known(sel)?.[0] ?? null;
+    },
+    cellValue: async () => {
+      const f = focusRef.current;
+      if (!f) return null;
+      const row = rowAt(f.row);
+      const column = names[f.col];
+      const cell = row?.cells[cellIdx[f.col]];
+      if (!row || !cell || column === undefined) return null;
+      if (!cell.clipped) return cell.text ?? "";
+      const session = beginCopy();
+      const text = await session.value(row.id, column);
+      return session.alive() ? (text ?? "") : null;
+    },
+  };
+  const rowActions = useRowActions(rowSource, { report: reportError, onEntry: setDetailEntry, enabled: active });
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
-    if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return;
+    if (isTypingTarget(t) || t.tagName === "INPUT") return;
     // The shortcuts below work on the flat list's offsets; the group list has its own (buttons, native Space and Enter).
     if (grouped) return;
     const height = scrollRef.current?.clientHeight ?? 0;
@@ -809,6 +868,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       else copyCell();
       return;
     }
+    if (rowActions.onKey(e)) return;
     switch (e.key) {
       case "F3": e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); break;
       case " ":
@@ -1228,6 +1288,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
           onClose={() => setRulesOpen(false)}
         />
       )}
+      {rowActions.dialog}
       {viewer && (
         <ValueViewer tabId={tab.id} rowId={viewer.rowId} column={viewer.column} onClose={closeViewer} onError={reportError} />
       )}

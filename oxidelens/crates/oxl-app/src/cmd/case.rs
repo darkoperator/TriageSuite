@@ -113,6 +113,13 @@ pub fn zone_names() -> Vec<String> {
         .collect()
 }
 
+/// The IOC type the I key preselects for `value`: the engine's
+/// `guess_ioc_type` (the first type it validates as), or `None`. A rule of
+/// the engine's, asked with no case and no query; the analyst confirms.
+pub fn ioc_guess(value: &str) -> Option<oxl_engine::IocType> {
+    oxl_engine::guess_ioc_type(value)
+}
+
 /// Set the case's display zone; `case-changed` with `display_zone`.
 pub fn display_zone_set(state: &AppState, zone: &str) -> Result<(), CmdError> {
     let actor = state.actor();
@@ -170,6 +177,11 @@ pub mod commands {
     #[tauri::command(async)]
     pub fn zone_names() -> Vec<String> {
         super::zone_names()
+    }
+
+    #[tauri::command(async)]
+    pub fn ioc_guess(value: String) -> Option<oxl_engine::IocType> {
+        super::ioc_guess(&value)
     }
 
     #[tauri::command(async)]

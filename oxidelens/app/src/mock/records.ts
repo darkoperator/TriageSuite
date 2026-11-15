@@ -245,6 +245,7 @@ export function entriesList(r: MockRecords, q: EntryQuery, limit: number, offset
     .filter((e) => !q.host || e.hosts.some((h) => h.toLowerCase() === q.host!.toLowerCase()))
     .filter((e) => !q.tactic || e.tactic === q.tactic)
     .filter((e) => !text || e.title.toLowerCase().includes(text) || e.description.toLowerCase().includes(text))
+    .filter((e) => q.row === null || q.row === undefined || (r.evidence.get(e.id) ?? []).some((ev) => ev.row_id === q.row))
     .sort(timelineOrder);
   return page(all, limit, offset);
 }
@@ -291,6 +292,22 @@ export function tagsList(r: MockRecords, limit: number, offset: number): Listing
     }
   }
   return page([...byName.values()].sort((x, y) => (x.name < y.name ? -1 : 1)), limit, offset);
+}
+
+/** A row's tags, sorted, as the row detail lists them. */
+export const rowTags = (r: MockRecords, rowId: number): string[] => [...(r.tags.get(rowId)?.keys() ?? [])].sort();
+
+/** The I key's guess, roughly as the engine's `guess_ioc_type` makes it (hashes, an IPv4 address, a URL, an email, a
+ *  domain); the engine's own rule is tested in Rust. */
+export function guessIocType(value: string): IocRecord["ioc_type"] | null {
+  if (/^[0-9a-f]{64}$/i.test(value)) return "sha256";
+  if (/^[0-9a-f]{40}$/i.test(value)) return "sha1";
+  if (/^[0-9a-f]{32}$/i.test(value)) return "md5";
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return "ip";
+  if (/^(https?|ftp):\/\/[^/\s]+/i.test(value)) return "url";
+  if (/^[^@\s]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(value)) return "email";
+  if (/^[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+$/.test(value)) return "domain";
+  return null;
 }
 
 export const notesList = (r: MockRecords, rowId: number, limit: number, offset: number): Listing<Note> =>
@@ -397,9 +414,20 @@ export function derivedMark(r: MockRecords, rowId: number): MarkState | null {
 /** The rows that are evidence on `entry`. */
 export const evidenceRows = (r: MockRecords, entry: number): number[] => (r.evidence.get(entry) ?? []).map((e) => e.row_id);
 
+/** The live analyst's (or reviewed) entry row `rowId` is evidence on, which S and U refuse it for (S2). */
+function analystHolder(r: MockRecords, rowId: number): number | null {
+  for (const [entry, held] of r.evidence) {
+    const e = r.entries.get(entry);
+    if (e && (!e.agent_added || e.status === "reviewed") && held.some((x) => x.row_id === rowId)) return entry;
+  }
+  return null;
+}
+
 export function markSet(r: MockRecords, rows: Rows, ids: number[], set: boolean): RowOutcome[] {
   return ids.map((row_id) => {
     if (!rows.facts(row_id)) return { row_id, done: false, reason: `no row ${row_id}` };
+    const holder = analystHolder(r, row_id);
+    if (holder !== null) return { row_id, done: false, reason: `evidence on entry E-${holder}; detach it there` };
     if (set) r.suspicious.add(row_id);
     else r.suspicious.delete(row_id);
     return { row_id, done: true, reason: null };

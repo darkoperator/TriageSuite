@@ -10,8 +10,15 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   return !["button", "checkbox", "radio", "submit", "reset", "range", "color", "file", "image"].includes(type);
 }
 
-/** The keys live in step 2, in the order the key strip shows them. */
+/** The keys live in step 3, in the order the key strip shows them (F and K arrive in step 4). */
 export const KEY_STRIP: ReadonlyArray<readonly [string, string]> = [
+  ["S", "suspicious"],
+  ["U", "clear mark"],
+  ["M", "malicious → timeline"],
+  ["T", "tag"],
+  ["N", "note"],
+  ["A", "attach"],
+  ["I", "add as IOC"],
   ["Space", "full value"],
   ["Enter", "row detail"],
   ["Ctrl+C", "copy"],

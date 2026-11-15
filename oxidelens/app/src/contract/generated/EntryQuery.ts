@@ -21,4 +21,9 @@ tactic: string | null,
 /**
  * In the title or description, case ignored.
  */
-text: string | null, };
+text: string | null, 
+/**
+ * Holding row `row` (its `_ox_row`) as evidence: the entries a row's
+ * detail lists.
+ */
+row: number | null, };

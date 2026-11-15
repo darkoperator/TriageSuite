@@ -898,6 +898,41 @@ fn entries_filter_by_status_host_tactic_and_text() {
     );
 }
 
+#[test]
+fn entries_filter_by_an_evidence_row() {
+    let (_d, mut case) = loaded();
+    let row = n(&case, FAILED_LOGON_WS01);
+    let other = n(&case, SHARE_SRV01);
+    let first = promote(&mut case, row, &analyst());
+    let second = new_entry(&mut case, &titled("Second look"), &analyst())
+        .unwrap()
+        .id;
+    let unrelated = promote(&mut case, other, &analyst());
+    attach_rows(&mut case, second, &[row], &analyst()).unwrap();
+    let ids = |case: &Case, row: i64| -> Vec<i64> {
+        let q = EntryQuery {
+            row: Some(row),
+            ..Default::default()
+        };
+        entries(case, &q, 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|e| e.id)
+            .collect()
+    };
+    // Every live entry holding the row, and no other: the unrelated entry holds a different row.
+    let mut both = ids(&case, row);
+    both.sort_unstable();
+    assert_eq!(both, [first, second]);
+    assert_eq!(ids(&case, other), [unrelated]);
+    // A detached row and a deleted entry drop out.
+    detach_row(&mut case, second, row, &analyst()).unwrap();
+    assert_eq!(ids(&case, row), [first]);
+    delete_entry(&mut case, first, &analyst()).unwrap();
+    assert!(ids(&case, row).is_empty());
+}
+
 /// The written time an undated entry quotes is kept whole up to the
 /// description's own bound; only what would pass `MAX_DESCRIPTION` is cut,
 /// and the description says so.

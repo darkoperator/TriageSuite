@@ -4,7 +4,6 @@
 .detail-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .detail-rel { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
 .detail-rowid { color: var(--muted); font: var(--cell-font); }
-.detail-mark { color: var(--suspicious); background: var(--suspicious-bg); border-radius: 3px; padding: 0 6px; }
 .detail-banner { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; margin: 0 0 8px; padding: 6px 8px; border-radius: 4px; background: var(--suspicious-bg); color: var(--text); }
 .detail-fields { margin: 0; }
 .field { padding: 3px 0; border-top: 1px solid var(--line); }
@@ -34,3 +33,9 @@
 .note { margin: 4px 0; padding: 4px 6px; background: var(--card); border-radius: 4px; }
 .note-meta { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-meta { display: flex; justify-content: space-between; gap: 6px; }
+.note-delete, .tag-remove { background: none; border: 0; padding: 0 2px; color: var(--muted); cursor: pointer; font: inherit; }
+.detail-mark-line { margin: 2px 0 6px; }
+.detail-add { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; }
+.detail-add input, .detail-add textarea { flex: 1; min-width: 0; }
+.detail-entries { margin: 0; padding: 0; list-style: none; }

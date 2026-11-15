@@ -544,6 +544,7 @@ const handlers: Handlers = {
   sessions: (a) => read(a.slot, a.queryId, () => fx.sessions()),
   host_zones: (a) => read(a.slot, a.queryId, () => fx.hostZones()),
   zone_names: () => ["America/New_York", "Asia/Tokyo", "Etc/UTC", "Europe/London", "UTC"],
+  ioc_guess: (a) => rec.guessIocType(a.value),
   display_zone_set: (a) =>
     write(["display_zone"], () => {
       theCase().displayZone = a.zone;
@@ -758,7 +759,8 @@ const handlers: Handlers = {
         detail: {
           row_id: a.rowId, standing: "active", current_row: null, relation: rel.info.name, source_id: 1, host: row[hostIx],
           hash: a.rowId.toString(16).padStart(64, "0"), active: true, fields: cells, mark: theCase().marks.get(a.rowId) ?? null,
-          marked_by: theCase().marks.has(a.rowId) ? "analyst:analyst01" : null, tags: [], notes: [],
+          marked_by: theCase().marks.has(a.rowId) ? "analyst:analyst01" : null,
+          tags: rec.rowTags(theCase().records, a.rowId), notes: rec.notesList(theCase().records, a.rowId, 1000, 0).items,
           evidence_path: fileIx >= 0 ? row[fileIx] : null, output_file: row[outIx],
         },
         fields: rel.columns.map((meta, i) => ({ meta, text: row[i], display: isUtc(meta) && row[i] !== null ? `${shown(meta, row[i])} Z` : null, failed: false })),

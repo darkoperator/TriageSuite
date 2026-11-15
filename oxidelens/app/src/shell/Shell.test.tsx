@@ -159,7 +159,8 @@ describe("the open case", () => {
     expect(within(left).getByText("Sessions")).toBeInTheDocument();
     expect(within(left).getByRole("button", { name: /mock_hayabusa/ })).toBeInTheDocument();
     expect(screen.getByLabelText("Keys").textContent).toBe(
-      "Space full value · Enter row detail · Ctrl+C copy · Ctrl+Shift+C copy rows · Ctrl+[ Ctrl+] panes",
+      "S suspicious · U clear mark · M malicious → timeline · T tag · N note · A attach · I add as IOC · " +
+        "Space full value · Enter row detail · Ctrl+C copy · Ctrl+Shift+C copy rows · Ctrl+[ Ctrl+] panes",
     );
     expect(screen.getByRole("complementary", { name: "Row detail" })).toBeInTheDocument();
   });

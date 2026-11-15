@@ -34,11 +34,14 @@ kbd { font: var(--cell-font); color: var(--text-2); background: var(--raised); b
 .pane-empty { margin: 2px 4px; color: var(--faint); }
 .pane-body { padding: 8px 10px; }
 .mark-suspicious { color: var(--suspicious); }
+.mark-malicious { color: var(--malicious); }
+.mark-agent { color: var(--agent); }
 
 .rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 6px; flex: none; box-sizing: border-box; background: var(--surface); border-right: 1px solid var(--line); }
 .rail[data-side="right"] { border-right: 0; border-left: 1px solid var(--line); }
 .rail-button { padding: 0 4px; }
-.rail-count { color: var(--suspicious); font: var(--cell-font); }
+.rail-count { display: flex; flex-direction: column; align-items: center; font: var(--cell-font); }
+.pane-item-marks { flex: none; margin-left: auto; font: var(--cell-font); }
 
 .tab-strip { display: flex; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .tab { display: inline-flex; align-items: center; border-right: 1px solid var(--line); }

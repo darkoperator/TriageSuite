@@ -35,10 +35,10 @@ use crate::settings::{DamagedSettings, Settings, SettingsReply};
 use oxl_engine::{
     AppliedView, Candidate, CellValue, Chip, ColourRule, ColumnMeta, Entry, EntryQuery,
     EntryStatus, Evidence, ExportReport, FileOptions, GridCounts, GridPage, GridState, GroupView,
-    Histogram, HistoryRow, HostZone, Listing, LoadReport, LogonSummary, MatchPos, MatchingView,
-    MergedSource, MergedView, Note, PageOptions, PromoteOutcome, RecordKind, RecordStatus,
-    RowOutcome, RowView, SavedView, Session, Sightings, TagInfo, ValueCount, ValueOrder, ViewDoc,
-    ViewKind, ViewListing, WindowTotal,
+    Histogram, HistoryRow, HostZone, IocType, Listing, LoadReport, LogonSummary, MatchPos,
+    MatchingView, MergedSource, MergedView, Note, PageOptions, PromoteOutcome, RecordKind,
+    RecordStatus, RowOutcome, RowView, SavedView, Session, Sightings, TagInfo, ValueCount,
+    ValueOrder, ViewDoc, ViewKind, ViewListing, WindowTotal,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -58,6 +58,7 @@ pub const COMMANDS: &[&str] = &[
     "sessions",
     "host_zones",
     "zone_names",
+    "ioc_guess",
     "display_zone_set",
     "grid_page",
     "grid_counts",
@@ -244,6 +245,7 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         read!(c, sessions() -> Vec<Session>),
         read!(c, host_zones() -> Vec<HostZone>),
         cmd!(c, zone_names() -> Vec<String>),
+        cmd!(c, ioc_guess(value: String) -> Option<IocType>),
         cmd!(c, display_zone_set(zone: String) -> ()),
         read!(
             c,

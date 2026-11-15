@@ -208,6 +208,19 @@ fn zone_names_start_with_utc() {
     assert!(names.iter().any(|n| n == NY));
 }
 
+/// The I key's preselected type is the engine's `guess_ioc_type`, asked
+/// with no case open: a hash, an address and an email each come back as
+/// their type, and text that validates as none of them as no guess.
+#[test]
+fn ioc_guess_answers_the_engines_guess() {
+    use oxl_engine::IocType;
+    let sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    assert_eq!(case::ioc_guess(sha256), Some(IocType::Sha256));
+    assert_eq!(case::ioc_guess("203.0.113.7"), Some(IocType::Ip));
+    assert_eq!(case::ioc_guess("jdoe@acme.local"), Some(IocType::Email));
+    assert_eq!(case::ioc_guess("not an indicator at all"), None);
+}
+
 #[test]
 fn display_zone_set_is_a_write() {
     let l = loaded();
