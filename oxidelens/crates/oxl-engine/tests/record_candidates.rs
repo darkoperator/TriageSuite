@@ -6,6 +6,7 @@
 mod common;
 
 use common::{analyst, n};
+use duckdb::types::Value as SqlValue;
 use oxl_engine::{
     candidates, delete_record, load_run, upsert_account, upsert_ioc, AccountSpec, Candidate, Case,
     IocSpec, IocType, RecordKind,
@@ -121,13 +122,13 @@ fn an_event_remote_host_offers_the_ip_in_its_parentheses() {
     let mut case = oxl_fixtures::new_case(d.path());
     load_run(&mut case, &run, &analyst()).unwrap();
     let remote = |i: u32| -> Vec<Candidate> {
-        let rows = of(
-            &case,
-            &format!(
-                r"select _ox_row from evtxtriage_events where PayloadData1 = 'Target: ACME\svc{i}'"
-            ),
-        );
-        from(&rows, "RemoteHost")
+        let row = case
+            .scalar_i64_with(
+                "select _ox_row from evtxtriage_events where PayloadData1 = ?",
+                &[SqlValue::Text(format!(r"Target: ACME\svc{i}"))],
+            )
+            .unwrap();
+        from(&candidates(&case, row).unwrap(), "RemoteHost")
     };
     // `NAME (IP)`, as EvtxECmd's logon maps write it: the address.
     assert_eq!(
@@ -153,18 +154,18 @@ fn an_event_remote_host_offers_the_ip_in_its_parentheses() {
 #[test]
 fn an_amcache_file_entry_sha1_is_a_sha1() {
     let (_d, case) = loaded();
-    for (relation, sha1) in [
+    for (select, sha1) in [
         (
-            "amcachetriage_unassociated_file_entries",
+            "select _ox_row from amcachetriage_unassociated_file_entries",
             "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
         ),
         (
-            "amcachetriage_associated_file_entries",
+            "select _ox_row from amcachetriage_associated_file_entries",
             "3c363836cf4e16666669a25da280a1865c2d2874",
         ),
     ] {
-        let rows = of(&case, &format!("select _ox_row from {relation}"));
-        assert_eq!(rows, vec![ioc(IocType::Sha1, sha1, "SHA1")], "{relation}");
+        let rows = of(&case, select);
+        assert_eq!(rows, vec![ioc(IocType::Sha1, sha1, "SHA1")], "{select}");
     }
 }
 
@@ -421,16 +422,16 @@ fn candidates_add_nothing() {
     let (_d, case) = loaded();
     let counts = |case: &Case| -> Vec<i64> {
         [
-            "ox.account",
-            "ox.ioc",
-            "ox.host",
-            "ox.entry",
-            "ox.entry_account",
-            "ox.entry_ioc",
-            "ox.history",
+            "select count(*) from ox.account",
+            "select count(*) from ox.ioc",
+            "select count(*) from ox.host",
+            "select count(*) from ox.entry",
+            "select count(*) from ox.entry_account",
+            "select count(*) from ox.entry_ioc",
+            "select count(*) from ox.history",
         ]
         .iter()
-        .map(|t| n(case, &format!("select count(*) from {t}")))
+        .map(|sql| n(case, sql))
         .collect()
     };
     let before = counts(&case);
