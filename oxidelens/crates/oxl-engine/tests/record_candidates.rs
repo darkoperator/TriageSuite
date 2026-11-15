@@ -115,6 +115,42 @@ fn an_event_remote_host_is_an_ip_when_it_is_one() {
 }
 
 #[test]
+fn an_event_remote_host_offers_the_ip_in_its_parentheses() {
+    let d = tempfile::tempdir().unwrap();
+    let run = oxl_fixtures::remote_hosts_run(&d.path().join("run"));
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_run(&mut case, &run, &analyst()).unwrap();
+    let remote = |i: u32| -> Vec<Candidate> {
+        let rows = of(
+            &case,
+            &format!(
+                r"select _ox_row from evtxtriage_events where PayloadData1 = 'Target: ACME\svc{i}'"
+            ),
+        );
+        from(&rows, "RemoteHost")
+    };
+    // `NAME (IP)`, as EvtxECmd's logon maps write it: the address.
+    assert_eq!(
+        remote(1),
+        vec![ioc(IocType::Ip, "203.0.113.7", "RemoteHost")]
+    );
+    assert_eq!(
+        remote(2),
+        vec![ioc(IocType::Ip, "2001:db8::5", "RemoteHost")]
+    );
+    // A bare address offers itself.
+    assert_eq!(
+        remote(3),
+        vec![ioc(IocType::Ip, "198.51.100.9", "RemoteHost")]
+    );
+    // `- (-)`, a name with no address in its parentheses, and a bare name:
+    // nothing.
+    for i in [4, 5, 6] {
+        assert!(remote(i).is_empty(), "r{i}: {:?}", remote(i));
+    }
+}
+
+#[test]
 fn an_amcache_file_entry_sha1_is_a_sha1() {
     let (_d, case) = loaded();
     for (relation, sha1) in [
@@ -336,6 +372,48 @@ fn an_existing_record_is_named() {
     delete_record(&mut case, RecordKind::Ioc, ip, &me).unwrap();
     let rows = of(&case, JDOE_LOGON);
     assert_eq!(from(&rows, "RemoteHost")[0].existing_id, None);
+}
+
+#[test]
+fn an_account_without_a_domain_matches_any_domain() {
+    let (_d, mut case) = loaded();
+    let me = analyst();
+    let spec = |name: &str, domain: Option<&str>| AccountSpec {
+        name: name.into(),
+        domain: domain.map(str::to_string),
+        ..Default::default()
+    };
+    // No match: neither `ACME\jdoe` nor a domainless `jdoe` is recorded.
+    upsert_account(&mut case, &spec("someone", None), &me).unwrap();
+    let rows = of(&case, JDOE_LOGON);
+    assert_eq!(from(&rows, "PayloadData1")[0].existing_id, None);
+    assert_eq!(from(&rows, "UserName")[0].existing_id, None);
+
+    // Only a domainless `Jdoe`: S6 matches it for `ACME\jdoe` too, ASCII
+    // case ignored.
+    let bare = upsert_account(&mut case, &spec("Jdoe", None), &me)
+        .unwrap()
+        .id;
+    let rows = of(&case, JDOE_LOGON);
+    assert_eq!(from(&rows, "PayloadData1")[0].existing_id, Some(bare));
+    assert_eq!(from(&rows, "UserName")[0].existing_id, Some(bare));
+
+    // Both: the exact name and domain comes first; the domainless
+    // candidate still names the domainless record.
+    let exact = upsert_account(&mut case, &spec("jdoe", Some("Acme")), &me)
+        .unwrap()
+        .id;
+    let rows = of(&case, JDOE_LOGON);
+    assert_eq!(from(&rows, "PayloadData1")[0].existing_id, Some(exact));
+    assert_eq!(from(&rows, "UserName")[0].existing_id, Some(bare));
+
+    // A record in another domain is not this account.
+    delete_record(&mut case, RecordKind::Account, exact, &me).unwrap();
+    delete_record(&mut case, RecordKind::Account, bare, &me).unwrap();
+    upsert_account(&mut case, &spec("jdoe", Some("OTHER")), &me).unwrap();
+    let rows = of(&case, JDOE_LOGON);
+    assert_eq!(from(&rows, "PayloadData1")[0].existing_id, None);
+    assert_eq!(from(&rows, "UserName")[0].existing_id, None);
 }
 
 #[test]

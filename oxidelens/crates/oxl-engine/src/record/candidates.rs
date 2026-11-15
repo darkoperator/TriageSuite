@@ -16,6 +16,7 @@ use crate::annot::row_detail;
 use crate::case::Case;
 use crate::catalog;
 use crate::error::Result;
+use duckdb::Connection;
 
 /// A record the row names, for the analyst to link: an account or an IOC.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -77,6 +78,9 @@ enum Take {
     /// An account written `Target: D\N`, as EvtxTriage writes a logon's
     /// target account (ruling S6).
     LogonTarget,
+    /// An ip written `NAME (IP)`, as EvtxECmd's logon maps write a remote
+    /// host, or a bare address.
+    RemoteAddress,
     /// An IOC of this type, when the value validates as one.
     Ioc(IocType),
 }
@@ -98,7 +102,7 @@ const MAP: &[(Relations, &str, Take)] = &[
     (
         Relations::Named("evtxtriage_events"),
         "RemoteHost",
-        Take::Ioc(IocType::Ip),
+        Take::RemoteAddress,
     ),
     (
         Relations::Around("amcachetriage_", "_file_entries"),
@@ -172,6 +176,9 @@ pub fn candidates(case: &Case, row_id: i64) -> Result<Vec<Candidate>> {
                 .strip_prefix(TARGET)
                 .and_then(account)
                 .map(|(name, domain)| account_candidate(name, domain, None, column)),
+            Take::RemoteAddress => ioc_candidate(IocType::Ip, value, column).or_else(|| {
+                parenthesised(value).and_then(|ip| ioc_candidate(IocType::Ip, ip, column))
+            }),
             Take::Ioc(t) => ioc_candidate(t, value, column),
         };
         offer(&mut out, found);
@@ -185,12 +192,32 @@ pub fn candidates(case: &Case, row_id: i64) -> Result<Vec<Candidate>> {
         let conn = case.conn();
         for c in &mut out {
             c.existing_id = match c.ioc_type {
-                None => find_account(conn, &c.value, c.domain.as_deref())?,
+                None => existing_account(conn, &c.value, c.domain.as_deref())?,
                 Some(t) => find_ioc(conn, t, &c.value)?,
             };
         }
     }
     Ok(out)
+}
+
+/// The live account an account candidate names, as S6 matches accounts:
+/// the one with its name and domain, else one with its name and no
+/// domain, ASCII case ignored. `find_account` alone, the uniqueness rule,
+/// would not let a domainless record stand for `D\N`.
+fn existing_account(conn: &Connection, name: &str, domain: Option<&str>) -> Result<Option<i64>> {
+    match find_account(conn, name, domain)? {
+        Some(id) => Ok(Some(id)),
+        None if domain.is_some() => find_account(conn, name, None),
+        None => Ok(None),
+    }
+}
+
+/// What the last ` (` … `)` of `text` holds, when `text` ends in one:
+/// `203.0.113.7` of `WS01 (203.0.113.7)`.
+fn parenthesised(text: &str) -> Option<&str> {
+    let inner = text.strip_suffix(')')?;
+    let (_, inside) = inner.rsplit_once(" (")?;
+    Some(inside)
 }
 
 /// `text` as an account: `(name, domain)` split at the last `\`, the
@@ -285,6 +312,16 @@ mod tests {
         }
         assert_eq!(a(&"x".repeat(MAX_RECORD_NAME + 1)), None);
         assert!(a(&"x".repeat(MAX_RECORD_NAME)).is_some());
+    }
+
+    #[test]
+    fn parenthesised_text() {
+        assert_eq!(parenthesised("WS01 (203.0.113.7)"), Some("203.0.113.7"));
+        assert_eq!(parenthesised("a (b) (::1)"), Some("::1"));
+        assert_eq!(parenthesised("- (-)"), Some("-"));
+        for none in ["", "WS01", "(1.2.3.4)", "WS01 (1.2.3.4", "WS01 (1.2.3.4) x"] {
+            assert_eq!(parenthesised(none), None, "{none:?}");
+        }
     }
 
     #[test]

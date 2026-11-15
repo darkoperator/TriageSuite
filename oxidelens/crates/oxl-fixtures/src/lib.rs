@@ -737,6 +737,60 @@ pub fn candidate_sources_run(dir: &Path) -> PathBuf {
     )
 }
 
+/// A run of WS01 whose one dataset, `evtxtriage_events` with the header
+/// EvtxTriage really writes ([`EVTX_REAL_HEADER`]), holds a Security 4624
+/// for each way EvtxECmd writes `RemoteHost`, told apart by `PayloadData1`
+/// (`Target: ACME\svc1` … `svc6`): `WS01 (203.0.113.7)`, `WS01 (2001:db8::5)`,
+/// `198.51.100.9`, `- (-)`, `WS01 (not-an-ip)` and `WS01`. Run id
+/// `20260117000000-rrrr`. Load it into a case of its own: its rows are
+/// WS01's events, and a later run of WS01 supersedes earlier ones.
+pub fn remote_hosts_run(dir: &Path) -> PathBuf {
+    let path = "Processed-WS01-20260117000000/EventLogs/evtx.csv";
+    let remotes = [
+        "WS01 (203.0.113.7)",
+        "WS01 (2001:db8::5)",
+        "198.51.100.9",
+        "- (-)",
+        "WS01 (not-an-ip)",
+        "WS01",
+    ];
+    let targets: Vec<String> = (1..=remotes.len())
+        .map(|i| format!(r"Target: ACME\svc{i}"))
+        .collect();
+    let rows: Vec<String> = remotes
+        .iter()
+        .zip(&targets)
+        .map(|(remote, target)| {
+            csv_line(
+                EVTX_REAL_HEADER,
+                &[
+                    ("TimeCreated", "2026-01-05T02:40:00.0000000Z"),
+                    ("EventId", "4624"),
+                    ("Channel", "Security"),
+                    ("Computer", "WS01"),
+                    ("MapDescription", "Successful logon"),
+                    ("RemoteHost", remote),
+                    ("PayloadData1", target),
+                    ("PayloadData2", "LogonType 3"),
+                ],
+            )
+        })
+        .collect();
+    let rows = refs(&rows);
+    write_run(
+        &dir.join("run-20260117000000-rrrr"),
+        "20260117000000-rrrr",
+        vec![untyped(
+            "EvtxTriage",
+            "events",
+            "evtxtriage_events",
+            path,
+            EVTX_REAL_HEADER,
+            &rows,
+        )],
+    )
+}
+
 /// Each of `rows`, borrowed.
 fn refs(rows: &[String]) -> Vec<&str> {
     rows.iter().map(String::as_str).collect()
