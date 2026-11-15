@@ -539,6 +539,20 @@ describe("export menu", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel export" })).toBeNull());
   });
 
+  it("a_cancel_note_does_not_follow_the_analyst_into_the_next_case", async () => {
+    vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue("/out/r.md");
+    vi.mocked(dialogs.pickCaseFile).mockResolvedValue("/cases/second.duckdb");
+    overrideCommand("export_report", () => Promise.reject({ code: "interrupted", message: "the query was cancelled" }));
+    const user = await openRecent();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "report" }));
+    expect(await screen.findByText("Export cancelled.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close case" }));
+    await user.click(await screen.findByRole("button", { name: "Open case…" }));
+    await screen.findByRole("tab", { name: "Overview" });
+    expect(screen.queryByText("Export cancelled.")).toBeNull();
+  });
+
   it.each(["superseded", "no_case"])("an_export_answering_%s_shows_nothing", async (code) => {
     vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue("/out/r.md");
     overrideCommand("export_report", () => Promise.reject({ code, message: "gone" }));

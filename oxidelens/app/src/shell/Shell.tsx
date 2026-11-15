@@ -286,6 +286,7 @@ export default function Shell() {
       setTabsCase(s.case_id);
       setSummary(s);
       setError(null);
+      setNote(null);
       setGridStatus(null);
       setRightPane(null);
       readSessionsNow();
