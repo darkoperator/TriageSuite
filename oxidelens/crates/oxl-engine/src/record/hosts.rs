@@ -4,20 +4,20 @@
 //! has none.
 
 use super::records::{
-    agent_added, changeable_record, duplicate, next_id, record_change, refuse_duplicate, row_json,
-    seen_columns, RawSeen, RecordKind, RecordStatus, Seen,
+    agent_added, changeable_record, duplicate, next_id, order_by, record_change, refuse_duplicate,
+    row_json, seen_columns, RawSeen, RecordKind, RecordOrder, RecordStatus, Seen,
 };
 use super::validate::{check_line, check_text, MAX_RECORD_LABEL, MAX_RECORD_NAME};
 use super::{has_records, require_records};
 use crate::actor::Actor;
 use crate::annot::{record, record_all, write_rows, Change};
-use crate::case::Case;
+use crate::case::{stored_zone, Case};
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::query::check_offset;
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
-use duckdb::{params, Connection, OptionalExt};
+use duckdb::{params, params_from_iter, Connection, OptionalExt};
 use std::collections::HashSet;
 
 /// A host record, as the Hosts sheet shows it.
@@ -48,6 +48,12 @@ pub struct HostRecord {
     pub first_seen: Option<String>,
     /// The latest time among them.
     pub last_seen: Option<String>,
+    /// `first_seen` as the case's display zone shows it (`YYYY-MM-DD
+    /// HH:MM:SS` and the fraction as stored), what the sheet shows; `None`
+    /// with no dated entry.
+    pub first_seen_shown: Option<String>,
+    /// `last_seen` as the case's display zone shows it.
+    pub last_seen_shown: Option<String>,
 }
 
 /// What `upsert_host` sets: a new record with `id: None`, else every field
@@ -245,10 +251,10 @@ fn raw_host(r: &duckdb::Row<'_>) -> duckdb::Result<RawHost> {
     ))
 }
 
-fn decode_host(raw: RawHost) -> Result<HostRecord> {
+fn decode_host(raw: RawHost, zone: &str) -> Result<HostRecord> {
     let ((id, name, role, note, status), stamps, seen) = raw;
     let (created_by, created_at, modified_by, modified_at, deleted) = stamps;
-    let seen = Seen::decode(RecordKind::Host, id, seen)?;
+    let seen = Seen::decode(RecordKind::Host, id, seen, zone)?;
     Ok(HostRecord {
         id,
         name,
@@ -264,6 +270,8 @@ fn decode_host(raw: RawHost) -> Result<HostRecord> {
         entries: seen.entries,
         first_seen: seen.first_seen,
         last_seen: seen.last_seen,
+        first_seen_shown: seen.first_seen_shown,
+        last_seen_shown: seen.last_seen_shown,
     })
 }
 
@@ -274,7 +282,7 @@ fn read_host(conn: &Connection, id: i64) -> Result<HostRecord> {
         .next()
         .transpose()?
         .ok_or_else(|| EngineError::NotFound(format!("no {}", RecordKind::Host.shown(id))))?;
-    decode_host(raw)
+    decode_host(raw, &stored_zone(conn)?)
 }
 
 /// Host record `id`, deleted or not. `NotFound` for an unknown id, and in a
@@ -305,7 +313,23 @@ pub fn hosts_matching(
     limit: u32,
     offset: u64,
 ) -> Result<Listing<HostRecord>> {
+    hosts_ordered(case, text, None, limit, offset)
+}
+
+/// [`hosts_matching`] in `order` (then by id) in place of the closest
+/// match first; `None` is `hosts_matching`'s order. `Invalid` as that is,
+/// and for an order by an IOC's type or value.
+pub fn hosts_ordered(
+    case: &Case,
+    text: Option<&str>,
+    order: Option<RecordOrder>,
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<HostRecord>> {
     check_limit(limit)?;
+    let explicit = order
+        .map(|o| order_by(RecordKind::Host, o, "r.name"))
+        .transpose()?;
     check_offset(offset)?;
     if let Some(text) = text {
         super::check_name_filter(text)?;
@@ -316,23 +340,32 @@ pub fn hosts_matching(
             truncated: false,
         });
     }
+    let text_value = || text.map_or(SqlValue::Null, |t| SqlValue::Text(t.to_string()));
+    let mut values = vec![text_value(), text_value()];
+    // The closest matches first, unless the sheet asked for an order.
+    let ordering = match explicit {
+        Some(o) => o,
+        None => {
+            values.extend(std::iter::repeat_with(text_value).take(super::MATCH_RANK_PARAMS));
+            format!("{}, lower(r.name), r.id", super::match_rank("r.name"))
+        }
+    };
+    values.push(SqlValue::BigInt(fetch_limit(limit)));
+    values.push(SqlValue::UBigInt(offset));
     let raw: Vec<RawHost> = case
         .conn()
         .prepare(&format!(
             "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
              OR contains(lower(r.name), lower(?))) \
-             ORDER BY {}, lower(r.name), r.id LIMIT ? OFFSET ?",
+             ORDER BY {ordering} LIMIT ? OFFSET ?",
             host_select(),
-            super::match_rank("r.name")
         ))?
-        .query_map(
-            params![text, text, text, text, text, fetch_limit(limit), offset],
-            raw_host,
-        )?
+        .query_map(params_from_iter(values), raw_host)?
         .collect::<std::result::Result<_, _>>()?;
+    let zone = stored_zone(case.conn())?;
     let items = raw
         .into_iter()
-        .map(decode_host)
+        .map(|r| decode_host(r, &zone))
         .collect::<Result<Vec<_>>>()?;
     Ok(Listing::from_fetched(items, limit))
 }

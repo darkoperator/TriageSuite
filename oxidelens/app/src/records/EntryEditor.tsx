@@ -19,6 +19,7 @@ import type { RecordQuery } from "../contract/generated/RecordQuery";
 import { useDialogFocus } from "../grid/dialogFocus";
 import { useShell } from "../shell/context";
 import { displaySafe } from "../text";
+import { attackIdsOf } from "./attackIds";
 import Candidates from "./Candidates";
 import { isStale, messageOf, reportFailure } from "./outcomes";
 import RecordDialog from "./RecordDialog";
@@ -85,8 +86,6 @@ interface Fields {
 const fieldsOf = (e: Entry): Fields => ({
   title: e.title, description: e.description, time: e.time ?? "", tactic: e.tactic ?? "", techniques: e.technique_ids.join(" "),
 });
-/** The analyst's technique ids as typed, split at spaces and commas; the engine checks each. */
-const techniqueList = (text: string): string[] => text.split(/[\s,]+/).filter((t) => t !== "");
 
 /** Only what the analyst changed; `null` leaves a field as it is (a time the evidence gave stays the row's). */
 function changesOf(e: Entry, f: Fields): EntryChanges | null {
@@ -97,7 +96,7 @@ function changesOf(e: Entry, f: Fields): EntryChanges | null {
     description: f.description === was.description ? null : f.description,
     time: text(f.time, was.time),
     tactic: text(f.tactic, was.tactic),
-    technique_ids: f.techniques === was.techniques ? null : techniqueList(f.techniques),
+    technique_ids: f.techniques === was.techniques ? null : attackIdsOf(f.techniques),
   };
   return Object.values(changes).every((v) => v === null) ? null : changes;
 }

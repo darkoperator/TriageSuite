@@ -426,7 +426,10 @@ fn the_window_json_is_what_the_commands_take() {
     let host: RecordQuery = serde_json::from_value(json!({ "kind": "host" })).unwrap();
     assert!(matches!(
         host,
-        RecordQuery::Host(r::NameQuery { text: None })
+        RecordQuery::Host(r::NameQuery {
+            text: None,
+            order: None
+        })
     ));
 
     let s = setup();
@@ -881,4 +884,42 @@ fn records_list_narrows_hosts_and_accounts_by_text() {
     );
     assert!(names(&query(json!({ "kind": "account", "text": "nobody" }))).is_empty());
     assert!(serde_json::from_value::<RecordQuery>(json!({ "kind": "host", "other": 1 })).is_err());
+}
+
+/// `records_list` takes the sheet's order in the query, for every kind, and
+/// refuses one the kind does not have.
+#[test]
+fn records_list_orders_by_the_query() {
+    let s = setup();
+    for name in ["WS02", "SRV01", "WS01"] {
+        r::record_upsert(&s.state, &host_spec(None, name, "")).unwrap();
+    }
+    let query = |v: Value| -> RecordQuery { serde_json::from_value(v).unwrap() };
+    let names = |q: &RecordQuery| -> Vec<String> {
+        r::records_list(&s.state, at("hosts"), q, 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|c| match c {
+                CaseRecord::Host(h) => h.name,
+                CaseRecord::Account(a) => a.name,
+                CaseRecord::Ioc(i) => i.value,
+            })
+            .collect()
+    };
+    let order = json!({ "by": "name", "descending": true });
+    assert_eq!(
+        names(&query(json!({ "kind": "host", "order": order }))),
+        ["WS02", "WS01", "SRV01"]
+    );
+    let by_value = json!({ "kind": "ioc", "ioc_type": null, "tool": null, "text": null,
+        "order": { "by": "value", "descending": false } });
+    assert!(names(&query(by_value)).is_empty());
+    let wrong = query(json!({ "kind": "host", "order": { "by": "value", "descending": false } }));
+    assert_eq!(
+        r::records_list(&s.state, at("hosts"), &wrong, 100, 0)
+            .unwrap_err()
+            .code,
+        "invalid"
+    );
 }

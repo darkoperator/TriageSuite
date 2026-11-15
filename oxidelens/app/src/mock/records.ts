@@ -75,7 +75,8 @@ interface Link {
 
 /** Entries are kept without their derived `hosts`, `evidence_rows`, `time_shown`, `links` and `mark`, which `shown` fills in. */
 type StoredEntry = Omit<Entry, "hosts" | "evidence_rows" | "time_shown" | "time_us" | "links" | "mark">;
-type StoredRecord = Omit<HostRecord, "entries" | "first_seen" | "last_seen"> &
+type Computed = "entries" | "first_seen" | "last_seen" | "first_seen_shown" | "last_seen_shown";
+type StoredRecord = Omit<HostRecord, Computed> &
   Partial<Omit<AccountRecord, keyof HostRecord>> &
   Partial<Omit<IocRecord, keyof HostRecord>>;
 
@@ -101,7 +102,8 @@ const page = <T>(all: T[], limit: number, offset: number): Listing<T> => ({
 
 const recordBase = (id: number, by: string, status: RecordStatus) => ({
   id, status, created_by: by, created_at: NOW, modified_by: by, modified_at: NOW,
-  agent_added: by.startsWith("agent:"), deleted: false, entries: 0, first_seen: null, last_seen: null,
+  agent_added: by.startsWith("agent:"), deleted: false, entries: 0, first_seen: null, last_seen: null, first_seen_shown: null,
+  last_seen_shown: null,
 });
 
 function entryBase(id: number, title: string, by: string, time: string | null, source: string | null): StoredEntry {
@@ -249,7 +251,11 @@ function shownRecord(r: MockRecords, kind: RecordKind, x: StoredRecord): CaseRec
   const linked = r.links.filter((l) => l.kind === kind && l.id === x.id).map((l) => r.entries.get(l.entry)).filter((e) => e !== undefined);
   const times = linked.map((e) => e.time).filter((t): t is string => t !== null).sort();
   const hostsSeen = [...new Set(linked.flatMap((e) => shownEntry(r, e).hosts))].sort();
-  const counted = { entries: linked.length, first_seen: times[0] ?? null, last_seen: times[times.length - 1] ?? null };
+  const first = times[0] ?? null;
+  const last = times[times.length - 1] ?? null;
+  // The mock's display zone is UTC (see `shownEntry`): the engine's text of a UTC time, `T` and `Z` dropped.
+  const inZone = (t: string | null) => (t === null ? null : t.replace("T", " ").replace(/Z$/, ""));
+  const counted = { entries: linked.length, first_seen: first, last_seen: last, first_seen_shown: inZone(first), last_seen_shown: inZone(last) };
   if (kind === "host") return { kind, ...(x as HostRecord), ...counted };
   if (kind === "account") return { kind, ...(x as unknown as AccountRecord), ...counted, hosts_seen: hostsSeen };
   return { kind, ...(x as unknown as IocRecord), ...counted, hosts_seen: hostsSeen };
@@ -333,7 +339,31 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
   const domain = (x: StoredRecord) => (q.kind === "account" ? (x.domain ?? "").toLowerCase() : "");
   const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   all = [...all].sort((x, y) => rank(x) - rank(y) || byText(key(x), key(y)) || byText(domain(x), domain(y)) || x.id - y.id);
-  return page(all.map((x) => shownRecord(r, q.kind, x)), limit, offset);
+  const shownAll = all.map((x) => shownRecord(r, q.kind, x));
+  // The sheet's order, as the engine's `order_by`: one column either way, no value last, then the id.
+  const order = q.order ?? null;
+  if (order !== null) {
+    const value = (x: CaseRecord): string | number | null => {
+      switch (order.by) {
+        case "name": return x.kind === "host" ? x.name.toLowerCase() : x.kind === "account" ? shown(x as unknown as StoredRecord) : fail("invalid", "IOCs do not order by name");
+        case "entries": return x.entries;
+        case "first_seen": return x.first_seen;
+        case "last_seen": return x.last_seen;
+        case "type": return x.kind === "ioc" ? x.ioc_type : fail("invalid", `${x.kind} records do not order by type`);
+        case "value": return x.kind === "ioc" ? x.value.toLowerCase() : fail("invalid", `${x.kind} records do not order by value`);
+      }
+    };
+    const dir = order.descending ? -1 : 1;
+    shownAll.sort((x, y) => {
+      const a = value(x);
+      const b = value(y);
+      if (a === b) return x.id - y.id;
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return (a < b ? -1 : 1) * dir;
+    });
+  }
+  return page(shownAll, limit, offset);
 }
 
 export const recordGet = (r: MockRecords, kind: RecordKind, id: number): CaseRecord => shownRecord(r, kind, stored(r, kind, id));

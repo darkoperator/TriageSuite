@@ -2,20 +2,20 @@
 //! with the columns computed from their linked entries.
 
 use super::records::{
-    agent_added, changeable_record, duplicate, next_id, non_empty, record_change, refuse_duplicate,
-    row_json, seen_columns, RawSeen, RecordKind, RecordStatus, Seen,
+    agent_added, changeable_record, duplicate, next_id, non_empty, order_by, record_change,
+    refuse_duplicate, row_json, seen_columns, RawSeen, RecordKind, RecordOrder, RecordStatus, Seen,
 };
 use super::validate::{check_line, check_text, validate_sid, Privilege, MAX_RECORD_NAME};
 use super::{has_records, require_records};
 use crate::actor::Actor;
 use crate::annot::record;
-use crate::case::Case;
+use crate::case::{stored_zone, Case};
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::query::check_offset;
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
-use duckdb::{params, Connection};
+use duckdb::{params, params_from_iter, Connection};
 
 /// An account record, as the Accounts sheet shows it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -48,6 +48,12 @@ pub struct AccountRecord {
     pub first_seen: Option<String>,
     /// The latest time among them.
     pub last_seen: Option<String>,
+    /// `first_seen` as the case's display zone shows it (`YYYY-MM-DD
+    /// HH:MM:SS` and the fraction as stored), what the sheet shows; `None`
+    /// with no dated entry.
+    pub first_seen_shown: Option<String>,
+    /// `last_seen` as the case's display zone shows it.
+    pub last_seen_shown: Option<String>,
     /// The live host records those entries link, by name.
     pub hosts_seen: Vec<String>,
 }
@@ -260,10 +266,10 @@ fn raw_account(r: &duckdb::Row<'_>) -> duckdb::Result<RawAccount> {
     ))
 }
 
-fn decode_account(raw: RawAccount) -> Result<AccountRecord> {
+fn decode_account(raw: RawAccount, zone: &str) -> Result<AccountRecord> {
     let ((id, name, domain, sid, description, privilege, note, status), stamps, seen) = raw;
     let (created_by, created_at, modified_by, modified_at, deleted) = stamps;
-    let seen = Seen::decode(RecordKind::Account, id, seen)?;
+    let seen = Seen::decode(RecordKind::Account, id, seen, zone)?;
     let privilege = Privilege::parse(&privilege)
         .map_err(|_| EngineError::Internal(format!("A-{id} holds the privilege {privilege:?}")))?;
     Ok(AccountRecord {
@@ -284,6 +290,8 @@ fn decode_account(raw: RawAccount) -> Result<AccountRecord> {
         entries: seen.entries,
         first_seen: seen.first_seen,
         last_seen: seen.last_seen,
+        first_seen_shown: seen.first_seen_shown,
+        last_seen_shown: seen.last_seen_shown,
         hosts_seen: seen.hosts_seen,
     })
 }
@@ -295,7 +303,7 @@ fn read_account(conn: &Connection, id: i64) -> Result<AccountRecord> {
         .next()
         .transpose()?
         .ok_or_else(|| EngineError::NotFound(format!("no {}", RecordKind::Account.shown(id))))?;
-    decode_account(raw)
+    decode_account(raw, &stored_zone(conn)?)
 }
 
 /// Account record `id`, deleted or not. `NotFound` for an unknown id, and
@@ -335,7 +343,24 @@ pub fn accounts_matching(
     limit: u32,
     offset: u64,
 ) -> Result<Listing<AccountRecord>> {
+    accounts_ordered(case, text, None, limit, offset)
+}
+
+/// [`accounts_matching`] in `order` (then by id) in place of the closest
+/// match first, the name being `DOMAIN\name`; `None` is
+/// `accounts_matching`'s order. `Invalid` as that is, and for an order by
+/// an IOC's type or value.
+pub fn accounts_ordered(
+    case: &Case,
+    text: Option<&str>,
+    order: Option<RecordOrder>,
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<AccountRecord>> {
     check_limit(limit)?;
+    let explicit = order
+        .map(|o| order_by(RecordKind::Account, o, SHOWN_NAME))
+        .transpose()?;
     check_offset(offset)?;
     if let Some(text) = text {
         super::check_name_filter(text)?;
@@ -346,37 +371,38 @@ pub fn accounts_matching(
             truncated: false,
         });
     }
+    let text_value = || text.map_or(SqlValue::Null, |t| SqlValue::Text(t.to_string()));
+    // The text twice for the filter.
+    let mut values = vec![text_value(), text_value()];
+    // The closest matches first (the text for each `match_rank`), unless the
+    // sheet asked for an order.
+    let ordering = match explicit {
+        Some(o) => o,
+        None => {
+            values.extend(std::iter::repeat_with(text_value).take(2 * super::MATCH_RANK_PARAMS));
+            format!(
+                "least({}, {}), lower(r.name), lower(r.domain) NULLS FIRST, r.id",
+                super::match_rank("r.name"),
+                super::match_rank(SHOWN_NAME)
+            )
+        }
+    };
+    values.push(SqlValue::BigInt(fetch_limit(limit)));
+    values.push(SqlValue::UBigInt(offset));
     let raw: Vec<RawAccount> = case
         .conn()
         .prepare(&format!(
             "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
              OR contains(lower({SHOWN_NAME}), lower(?))) \
-             ORDER BY least({}, {}), lower(r.name), lower(r.domain) NULLS FIRST, r.id \
-             LIMIT ? OFFSET ?",
+             ORDER BY {ordering} LIMIT ? OFFSET ?",
             account_select(),
-            super::match_rank("r.name"),
-            super::match_rank(SHOWN_NAME)
         ))?
-        .query_map(
-            // The text: twice for the filter, then for each `match_rank`.
-            params![
-                text,
-                text,
-                text,
-                text,
-                text,
-                text,
-                text,
-                text,
-                fetch_limit(limit),
-                offset
-            ],
-            raw_account,
-        )?
+        .query_map(params_from_iter(values), raw_account)?
         .collect::<std::result::Result<_, _>>()?;
+    let zone = stored_zone(case.conn())?;
     let items = raw
         .into_iter()
-        .map(decode_account)
+        .map(|r| decode_account(r, &zone))
         .collect::<Result<Vec<_>>>()?;
     Ok(Listing::from_fetched(items, limit))
 }

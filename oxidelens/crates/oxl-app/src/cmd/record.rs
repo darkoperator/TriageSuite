@@ -138,13 +138,18 @@ pub enum RecordQuery {
 
 /// How the Hosts or Accounts list narrows: by text in a host's name, or in
 /// an account's `DOMAIN\name` (so its name, its domain, or both as shown),
-/// case ignored. Absent or `null`, every record.
+/// case ignored. Absent or `null`, every record. `order` is the sheet's
+/// (by `name`, `entries`, `first_seen` or `last_seen`, then id); absent or
+/// `null`, the closest matches first, then by name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, ts_rs::TS)]
 #[serde(deny_unknown_fields)]
 pub struct NameQuery {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub text: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub order: Option<oxl_engine::RecordOrder>,
 }
 
 fn listing<T>(list: Listing<T>, wrap: fn(T) -> CaseRecord) -> Listing<CaseRecord> {
@@ -328,11 +333,11 @@ pub fn records_list(
     at.read(state, |c| {
         Ok(match query {
             RecordQuery::Host(q) => listing(
-                oxl_engine::hosts_matching(c, q.text.as_deref(), limit, offset)?,
+                oxl_engine::hosts_ordered(c, q.text.as_deref(), q.order, limit, offset)?,
                 CaseRecord::Host,
             ),
             RecordQuery::Account(q) => listing(
-                oxl_engine::accounts_matching(c, q.text.as_deref(), limit, offset)?,
+                oxl_engine::accounts_ordered(c, q.text.as_deref(), q.order, limit, offset)?,
                 CaseRecord::Account,
             ),
             RecordQuery::Ioc(q) => listing(oxl_engine::iocs(c, q, limit, offset)?, CaseRecord::Ioc),

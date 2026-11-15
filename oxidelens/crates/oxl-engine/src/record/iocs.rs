@@ -4,8 +4,8 @@
 
 use super::entry::MAX_TECHNIQUES;
 use super::records::{
-    agent_added, changeable_record, duplicate, next_id, non_empty, record_change, refuse_duplicate,
-    row_json, seen_columns, RawSeen, RecordKind, RecordStatus, Seen,
+    agent_added, changeable_record, duplicate, next_id, non_empty, order_by, record_change,
+    refuse_duplicate, row_json, seen_columns, RawSeen, RecordKind, RecordOrder, RecordStatus, Seen,
 };
 use super::validate::{
     check_line, check_text, validate_attack_id, validate_ioc, IocType, MAX_RECORD_LABEL,
@@ -13,7 +13,7 @@ use super::validate::{
 use super::{has_records, require_records};
 use crate::actor::Actor;
 use crate::annot::record;
-use crate::case::Case;
+use crate::case::{stored_zone, Case};
 use crate::catalog::TimeSemantics;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
@@ -56,6 +56,12 @@ pub struct IocRecord {
     pub first_seen: Option<String>,
     /// The latest time among them.
     pub last_seen: Option<String>,
+    /// `first_seen` as the case's display zone shows it (`YYYY-MM-DD
+    /// HH:MM:SS` and the fraction as stored), what the sheet shows; `None`
+    /// with no dated entry.
+    pub first_seen_shown: Option<String>,
+    /// `last_seen` as the case's display zone shows it.
+    pub last_seen_shown: Option<String>,
     /// The live host records those entries link, by name.
     pub hosts_seen: Vec<String>,
 }
@@ -92,6 +98,12 @@ pub struct IocQuery {
     pub tool: Option<String>,
     /// In the value, tool or note, case ignored.
     pub text: Option<String>,
+    /// The sheet's order (by `entries`, `first_seen`, `last_seen`, `type`
+    /// or `value`, then id); absent or `null`, the closest values to `text`
+    /// first, then by type and value.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub order: Option<RecordOrder>,
 }
 
 /// The fields `spec` stores, checked: `(value, tool, attack_ids)`.
@@ -263,10 +275,10 @@ fn raw_ioc(r: &duckdb::Row<'_>) -> duckdb::Result<RawIoc> {
     ))
 }
 
-fn decode_ioc(raw: RawIoc) -> Result<IocRecord> {
+fn decode_ioc(raw: RawIoc, zone: &str) -> Result<IocRecord> {
     let ((id, ioc_type, value, tool, attack_ids, note, status), stamps, seen) = raw;
     let (created_by, created_at, modified_by, modified_at, deleted) = stamps;
-    let seen = Seen::decode(RecordKind::Ioc, id, seen)?;
+    let seen = Seen::decode(RecordKind::Ioc, id, seen, zone)?;
     // The engine writes both itself.
     let ioc_type = IocType::parse(&ioc_type)
         .map_err(|_| EngineError::Internal(format!("I-{id} holds the type {ioc_type:?}")))?;
@@ -290,6 +302,8 @@ fn decode_ioc(raw: RawIoc) -> Result<IocRecord> {
         entries: seen.entries,
         first_seen: seen.first_seen,
         last_seen: seen.last_seen,
+        first_seen_shown: seen.first_seen_shown,
+        last_seen_shown: seen.last_seen_shown,
         hosts_seen: seen.hosts_seen,
     })
 }
@@ -301,7 +315,7 @@ fn read_ioc(conn: &Connection, id: i64) -> Result<IocRecord> {
         .next()
         .transpose()?
         .ok_or_else(|| EngineError::NotFound(format!("no {}", RecordKind::Ioc.shown(id))))?;
-    decode_ioc(raw)
+    decode_ioc(raw, &stored_zone(conn)?)
 }
 
 /// IOC record `id`, deleted or not. `NotFound` for an unknown id, and in a
@@ -335,6 +349,10 @@ fn check_filter(what: &str, text: &str) -> Result<()> {
 pub fn iocs(case: &Case, q: &IocQuery, limit: u32, offset: u64) -> Result<Listing<IocRecord>> {
     check_limit(limit)?;
     check_offset(offset)?;
+    let explicit = q
+        .order
+        .map(|o| order_by(RecordKind::Ioc, o, "r.value"))
+        .transpose()?;
     let mut filters = vec!["NOT r.deleted".to_string()];
     let mut params: Vec<SqlValue> = Vec::new();
     if let Some(t) = q.ioc_type {
@@ -361,24 +379,34 @@ pub fn iocs(case: &Case, q: &IocQuery, limit: u32, offset: u64) -> Result<Listin
             truncated: false,
         });
     }
-    // The closest values to the text first (`match_rank`), then the sheet's order.
-    let rank_text = q.text.clone().map_or(SqlValue::Null, SqlValue::Text);
-    params.extend(std::iter::repeat_n(rank_text, super::MATCH_RANK_PARAMS));
+    // The sheet's order when it asked for one; else the closest values to the
+    // text first (`match_rank`), then by type and value.
+    let ordering = match explicit {
+        Some(o) => o,
+        None => {
+            let rank_text = q.text.clone().map_or(SqlValue::Null, SqlValue::Text);
+            params.extend(std::iter::repeat_n(rank_text, super::MATCH_RANK_PARAMS));
+            format!(
+                "{}, r.type, lower(r.value), r.id",
+                super::match_rank("r.value")
+            )
+        }
+    };
     params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
     let raw: Vec<RawIoc> = case
         .conn()
         .prepare(&format!(
-            "{} WHERE {} ORDER BY {}, r.type, lower(r.value), r.id LIMIT ? OFFSET ?",
+            "{} WHERE {} ORDER BY {ordering} LIMIT ? OFFSET ?",
             ioc_select(),
             filters.join(" AND "),
-            super::match_rank("r.value")
         ))?
         .query_map(params_from_iter(params), raw_ioc)?
         .collect::<std::result::Result<_, _>>()?;
+    let zone = stored_zone(case.conn())?;
     let items = raw
         .into_iter()
-        .map(decode_ioc)
+        .map(|r| decode_ioc(r, &zone))
         .collect::<Result<Vec<_>>>()?;
     Ok(Listing::from_fetched(items, limit))
 }

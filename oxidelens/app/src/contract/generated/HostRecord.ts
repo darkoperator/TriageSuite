@@ -38,4 +38,14 @@ first_seen: string | null,
 /**
  * The latest time among them.
  */
-last_seen: string | null, };
+last_seen: string | null, 
+/**
+ * `first_seen` as the case's display zone shows it (`YYYY-MM-DD
+ * HH:MM:SS` and the fraction as stored), what the sheet shows; `None`
+ * with no dated entry.
+ */
+first_seen_shown: string | null, 
+/**
+ * `last_seen` as the case's display zone shows it.
+ */
+last_seen_shown: string | null, };

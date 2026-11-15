@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { recordsList } from "../api";
 import type { IocRecord } from "../contract/generated/IocRecord";
 import type { IocType } from "../contract/generated/IocType";
+import type { RecordOrder } from "../contract/generated/RecordOrder";
 import type { RecordQuery } from "../contract/generated/RecordQuery";
 import { useShell } from "../shell/context";
 import type { TabBodyProps } from "../shell/slots";
@@ -70,27 +71,22 @@ export default function IocsSheet({ active }: TabBodyProps): ReactNode {
   const results = store.results;
   const columns = useMemo<Column<Ioc>[]>(
     () => [
-      { header: "Value", cell: (r) => displaySafe(r.value), sort: (r) => r.value, filter: "text" },
-      { header: "Type", cell: (r) => iocTypeLabel(r.ioc_type), sort: (r) => iocTypeLabel(r.ioc_type) },
-      { header: "Tool", cell: (r) => displaySafe(r.tool ?? ""), sort: (r) => r.tool, filter: "tool" },
-      { header: "Entries", cell: (r) => fmt(r.entries), sort: (r) => r.entries, num: true },
-      { header: "Hosts seen", cell: (r) => displaySafe(r.hosts_seen.join(", ")), sort: (r) => r.hosts_seen.length },
-      { header: "First seen (UTC)", cell: (r) => timeText(r.first_seen), sort: (r) => r.first_seen },
-      { header: "Last seen (UTC)", cell: (r) => timeText(r.last_seen), sort: (r) => r.last_seen },
-      {
-        header: "Sightings",
-        cell: (r) => sightingCell(results.get(r.id)),
-        sort: (r) => {
-          const s = results.get(r.id);
-          return s?.state === "found" ? s.sightings.hits : null;
-        },
-        num: true,
-      },
-      { header: "Status", cell: (r) => <RecordStatusText record={r} />, sort: (r) => r.status },
+      { header: "Value", cell: (r) => displaySafe(r.value), order: "value", filter: "text" },
+      { header: "Type", cell: (r) => iocTypeLabel(r.ioc_type), order: "type" },
+      { header: "Tool", cell: (r) => displaySafe(r.tool ?? ""), filter: "tool" },
+      { header: "Entries", cell: (r) => fmt(r.entries), order: "entries", num: true },
+      { header: "Hosts seen", cell: (r) => displaySafe(r.hosts_seen.join(", ")) },
+      { header: "First seen", zoned: true, cell: (r) => timeText(r.first_seen_shown), order: "first_seen" },
+      { header: "Last seen", zoned: true, cell: (r) => timeText(r.last_seen_shown), order: "last_seen" },
+      { header: "Sightings", cell: (r) => sightingCell(results.get(r.id)), num: true },
+      { header: "Status", cell: (r) => <RecordStatusText record={r} /> },
     ],
     [results],
   );
-  const query = useCallback((f: RowFilters): RecordQuery => ({ kind: "ioc", ioc_type: type, tool: f.tool, text: f.text }), [type]);
+  const query = useCallback(
+    (f: RowFilters, order: RecordOrder | null): RecordQuery => ({ kind: "ioc", ioc_type: type, tool: f.tool, text: f.text, order }),
+    [type],
+  );
   const extra = useCallback((r: Ioc) => <SightingsPanel ioc={r} store={store} />, [store]);
   return (
     <RecordSheet<Ioc>

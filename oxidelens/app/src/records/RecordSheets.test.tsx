@@ -32,7 +32,8 @@ afterEach(() => vi.restoreAllMocks());
 // ---- helpers ------------------------------------------------------------------------------------------------------------
 const base = {
   status: "reviewed" as const, created_by: "analyst:analyst01", created_at: "2026-01-10T12:00:00.000000Z", modified_by: "analyst:analyst01",
-  modified_at: "2026-01-10T12:00:00.000000Z", agent_added: false, deleted: false, entries: 0, first_seen: null, last_seen: null,
+  modified_at: "2026-01-10T12:00:00.000000Z", agent_added: false, deleted: false, entries: 0, first_seen: null, last_seen: null, first_seen_shown: null,
+  last_seen_shown: null,
 };
 const hostOf = (over: Partial<HostRecord> & { id: number; name: string }): CaseRecord => ({ kind: "host", ...base, role: "", note: "", ...over });
 const accountOf = (over: Partial<AccountRecord> & { id: number; name: string }): CaseRecord => ({
@@ -98,11 +99,18 @@ const realCall = (cmd: string, a: unknown) => import("../mock/backend").then((m)
 describe("the record sheets", () => {
   it("records_list_with_computed_columns", async () => {
     const hosts = [
-      hostOf({ id: 4, name: "WS01", role: "workstation", entries: 3, first_seen: "2026-01-05T02:14:07.000000Z", last_seen: "2026-01-05T02:20:00.000000Z" }),
+      hostOf({
+        id: 4, name: "WS01", role: "workstation", entries: 3, first_seen: "2026-01-05T02:14:07.000000Z", last_seen: "2026-01-05T02:20:00.000000Z",
+        first_seen_shown: "2026-01-04 21:14:07.000000", last_seen_shown: "2026-01-04 21:20:00.000000",
+      }),
       hostOf({ id: 5, name: "SRV01", status: "unreviewed", agent_added: true, created_by: "agent:triage-bot" }),
     ];
     const accounts = [
-      accountOf({ id: 7, name: "jdoe", domain: "ACME", sid: "S-1-5-21-1-2-3-1104", privilege: "domain_admin", entries: 2, hosts_seen: ["SRV01", "WS01"], first_seen: "2026-01-05T02:14:07.000000Z", last_seen: "2026-01-05T02:15:00.000000Z" }),
+      accountOf({
+        id: 7, name: "jdoe", domain: "ACME", sid: "S-1-5-21-1-2-3-1104", privilege: "domain_admin", entries: 2, hosts_seen: ["SRV01", "WS01"],
+        first_seen: "2026-01-05T02:14:07.000000Z", last_seen: "2026-01-05T02:15:00.000000Z", first_seen_shown: "2026-01-04 21:14:07.000000",
+        last_seen_shown: "2026-01-04 21:15:00.000000",
+      }),
     ];
     const iocs = [
       iocOf({ id: 9, ioc_type: "ip", value: "203.0.113.7", tool: "Cobalt Strike", entries: 1, hosts_seen: ["WS01"], first_seen: "2026-01-05T02:14:07.000000Z", last_seen: "2026-01-05T02:14:07.000000Z", status: "unreviewed", agent_added: true, created_by: "agent:triage-bot" }),
@@ -118,8 +126,10 @@ describe("the record sheets", () => {
     expect(cellOf("Hosts", ws, "Name").textContent).toBe("WS01");
     expect(cellOf("Hosts", ws, "Role").textContent).toBe("workstation");
     expect(cellOf("Hosts", ws, "Entries").textContent).toBe("3");
-    expect(cellOf("Hosts", ws, "First seen").textContent).toBe("2026-01-05T02:14:07.000000Z");
-    expect(cellOf("Hosts", ws, "Last seen").textContent).toBe("2026-01-05T02:20:00.000000Z");
+    // The engine's text for the time in the case's zone; the header names the zone.
+    expect(cellOf("Hosts", ws, "First seen").textContent).toBe("2026-01-04 21:14:07.000000");
+    expect(cellOf("Hosts", ws, "Last seen").textContent).toBe("2026-01-04 21:20:00.000000");
+    expect(within(grid("Hosts")).getAllByRole("columnheader").map((h) => h.textContent)).toContain("First seen (UTC)");
     expect(cellOf("Hosts", ws, "Status").textContent).toBe("reviewed");
     // An agent's unreviewed record says so in the agent colour.
     const agent = cellOf("Hosts", rowOf("Hosts", 5), "Status");
@@ -135,7 +145,12 @@ describe("the record sheets", () => {
     expect(cellOf("Accounts", jdoe, "Privilege").textContent).toBe("domain admin");
     expect(cellOf("Accounts", jdoe, "Entries").textContent).toBe("2");
     expect(cellOf("Accounts", jdoe, "Hosts seen").textContent).toBe("SRV01, WS01");
-    expect(cellOf("Accounts", jdoe, "Last seen").textContent).toBe("2026-01-05T02:15:00.000000Z");
+    expect(cellOf("Accounts", jdoe, "Last seen").textContent).toBe("2026-01-04 21:15:00.000000");
+    // The editor shows the same, beside the entries they come from.
+    overrideCommand("record_get", async () => accounts[0]);
+    const account = await select(user, "Accounts", 7);
+    await waitFor(() => expect(within(account).getByLabelText("From its entries").textContent).toContain("First seen2026-01-04 21:14:07.000000"));
+    expect(within(account).getByLabelText("From its entries").textContent).toContain("Last seen2026-01-04 21:15:00.000000");
 
     await user.click(screen.getByRole("tab", { name: /^IOCs/ }));
     await waitFor(() => expect(recordRows("IOCs")).toHaveLength(1));
@@ -161,33 +176,42 @@ describe("the record sheets", () => {
     overrideCommand("records_list", async (a) => ((a as { query: RecordQuery }).query.kind === "ioc" ? { items: iocs, truncated: false } : realCall("records_list", a)));
     const user = await openSheet("IOCs");
     expect(idsDrawn("IOCs")).toEqual([1, 2, 3, 4]);
-    // A header sorts what is shown: ascending, descending, then the engine's order again.
+    // A header asks the engine for its order (ascending, descending, then none) and draws the answer as given: the
+    // answer here is not sorted by entries, so a sheet that sorted it again is caught.
     const entries = within(grid("IOCs")).getByRole("button", { name: /^Entries/ });
+    const before = sheetQueries("IOCs").length;
     await user.click(entries);
-    expect(idsDrawn("IOCs")).toEqual([1, 4, 3, 2]);
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toEqual({ kind: "ioc", ioc_type: null, tool: null, text: null, order: { by: "entries", descending: false } }));
     expect(entries.closest("th")).toHaveAttribute("aria-sort", "ascending");
-    await user.click(entries);
-    expect(idsDrawn("IOCs")).toEqual([2, 3, 4, 1]);
-    await user.click(entries);
+    expect(sheetQueries("IOCs").length).toBeGreaterThan(before);
     expect(idsDrawn("IOCs")).toEqual([1, 2, 3, 4]);
+    await user.click(entries);
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)?.order).toEqual({ by: "entries", descending: true }));
+    await user.click(entries);
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)?.order).toBeNull());
     await user.click(within(grid("IOCs")).getByRole("button", { name: /^Value/ }));
-    expect(idsDrawn("IOCs")).toEqual([2, 1, 3, 4]);
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)?.order).toEqual({ by: "value", descending: false }));
+    // An order is read from the first page.
+    const orderedReads = callsOf("records_list").filter((c) => (c.args as { slot: string }).slot === "sheet:iocs" && (c.args as { query: RecordQuery & { order?: unknown } }).query.order != null);
+    expect(orderedReads.every((c) => (c.args as { offset: number }).offset === 0)).toBe(true);
+    // A column the engine does not order by has no sort button.
+    expect(within(grid("IOCs")).queryByRole("button", { name: /^Tool/ })).toBeNull();
 
     // The filter row goes to the engine: the value text and the tool.
     await user.type(screen.getByRole("textbox", { name: "Filter Value" }), "exe");
-    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toEqual({ kind: "ioc", ioc_type: null, tool: null, text: "exe" }));
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toMatchObject({ kind: "ioc", ioc_type: null, tool: null, text: "exe" }));
     await user.type(screen.getByRole("textbox", { name: "Filter Tool" }), "Mimikatz");
-    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toEqual({ kind: "ioc", ioc_type: null, tool: "Mimikatz", text: "exe" }));
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toMatchObject({ kind: "ioc", ioc_type: null, tool: "Mimikatz", text: "exe" }));
 
     // Grouping by tool is the tools view: the groups in the order their tools first appear in what is shown.
-    const before = sheetQueries("IOCs").length;
+    const reads = sheetQueries("IOCs").length;
     await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "tool");
     const groups = () => within(grid("IOCs")).getAllByRole("row").filter((r) => r.getAttribute("data-group") !== null);
     await waitFor(() => expect(groups()).toHaveLength(3));
-    expect(groups().map((g) => g.getAttribute("data-group"))).toEqual(["no tool", "Mimikatz", "Cobalt Strike"]);
-    expect(groups()[1].textContent).toContain("2");
-    expect(idsDrawn("IOCs")).toEqual([2, 1, 4, 3]);
-    expect(sheetQueries("IOCs")).toHaveLength(before);
+    expect(groups().map((g) => g.getAttribute("data-group"))).toEqual(["Mimikatz", "no tool", "Cobalt Strike"]);
+    expect(groups()[0].textContent).toContain("2");
+    expect(idsDrawn("IOCs")).toEqual([1, 4, 2, 3]);
+    expect(sheetQueries("IOCs")).toHaveLength(reads);
   });
 
   it("the_type_strip_counts_and_narrows", async () => {
@@ -196,7 +220,7 @@ describe("the record sheets", () => {
     // The mock holds an IP, an `other` and a file name: every type the case has, with its count, and All.
     await waitFor(() => expect(within(strip).getAllByRole("button").map((b) => b.textContent)).toEqual(["All 3", "IP 1", "File name 1", "Other 1"]));
     await user.click(within(strip).getByRole("button", { name: "IP 1" }));
-    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toEqual({ kind: "ioc", ioc_type: "ip", tool: null, text: null }));
+    await waitFor(() => expect(sheetQueries("IOCs").at(-1)).toEqual({ kind: "ioc", ioc_type: "ip", tool: null, text: null, order: null }));
     await waitFor(() => expect(idsDrawn("IOCs")).toEqual([1]));
     expect(within(strip).getByRole("button", { name: "IP 1" })).toHaveAttribute("aria-pressed", "true");
   });
@@ -337,6 +361,46 @@ describe("the record editor", () => {
     await user.click(within(linked).getByRole("button", { name: "Open E-1" }));
     await waitFor(() => expect(screen.getByRole("tab", { name: /^Timeline/ })).toHaveAttribute("aria-selected", "true"));
     await within(rightPane()).findByRole("region", { name: "Entry E-1" });
+  });
+
+  it("failed_entry_and_history_reads_are_shown", async () => {
+    const user = await openSheet("Accounts");
+    // A later page that fails: the first page read, then Show more fails.
+    const one = (await realCall("entry_get", { id: 1, slot: "x", queryId: "q" })) as object;
+    const first = Array.from({ length: 100 }, (_, i) => ({ ...one, id: i + 1 }));
+    overrideCommand("record_entries", async (a) => {
+      if ((a as { offset: number }).offset === 0) return { items: first, truncated: true };
+      throw { code: "engine", message: "the case could not be read" };
+    });
+    overrideCommand("history_list", async () => {
+      throw { code: "io", message: "history unreadable" };
+    });
+    const editor = await select(user, "Accounts", 1);
+    const linked = await within(editor).findByRole("region", { name: "Linked entries" });
+    await user.click(await within(linked).findByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(linked).getByRole("alert").textContent).toBe("engine: the case could not be read"));
+    await user.click(within(editor).getByRole("button", { name: /^History/ }));
+    const history = within(editor).getByRole("region", { name: "Record history" });
+    await waitFor(() => expect(within(history).getByRole("alert").textContent).toBe("io: history unreadable"));
+  });
+
+  it("the_merge_target_goes_when_the_search_changes", async () => {
+    const user = await openSheet("Hosts");
+    const host = await select(user, "Hosts", 2);
+    await user.click(within(host).getByRole("button", { name: "Merge into…" }));
+    const dialog = screen.getByRole("dialog", { name: "Merge H-2 into…" });
+    await user.click(await within(dialog).findByRole("option"));
+    const merge = within(dialog).getByRole("button", { name: "Merge" });
+    expect(merge).toBeEnabled();
+    // Typing hides WS01: nothing is chosen any more, so nothing can be merged into it unseen.
+    await user.type(within(dialog).getByRole("searchbox", { name: "Filter records" }), "zzz");
+    await waitFor(() => expect(within(dialog).queryAllByRole("option")).toHaveLength(0));
+    expect(merge).toBeDisabled();
+    await user.clear(within(dialog).getByRole("searchbox", { name: "Filter records" }));
+    await waitFor(() => expect(within(dialog).getAllByRole("option")).toHaveLength(1));
+    expect(within(dialog).getByRole("option")).toHaveAttribute("aria-selected", "false");
+    expect(merge).toBeDisabled();
+    expect(callsOf("record_merge")).toHaveLength(0);
   });
 
   it("open_from_the_timeline_selects_the_record", async () => {
@@ -510,6 +574,11 @@ describe("the logon summary", () => {
     await user.click(screen.getByRole("tab", { name: /^Accounts/ }));
     await user.click(within(rightPane()).getByRole("button", { name: "Open the 2 failure logons, type 10, WS01" }));
     await screen.findByRole("tab", { name: /^Logons: ACME\\jdoe · type 10 · WS01 · failure/ });
+    await waitFor(() => expect(callsOf("grid_page").some((c) => (c.args as { state: GridState }).state.chips[0]?.label.endsWith("failure"))).toBe(true));
+    const failed = (callsOf("grid_page").filter((c) => (c.args as { state: GridState }).state.chips[0]?.label.endsWith("failure")).at(-1)!.args as { state: GridState }).state;
+    expect(failed.relation).toBe("mock_events");
+    expect(failed.chips[0].filter).toEqual(failure);
+    expect(failed.chips[0].filter).not.toEqual(success);
   });
 
   it("no_event_logs_says_so", async () => {

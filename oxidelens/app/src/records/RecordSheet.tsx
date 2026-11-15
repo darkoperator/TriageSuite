@@ -1,11 +1,12 @@
 // What the Hosts, Accounts and IOCs sheets share (screens 09 and 10, without what D21 leaves out): a grid over the
 // case's records of one kind as `records_list` answers them, its computed columns (entries, first and last seen, hosts
-// seen) as the engine gives them, a filter row whose boxes go to the engine's query, a sort by any column over what is
-// shown, grouping, and the record editor in the right pane for the selected record.
+// seen) as the engine gives them, a filter row whose boxes go to the engine's query, the engine's order by a column,
+// grouping, and the record editor in the right pane for the selected record.
 //
-// Nothing here filters, counts or converts: the filter row narrows through `records_list`, the computed columns are the
-// engine's, a time is the engine's text. A header sorts the records shown by the value the column draws (the engine's
-// order again on a third click); grouping splits that order, in it, by a field the record gives.
+// Nothing here filters, sorts, counts or converts: the filter row narrows through `records_list`, a header click asks it
+// for an order (ascending, descending, then its own again) and the list is read again from its first page, the computed
+// columns are the engine's, a time is the engine's text in the case's display zone. Grouping splits the engine's order,
+// in it, by a field the record gives.
 //
 // Keys on the grid (inactive while a text field has focus): ↑/↓ move the selection, Enter focuses the editor's first
 // field.
@@ -13,6 +14,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { recordsList } from "../api";
 import type { CaseRecord } from "../contract/generated/CaseRecord";
 import type { RecordKind } from "../contract/generated/RecordKind";
+import type { RecordOrder } from "../contract/generated/RecordOrder";
+import type { RecordOrderBy } from "../contract/generated/RecordOrderBy";
 import type { RecordQuery } from "../contract/generated/RecordQuery";
 import { useShell } from "../shell/context";
 import { isTypingTarget } from "../shell/keys";
@@ -31,10 +34,12 @@ export const fmt = (n: number) => n.toLocaleString("en-US");
 export interface Column<R> {
   /** The header's text. */
   header: string;
+  /** The header names the case's display zone: the column shows a time in it. */
+  zoned?: boolean;
   /** What the cell draws (through `displaySafe` for case text). */
   cell(r: R): ReactNode;
-  /** What a click on the header sorts by; null sorts last. */
-  sort(r: R): string | number | null;
+  /** What the engine orders by when the header is clicked; a column without one has no sort. */
+  order?: RecordOrderBy;
   /** The engine query field the filter row's box under this column sets. */
   filter?: "text" | "tool";
   num?: boolean;
@@ -62,24 +67,6 @@ export function RecordStatusText({ record }: { record: Pick<CaseRecord, "agent_a
 /** The engine's text for a time, or nothing. */
 export const timeText = (t: string | null): string => (t === null ? "" : displaySafe(t));
 
-type Sort = { at: number; descending: boolean } | null;
-
-/** `items` in the order of column `sort`, stably; null values last either way. */
-function sorted<R>(items: R[], columns: Column<R>[], sort: Sort): R[] {
-  if (sort === null) return items;
-  const by = columns[sort.at].sort;
-  const dir = sort.descending ? -1 : 1;
-  return items
-    .map((r, ix) => ({ r, ix, v: by(r) }))
-    .sort((x, y) => {
-      if (x.v === y.v) return x.ix - y.ix;
-      if (x.v === null) return 1;
-      if (y.v === null) return -1;
-      return (x.v < y.v ? -1 : 1) * dir;
-    })
-    .map((x) => x.r);
-}
-
 export default function RecordSheet<R extends CaseRecord>({
   active, kind, sheet, label, noun, columns, groups, query, queryKey = "", strip, bar, extra,
 }: {
@@ -92,8 +79,9 @@ export default function RecordSheet<R extends CaseRecord>({
   noun: [string, string];
   columns: Column<R>[];
   groups: GroupOption<R>[];
-  /** The engine's query for the filter row's boxes (and the sheet's own narrowing, named by `queryKey`). */
-  query(f: RowFilters): RecordQuery;
+  /** The engine's query for the filter row's boxes and the header's order (and the sheet's own narrowing, named by
+   *  `queryKey`). */
+  query(f: RowFilters, order: RecordOrder | null): RecordQuery;
   queryKey?: string;
   /** Above the bar (the IOC type strip). */
   strip?: ReactNode;
@@ -105,12 +93,13 @@ export default function RecordSheet<R extends CaseRecord>({
   const { summary, change, reportError, setRightPane, pendingSelect, clearPendingSelect } = useShell();
   const [filters, setFilters] = useState<RowFilters>({ text: null, tool: null });
   const [groupBy, setGroupBy] = useState("");
-  const [sort, setSort] = useState<Sort>(null);
+  const [sortBy, setSortBy] = useState<RecordOrder | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [focusSeq, setFocusSeq] = useState(0);
 
-  const q = useMemo(() => query(filters), [query, filters]);
-  // A hidden sheet reads nothing; shown again, it reads the case as it is then.
+  const q = useMemo(() => query(filters, sortBy), [query, filters, sortBy]);
+  // A hidden sheet reads nothing; shown again, it reads the case as it is then. Another query (an order too) reads
+  // again from the first page.
   const base = active ? JSON.stringify([summary.case_id, queryKey, q]) : null;
   const slot = `sheet:${sheet}`;
   const { read: listed, showMore } = usePagedRead<CaseRecord>(
@@ -125,17 +114,16 @@ export default function RecordSheet<R extends CaseRecord>({
   }, [listed, reportError]);
 
   const items = useMemo(() => (listed?.value?.items ?? []).filter((r): r is R => r.kind === kind), [listed, kind]);
-  const shown = useMemo(() => sorted(items, columns, sort), [items, columns, sort]);
   const group = groups.find((g) => g.key === groupBy) ?? null;
   const grouped = useMemo(() => {
-    if (group === null) return [{ key: "", rows: shown }];
+    if (group === null) return [{ key: "", rows: items }];
     const out = new Map<string, R[]>();
-    for (const r of shown) {
+    for (const r of items) {
       const k = group.of(r);
       out.set(k, [...(out.get(k) ?? []), r]);
     }
     return [...out].map(([key, rows]) => ({ key, rows }));
-  }, [shown, group]);
+  }, [items, group]);
   const order = useMemo(() => grouped.flatMap((g) => g.rows.map((r) => r.id)), [grouped]);
 
   const select = useCallback((id: number | null) => setSelected(id), []);
@@ -204,8 +192,8 @@ export default function RecordSheet<R extends CaseRecord>({
     e.preventDefault();
   };
 
-  const clickHeader = (at: number) =>
-    setSort((s) => (s === null || s.at !== at ? { at, descending: false } : s.descending ? null : { at, descending: true }));
+  const clickHeader = (by: RecordOrderBy) =>
+    setSortBy((o) => (o === null || o.by !== by ? { by, descending: false } : o.descending ? null : { by, descending: true }));
   const setFilter = (field: "text" | "tool", value: string) => setFilters((f) => ({ ...f, [field]: value === "" ? null : value }));
 
   const n = listed?.value ? items.length : null;
@@ -232,18 +220,26 @@ export default function RecordSheet<R extends CaseRecord>({
           <table ref={table} className="sheet-table" role="grid" aria-label={label} tabIndex={0}>
             <thead>
               <tr>
-                {columns.map((c, at) => (
-                  <th
-                    key={c.header}
-                    className={c.num ? "col-num" : undefined}
-                    aria-sort={sort?.at === at ? (sort.descending ? "descending" : "ascending") : "none"}
-                  >
-                    <button type="button" className="sheet-sort" onClick={() => clickHeader(at)}>
-                      {c.header}
-                      <span aria-hidden="true">{sort?.at === at ? (sort.descending ? " ▾" : " ▴") : ""}</span>
-                    </button>
-                  </th>
-                ))}
+                {columns.map((c) => {
+                  const text = c.zoned ? `${c.header} (${displaySafe(summary.display_zone)})` : c.header;
+                  const by = c.order;
+                  if (by === undefined) {
+                    return (
+                      <th key={c.header} className={c.num ? "col-num" : undefined}>
+                        {text}
+                      </th>
+                    );
+                  }
+                  const dir = sortBy?.by === by ? (sortBy.descending ? "descending" : "ascending") : null;
+                  return (
+                    <th key={c.header} className={c.num ? "col-num" : undefined} aria-sort={dir ?? "none"}>
+                      <button type="button" className="sheet-sort" onClick={() => clickHeader(by)}>
+                        {text}
+                        <span aria-hidden="true">{dir === "descending" ? " ▾" : dir === "ascending" ? " ▴" : ""}</span>
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
               <tr className="sheet-filter-row">
                 {columns.map((c) => (
@@ -295,7 +291,6 @@ export default function RecordSheet<R extends CaseRecord>({
       {statusText !== null && (
         <div className="sheet-foot">
           <span>{statusText}</span>
-          {sort !== null && listed?.value?.truncated && <span>sorted within those shown</span>}
           {listed?.value?.truncated && (
             <button type="button" className="link-button" onClick={showMore}>
               Show more

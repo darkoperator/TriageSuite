@@ -1537,3 +1537,209 @@ fn accounts_rank_by_domain_and_name() {
     drop(case);
     drop(d);
 }
+
+#[test]
+fn records_order_by_a_column_across_pages() {
+    use oxl_engine::{accounts_ordered, hosts_ordered, RecordOrder, RecordOrderBy};
+    let (d, mut case) = loaded();
+    let e1 = entry(&mut case, "one", Some("2026-01-01T00:00:00Z"), &analyst());
+    let e2 = entry(&mut case, "two", Some("2026-01-03T00:00:00Z"), &analyst());
+    let e3 = entry(&mut case, "three", Some("2026-01-02T00:00:00Z"), &analyst());
+    // Created out of name order, so an order by id is not an order by name.
+    let hb = upsert_host(&mut case, &host_spec("ord-b"), &analyst())
+        .unwrap()
+        .id;
+    let ha = upsert_host(&mut case, &host_spec("ord-a"), &analyst())
+        .unwrap()
+        .id;
+    let hc = upsert_host(&mut case, &host_spec("ord-c"), &analyst())
+        .unwrap()
+        .id;
+    let hd = upsert_host(&mut case, &host_spec("ord-d"), &analyst())
+        .unwrap()
+        .id;
+    for e in [e1, e2] {
+        link(&mut case, e, RecordKind::Host, ha, &analyst()).unwrap();
+    }
+    link(&mut case, e3, RecordKind::Host, hb, &analyst()).unwrap();
+    let order = |by, descending| Some(RecordOrder { by, descending });
+    // Two pages of two, read one after the other: the order holds across them.
+    let paged = |o: Option<RecordOrder>| -> Vec<i64> {
+        let mut out = Vec::new();
+        for offset in [0, 2] {
+            let page = hosts_ordered(&case, Some("ord-"), o, 2, offset).unwrap();
+            assert_eq!(page.truncated, offset == 0);
+            out.extend(page.items.iter().map(|h| h.id));
+        }
+        out
+    };
+    assert_eq!(paged(None), [ha, hb, hc, hd], "by name without an order");
+    assert_eq!(paged(order(RecordOrderBy::Name, true)), [hd, hc, hb, ha]);
+    // Equal values keep the lower id first, either way.
+    assert_eq!(
+        paged(order(RecordOrderBy::Entries, false)),
+        [hc, hd, hb, ha]
+    );
+    assert_eq!(paged(order(RecordOrderBy::Entries, true)), [ha, hb, hc, hd]);
+    // No time sorts last, either way.
+    assert_eq!(
+        paged(order(RecordOrderBy::FirstSeen, false)),
+        [ha, hb, hc, hd]
+    );
+    assert_eq!(
+        paged(order(RecordOrderBy::FirstSeen, true)),
+        [hb, ha, hc, hd]
+    );
+    assert_eq!(
+        paged(order(RecordOrderBy::LastSeen, false)),
+        [hb, ha, hc, hd]
+    );
+    assert_eq!(
+        paged(order(RecordOrderBy::LastSeen, true)),
+        [ha, hb, hc, hd]
+    );
+    // Type and value are the IOCs'.
+    for by in [RecordOrderBy::Type, RecordOrderBy::Value] {
+        assert_eq!(
+            code(hosts_ordered(&case, None, order(by, false), 10, 0)).0,
+            "invalid"
+        );
+        assert_eq!(
+            code(accounts_ordered(&case, None, order(by, false), 10, 0)).0,
+            "invalid"
+        );
+    }
+
+    // An account orders by `DOMAIN\name`.
+    let z = upsert_account(&mut case, &account_spec("aaa", Some("ZED")), &analyst())
+        .unwrap()
+        .id;
+    let b = upsert_account(&mut case, &account_spec("zzz", Some("BEE")), &analyst())
+        .unwrap()
+        .id;
+    let names = accounts_ordered(&case, None, order(RecordOrderBy::Name, false), 10, 0).unwrap();
+    assert_eq!(names.items.iter().map(|a| a.id).collect::<Vec<_>>(), [b, z]);
+    let names = accounts_ordered(&case, None, order(RecordOrderBy::Name, true), 10, 0).unwrap();
+    assert_eq!(names.items.iter().map(|a| a.id).collect::<Vec<_>>(), [z, b]);
+
+    // IOCs order by type or value, and not by name.
+    let url = upsert_ioc(
+        &mut case,
+        &ioc_spec(IocType::Url, "https://a.example.com/x"),
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    let ip = upsert_ioc(&mut case, &ioc_spec(IocType::Ip, "203.0.113.9"), &analyst())
+        .unwrap()
+        .id;
+    let name = upsert_ioc(
+        &mut case,
+        &ioc_spec(IocType::FileName, "zz.exe"),
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    let ids = |o: Option<RecordOrder>| -> Vec<i64> {
+        let q = IocQuery {
+            order: o,
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        for offset in [0, 2] {
+            out.extend(
+                iocs(&case, &q, 2, offset)
+                    .unwrap()
+                    .items
+                    .iter()
+                    .map(|i| i.id),
+            );
+        }
+        out
+    };
+    assert_eq!(ids(order(RecordOrderBy::Value, false)), [ip, url, name]);
+    assert_eq!(ids(order(RecordOrderBy::Value, true)), [name, url, ip]);
+    assert_eq!(ids(order(RecordOrderBy::Type, false)), [name, ip, url]);
+    let by_name = IocQuery {
+        order: order(RecordOrderBy::Name, false),
+        ..Default::default()
+    };
+    assert_eq!(code(iocs(&case, &by_name, 10, 0)).0, "invalid");
+    drop(case);
+    drop(d);
+}
+
+#[test]
+fn seen_times_are_shown_in_the_case_zone() {
+    use oxl_engine::set_display_zone;
+    let (d, mut case) = loaded();
+    let early = entry(&mut case, "early", Some("2026-01-05T02:13:58Z"), &analyst());
+    let late = entry(&mut case, "late", Some("2026-01-06T10:00:00Z"), &analyst());
+    let host = upsert_host(&mut case, &host_spec("ZONE-H"), &analyst())
+        .unwrap()
+        .id;
+    let account = upsert_account(&mut case, &account_spec("zone", None), &analyst())
+        .unwrap()
+        .id;
+    let ioc = upsert_ioc(
+        &mut case,
+        &ioc_spec(IocType::FileName, "zone.exe"),
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    for e in [early, late] {
+        link(&mut case, e, RecordKind::Host, host, &analyst()).unwrap();
+        link(&mut case, e, RecordKind::Account, account, &analyst()).unwrap();
+        link(&mut case, e, RecordKind::Ioc, ioc, &analyst()).unwrap();
+    }
+    let render = |utc: &str, zone: &str| {
+        triage_core::timestamp::zone::render_utc_text(utc, zone)
+            .unwrap()
+            .local
+    };
+    let check = |case: &Case, zone: &str| {
+        let first = Some(render("2026-01-05T02:13:58.000000Z", zone));
+        let last = Some(render("2026-01-06T10:00:00.000000Z", zone));
+        let h = host_record(case, host).unwrap();
+        assert_eq!(
+            (h.first_seen_shown.clone(), h.last_seen_shown.clone()),
+            (first.clone(), last.clone())
+        );
+        let a = account_record(case, account).unwrap();
+        assert_eq!(
+            (a.first_seen_shown.clone(), a.last_seen_shown.clone()),
+            (first.clone(), last.clone())
+        );
+        let i = ioc_record(case, ioc).unwrap();
+        assert_eq!(
+            (i.first_seen_shown.clone(), i.last_seen_shown.clone()),
+            (first.clone(), last.clone())
+        );
+        let listed = hosts(case, 10, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|x| x.id == host)
+            .unwrap();
+        assert_eq!(listed.first_seen_shown, first);
+        // The UTC fields stay UTC.
+        assert_eq!(h.first_seen.as_deref(), Some("2026-01-05T02:13:58.000000Z"));
+    };
+    check(&case, "UTC");
+    assert_eq!(
+        render("2026-01-05T02:13:58.000000Z", "UTC"),
+        "2026-01-05 02:13:58.000000"
+    );
+    set_display_zone(&mut case, "America/New_York", &analyst()).unwrap();
+    assert_ne!(
+        render("2026-01-05T02:13:58.000000Z", "America/New_York"),
+        "2026-01-05 02:13:58.000000"
+    );
+    check(&case, "America/New_York");
+    // No dated entry: nothing shown.
+    let bare = upsert_host(&mut case, &host_spec("ZONE-BARE"), &analyst()).unwrap();
+    assert_eq!((bare.first_seen_shown, bare.last_seen_shown), (None, None));
+    drop(case);
+    drop(d);
+}

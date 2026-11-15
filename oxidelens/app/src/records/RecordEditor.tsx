@@ -18,6 +18,7 @@ import type { RecordQuery } from "../contract/generated/RecordQuery";
 import type { RecordSpec } from "../contract/generated/RecordSpec";
 import { useShell } from "../shell/context";
 import { displaySafe } from "../text";
+import { attackIdsOf } from "./attackIds";
 import { addedBy } from "./EntryEditor";
 import { isStale, messageOf, reportFailure } from "./outcomes";
 import RecordDialog from "./RecordDialog";
@@ -79,7 +80,7 @@ function specOf(r: CaseRecord, f: Fields): RecordSpec {
   }
   return {
     kind: "ioc", id: r.id, ioc_type: f.ioc_type as IocType, value: f.value, tool: orNull(f.tool),
-    attack_ids: f.attack.split(/[\s,]+/).filter((t) => t !== ""), note: f.note,
+    attack_ids: attackIdsOf(f.attack), note: f.note,
   };
 }
 const changed = (a: Fields, b: Fields) => Object.keys(a).some((k) => a[k] !== b[k]);
@@ -278,9 +279,9 @@ export default function RecordEditor<R extends CaseRecord>({
             <dt>Entries</dt>
             <dd>{record.entries.toLocaleString("en-US")}</dd>
             <dt>First seen</dt>
-            <dd>{record.first_seen === null ? "none dated" : displaySafe(record.first_seen)}</dd>
+            <dd>{record.first_seen_shown === null ? "none dated" : displaySafe(record.first_seen_shown)}</dd>
             <dt>Last seen</dt>
-            <dd>{record.last_seen === null ? "none dated" : displaySafe(record.last_seen)}</dd>
+            <dd>{record.last_seen_shown === null ? "none dated" : displaySafe(record.last_seen_shown)}</dd>
             {record.kind !== "host" && (
               <>
                 <dt>Hosts seen</dt>
@@ -322,6 +323,7 @@ export default function RecordEditor<R extends CaseRecord>({
                 Show more
               </button>
             )}
+            <ReadFailure read={entries.read} />
           </section>
 
           <section className="editor-section" aria-label="Record history">
@@ -345,6 +347,7 @@ export default function RecordEditor<R extends CaseRecord>({
                 Show more
               </button>
             )}
+            {historyOpen && <ReadFailure read={history.read} />}
           </section>
         </>
       )}
@@ -355,6 +358,17 @@ export default function RecordEditor<R extends CaseRecord>({
         <MergeDialog record={record} onClose={() => setAsking(null)} onDone={(into) => onMerged(into)} />
       )}
     </section>
+  );
+}
+
+/** A section's failed read (a first page or a later one), shown in place: the engine's message for a refusal, else
+ *  the code with it. A stale answer never reaches here (`useCaseRead` drops it). */
+function ReadFailure({ read }: { read: { error?: unknown } | null }): ReactNode {
+  if (read === null || read.error === undefined) return null;
+  return (
+    <p role="alert" className="form-error">
+      {displaySafe(messageOf(read.error))}
+    </p>
   );
 }
 
@@ -435,7 +449,17 @@ function MergeDialog({ record, onClose, onDone }: { record: CaseRecord; onClose(
       onClose={onClose}
       error={error ?? (read?.error !== undefined ? messageOf(read.error) : null)}
     >
-      <input type="search" aria-label="Filter records" placeholder={`Type to find a ${KIND_WORD[kind]}`} value={text} onChange={(e) => setText(e.target.value)} />
+      <input
+        type="search"
+        aria-label="Filter records"
+        placeholder={`Type to find a ${KIND_WORD[kind]}`}
+        value={text}
+        onChange={(e) => {
+          // The list changes: what was chosen may no longer be shown, so nothing is chosen.
+          setText(e.target.value);
+          setInto(null);
+        }}
+      />
       <div className="record-list" role="listbox" aria-label="Records">
         {options.map((r) => (
           <button

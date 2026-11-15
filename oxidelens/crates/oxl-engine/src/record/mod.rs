@@ -42,10 +42,13 @@ pub use export::{
 pub use iocs::ioc_sightings_paused;
 
 pub use accounts::{
-    account_record, accounts, accounts_matching, upsert_account, AccountRecord, AccountSpec,
+    account_record, accounts, accounts_matching, accounts_ordered, upsert_account, AccountRecord,
+    AccountSpec,
 };
 pub use candidates::{candidates, Candidate};
-pub use hosts::{host_record, hosts, hosts_matching, upsert_host, HostRecord, HostSpec};
+pub use hosts::{
+    host_record, hosts, hosts_matching, hosts_ordered, upsert_host, HostRecord, HostSpec,
+};
 pub(crate) use iocs::ioc_texts;
 pub use iocs::{
     ioc_record, ioc_sightings, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec, Sightings,
@@ -53,7 +56,7 @@ pub use iocs::{
 pub use logons::{logon_summary, LogonCount, LogonOutcome, LogonSummary};
 pub use records::{
     delete_record, link, merge_records, record_entries, set_record_status, unlink, RecordKind,
-    RecordStatus,
+    RecordOrder, RecordOrderBy, RecordStatus,
 };
 pub use validate::{
     guess_ioc_type, validate_attack_id, validate_ioc, validate_sid, IocType, Privilege,

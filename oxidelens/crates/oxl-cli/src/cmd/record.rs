@@ -471,6 +471,7 @@ pub fn ioc(ctx: &Ctx, cmd: &IocCmd) -> Result<Reply> {
                 ioc_type: ioc_type.as_deref().map(IocType::parse).transpose()?,
                 tool: tool.clone(),
                 text: text.clone(),
+                order: None,
             };
             let case = ctx.read_case()?;
             let list = oxl_engine::iocs(&case, &q, page.limit, page.offset)?;

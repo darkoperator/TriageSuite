@@ -19,6 +19,58 @@ use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection, OptionalExt};
 
+/// What a record sheet orders by (a header click), before paging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum RecordOrderBy {
+    /// A host's name, an account's `DOMAIN\name` (case ignored); not an
+    /// IOC's.
+    Name,
+    /// The live entries linked to it.
+    Entries,
+    /// The earliest dated linked entry; a record with none sorts last.
+    FirstSeen,
+    /// The latest dated linked entry; a record with none sorts last.
+    LastSeen,
+    /// An IOC's type; only an IOC's.
+    Type,
+    /// An IOC's value (case ignored); only an IOC's.
+    Value,
+}
+
+/// A record list's order: one column, either way, then the record id
+/// (ascending), so equal values page stably.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
+pub struct RecordOrder {
+    pub by: RecordOrderBy,
+    pub descending: bool,
+}
+
+/// The `ORDER BY` of a listing of `kind` in `order`, over the aliases
+/// `seen_columns` selects (`name` is the kind's name expression). `Invalid`
+/// for a column the kind does not have.
+pub(super) fn order_by(kind: RecordKind, order: RecordOrder, name: &str) -> Result<String> {
+    let column = match (order.by, kind) {
+        (RecordOrderBy::Name, RecordKind::Host | RecordKind::Account) => format!("lower({name})"),
+        (RecordOrderBy::Entries, _) => "seen_entries".to_string(),
+        (RecordOrderBy::FirstSeen, _) => "seen_first".to_string(),
+        (RecordOrderBy::LastSeen, _) => "seen_last".to_string(),
+        (RecordOrderBy::Type, RecordKind::Ioc) => "r.type".to_string(),
+        (RecordOrderBy::Value, RecordKind::Ioc) => "lower(r.value)".to_string(),
+        (by, kind) => {
+            return Err(EngineError::Invalid(format!(
+                "{} records do not order by {by:?}",
+                kind.as_str()
+            )))
+        }
+    };
+    let dir = if order.descending { "DESC" } else { "ASC" };
+    Ok(format!("{column} {dir} NULLS LAST, r.id"))
+}
+
 /// Which kind of record: the three sheets beside the Timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -668,12 +720,13 @@ pub(super) fn seen_columns(kind: RecordKind) -> String {
         kind.link_table()
     );
     format!(
-        "(SELECT count(*) {linked}), (SELECT min(e.\"time\") {linked}), \
-         (SELECT max(e.\"time\") {linked}), \
+        "(SELECT count(*) {linked}) AS seen_entries, \
+         (SELECT min(e.\"time\") {linked}) AS seen_first, \
+         (SELECT max(e.\"time\") {linked}) AS seen_last, \
          (SELECT CAST(to_json(list(DISTINCT h.name ORDER BY h.name)) AS VARCHAR) \
           FROM {} l JOIN ox.entry e ON e.id = l.entry_id \
           JOIN ox.entry_host eh ON eh.entry_id = e.id JOIN ox.host h ON h.id = eh.record_id \
-          WHERE l.record_id = r.id AND NOT e.deleted AND NOT h.deleted)",
+          WHERE l.record_id = r.id AND NOT e.deleted AND NOT h.deleted) AS seen_hosts",
         kind.link_table()
     )
 }
@@ -683,6 +736,9 @@ pub(super) struct Seen {
     pub entries: u64,
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
+    /// `first_seen` and `last_seen` as the case's display zone shows them.
+    pub first_seen_shown: Option<String>,
+    pub last_seen_shown: Option<String>,
     pub hosts_seen: Vec<String>,
 }
 
@@ -695,7 +751,9 @@ impl Seen {
         Ok((r.get(at)?, r.get(at + 1)?, r.get(at + 2)?, r.get(at + 3)?))
     }
 
-    pub(super) fn decode(kind: RecordKind, id: i64, raw: RawSeen) -> Result<Seen> {
+    /// The columns decoded, the times also rendered in `zone` (the case's
+    /// display zone, as an entry's `time_shown` is).
+    pub(super) fn decode(kind: RecordKind, id: i64, raw: RawSeen, zone: &str) -> Result<Seen> {
         let (entries, first_seen, last_seen, hosts) = raw;
         let hosts_seen = match hosts {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
@@ -703,8 +761,15 @@ impl Seen {
             })?,
             None => Vec::new(),
         };
+        let shown = |t: &Option<String>| {
+            t.as_deref()
+                .and_then(|t| triage_core::timestamp::zone::render_utc_text(t, zone))
+                .map(|r| r.local)
+        };
         Ok(Seen {
             entries: u64::try_from(entries).unwrap_or_default(),
+            first_seen_shown: shown(&first_seen),
+            last_seen_shown: shown(&last_seen),
             first_seen,
             last_seen,
             hosts_seen,
