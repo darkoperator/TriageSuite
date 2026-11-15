@@ -548,8 +548,11 @@ describe("export menu", () => {
     await user.click(screen.getByRole("button", { name: "report" }));
     expect(await screen.findByText("Export cancelled.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close case" }));
+    const second: CaseSummary = { ...caseSummaryFixture(), case_id: "fedcba9876543210fedcba9876543210", name: "second-case" };
+    overrideCommand("case_open", () => second);
     await user.click(await screen.findByRole("button", { name: "Open case…" }));
     await screen.findByRole("tab", { name: "Overview" });
+    expect(document.querySelector(".case-name")).toHaveTextContent("second-case"); // the second case is the one shown
     expect(screen.queryByText("Export cancelled.")).toBeNull();
   });
 
