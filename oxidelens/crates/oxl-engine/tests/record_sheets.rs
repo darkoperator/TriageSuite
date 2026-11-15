@@ -1744,190 +1744,272 @@ fn seen_times_are_shown_in_the_case_zone() {
     drop(d);
 }
 
+/// One sheet's orders, checked so that no column can stand in for another.
+///
+/// `list` reads one page of two of the kind's four records (`ids`, in the order they were made) in an order.
+/// `expected` gives each column the sheet shows with its ascending and its descending order. Each of those orders
+/// differs from every other, from the id order and from its reverse, so the test fails when a column is ordered by
+/// another column or by the id alone. An order the sheet does not show is refused.
+fn assert_columns_told_apart(
+    kind: &str,
+    ids: [i64; 4],
+    expected: &[(oxl_engine::RecordOrderBy, [i64; 4], [i64; 4])],
+    list: impl Fn(oxl_engine::RecordOrder, u64) -> oxl_engine::Result<Vec<i64>>,
+) {
+    use oxl_engine::{RecordOrder, RecordOrderBy as By};
+    const EVERY: [By; 12] = [
+        By::Name,
+        By::Role,
+        By::Sid,
+        By::Privilege,
+        By::HostsSeen,
+        By::Tool,
+        By::Status,
+        By::Entries,
+        By::FirstSeen,
+        By::LastSeen,
+        By::Type,
+        By::Value,
+    ];
+    let what = |by: By, descending: bool| {
+        let way = if descending {
+            "descending"
+        } else {
+            "ascending"
+        };
+        format!("{kind} records by {by:?} {way}")
+    };
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "{kind}: {ids:?}");
+    let mut reversed = ids;
+    reversed.reverse();
+    let mut told: Vec<(String, [i64; 4])> = Vec::new();
+    for (by, ascending, descending) in expected {
+        for (way, want) in [(false, ascending), (true, descending)] {
+            let what = what(*by, way);
+            assert!(
+                *want != ids && *want != reversed,
+                "{what} is the id order: {want:?}"
+            );
+            if let Some((other, _)) = told.iter().find(|(_, order)| order == want) {
+                panic!("{what} and {other} are the same order: {want:?}");
+            }
+            told.push((what, *want));
+        }
+    }
+    for by in EVERY {
+        let Some((_, ascending, descending)) = expected.iter().find(|(shown, ..)| *shown == by)
+        else {
+            let order = RecordOrder {
+                by,
+                descending: false,
+            };
+            assert_eq!(code(list(order, 0)).0, "invalid", "{}", what(by, false));
+            continue;
+        };
+        for (way, want) in [(false, ascending), (true, descending)] {
+            let order = RecordOrder {
+                by,
+                descending: way,
+            };
+            // Two pages of two, read one after the other: the order holds across them.
+            let mut got = list(order, 0).unwrap();
+            got.extend(list(order, 2).unwrap());
+            assert_eq!(got, want, "{}", what(by, way));
+        }
+    }
+}
+
 #[test]
 fn every_shown_column_orders_across_pages() {
-    use oxl_engine::{accounts_ordered, hosts_ordered, RecordOrder, RecordOrderBy as By};
+    use oxl_engine::{accounts_ordered, hosts_ordered, RecordOrderBy as By};
     let (d, mut case) = loaded();
-    let order = |by, descending| Some(RecordOrder { by, descending });
-    let link_to = |case: &mut Case, kind, id, host: &str| {
-        let e = entry(case, "seen", Some("2026-01-01T00:00:00Z"), &analyst());
-        let h = upsert_host(case, &host_spec(host), &analyst())
-            .map(|h| h.id)
-            .unwrap_or_else(|_| {
-                hosts(case, 100, 0)
-                    .unwrap()
-                    .items
-                    .into_iter()
-                    .find(|x| x.name == host)
-                    .unwrap()
-                    .id
-            });
-        link(case, e, RecordKind::Host, h, &analyst()).unwrap();
+    // An entry on that day of January 2026, linked to the record and to `hosts`.
+    let seen = |case: &mut Case, kind: RecordKind, id: i64, day: u8, hosts: &[i64]| {
+        let time = format!("2026-01-{day:02}T00:00:00Z");
+        let e = entry(case, "seen", Some(&time), &analyst());
         link(case, e, kind, id, &analyst()).unwrap();
-    };
-
-    // Hosts by role (none last) and by status.
-    let spec = |name: &str, role: &str| HostSpec {
-        role: role.to_string(),
-        ..host_spec(name)
-    };
-    // Every column's values sort apart from the id order, so an order by id fails each assertion.
-    let hb = upsert_host(&mut case, &spec("col-1", "server"), &analyst())
-        .unwrap()
-        .id;
-    let hg = upsert_host(&mut case, &host_spec("col-2"), &agent())
-        .unwrap()
-        .id;
-    let hn = upsert_host(&mut case, &spec("col-3", ""), &analyst())
-        .unwrap()
-        .id;
-    let ha = upsert_host(&mut case, &spec("col-4", "admin"), &analyst())
-        .unwrap()
-        .id;
-    let hosts_in = |o| -> Vec<i64> {
-        let mut out = Vec::new();
-        for offset in [0, 2] {
-            out.extend(
-                hosts_ordered(&case, Some("col-"), o, 2, offset)
-                    .unwrap()
-                    .items
-                    .iter()
-                    .map(|h| h.id),
-            );
+        for host in hosts {
+            link(case, e, RecordKind::Host, *host, &analyst()).unwrap();
         }
-        out
     };
-    assert_eq!(
-        hosts_in(order(By::Role, false)),
-        [hg, hn, ha, hb],
-        "an empty role is text, before any other"
-    );
-    assert_eq!(hosts_in(order(By::Role, true)), [hb, ha, hg, hn]);
-    // `reviewed` before `unreviewed`; equal statuses by id.
-    assert_eq!(hosts_in(order(By::Status, false)), [hb, hn, ha, hg]);
-    assert_eq!(hosts_in(order(By::Status, true)), [hg, hb, hn, ha]);
-
-    // Accounts by SID (none last either way), privilege and hosts seen.
-    let account = |name: &str, sid: Option<&str>, privilege: Privilege| AccountSpec {
-        sid: sid.map(str::to_string),
-        privilege,
-        ..account_spec(name, None)
-    };
-    let a1 = upsert_account(
-        &mut case,
-        &account("col-a", Some("S-1-5-21-1-2-3-1105"), Privilege::Standard),
-        &analyst(),
-    )
-    .unwrap()
-    .id;
-    let a2 = upsert_account(
-        &mut case,
-        &account("col-b", None, Privilege::DomainAdmin),
-        &analyst(),
-    )
-    .unwrap()
-    .id;
-    let a3 = upsert_account(
-        &mut case,
-        &account("col-c", Some("S-1-5-21-1-2-3-1104"), Privilege::Service),
-        &analyst(),
-    )
-    .unwrap()
-    .id;
-    link_to(&mut case, RecordKind::Account, a1, "HOST-B");
-    link_to(&mut case, RecordKind::Account, a3, "HOST-A");
-    let accounts_in = |case: &Case, o| -> Vec<i64> {
-        let mut out = Vec::new();
-        for offset in [0, 2] {
-            out.extend(
-                accounts_ordered(case, Some("col-"), o, 2, offset)
-                    .unwrap()
-                    .items
-                    .iter()
-                    .map(|a| a.id),
-            );
-        }
-        out
-    };
-    assert_eq!(accounts_in(&case, order(By::Sid, false)), [a3, a1, a2]);
-    assert_eq!(accounts_in(&case, order(By::Sid, true)), [a1, a3, a2]);
-    assert_eq!(
-        accounts_in(&case, order(By::Privilege, false)),
-        [a2, a3, a1]
-    );
-    assert_eq!(
-        accounts_in(&case, order(By::HostsSeen, false)),
-        [a2, a3, a1],
-        "no host first, then one host by name"
-    );
-    assert_eq!(accounts_in(&case, order(By::HostsSeen, true)), [a1, a3, a2]);
-
-    // IOCs by tool (none last) and hosts seen.
-    let ioc = |value: &str, tool: Option<&str>| IocSpec {
-        tool: tool.map(str::to_string),
-        ..ioc_spec(IocType::FileName, value)
-    };
-    let i1 = upsert_ioc(&mut case, &ioc("col-1.exe", Some("rclone")), &agent())
-        .unwrap()
-        .id;
-    let i2 = upsert_ioc(&mut case, &ioc("col-2.exe", None), &analyst())
-        .unwrap()
-        .id;
-    let i3 = upsert_ioc(&mut case, &ioc("col-3.exe", Some("Mimikatz")), &analyst())
-        .unwrap()
-        .id;
-    link_to(&mut case, RecordKind::Ioc, i1, "HOST-A");
-    let iocs_in = |case: &Case, o| -> Vec<i64> {
-        let q = IocQuery {
-            text: Some("col-".into()),
-            order: o,
-            ..Default::default()
+    let host = |case: &mut Case, name: &str, role: &str, by: &Actor| {
+        let spec = HostSpec {
+            role: role.to_string(),
+            ..host_spec(name)
         };
-        let mut out = Vec::new();
-        for offset in [0, 2] {
-            out.extend(
-                iocs(case, &q, 2, offset)
-                    .unwrap()
-                    .items
-                    .iter()
-                    .map(|i| i.id),
-            );
-        }
-        out
+        upsert_host(case, &spec, by).unwrap().id
     };
-    assert_eq!(
-        iocs_in(&case, order(By::Tool, false)),
-        [i3, i1, i2],
-        "case ignored, none last"
-    );
-    assert_eq!(iocs_in(&case, order(By::Tool, true)), [i1, i3, i2]);
-    assert_eq!(iocs_in(&case, order(By::HostsSeen, false)), [i2, i3, i1]);
-    assert_eq!(iocs_in(&case, order(By::HostsSeen, true)), [i1, i2, i3]);
-    assert_eq!(iocs_in(&case, order(By::Status, false)), [i2, i3, i1]);
-    assert_eq!(iocs_in(&case, order(By::Status, true)), [i1, i2, i3]);
+    // The hosts that the entries of the accounts and of the IOCs link. `col-` leaves them out of the hosts read below.
+    let host_a = host(&mut case, "HOST-A", "", &analyst());
+    let host_b = host(&mut case, "HOST-B", "", &analyst());
 
-    // Each kind refuses the columns it does not have.
-    for by in [By::Sid, By::Privilege, By::HostsSeen, By::Tool] {
-        assert_eq!(
-            code(hosts_ordered(&case, None, order(by, false), 10, 0)).0,
-            "invalid",
-            "{by:?}"
-        );
+    // Four records of each kind, made in an order no column gives. An agent's record is `unreviewed`.
+    //
+    //       name   role    status      entries on (January)
+    //   h1  col-c  ""      reviewed    none
+    //   h2  col-d  Server  reviewed    the 2nd, the 6th
+    //   h3  col-b  ""      unreviewed  the 5th
+    //   h4  col-a  admin   reviewed    the 1st, the 5th
+    let h1 = host(&mut case, "col-c", "", &analyst());
+    let h2 = host(&mut case, "col-d", "Server", &analyst());
+    let h3 = host(&mut case, "col-b", "", &agent());
+    let h4 = host(&mut case, "col-a", "admin", &analyst());
+    for (id, day) in [(h2, 2), (h2, 6), (h3, 5), (h4, 1), (h4, 5)] {
+        seen(&mut case, RecordKind::Host, id, day, &[]);
     }
-    for by in [By::Role, By::Tool] {
-        assert_eq!(
-            code(accounts_ordered(&case, None, order(by, false), 10, 0)).0,
-            "invalid",
-            "{by:?}"
-        );
-    }
-    for by in [By::Role, By::Sid, By::Privilege] {
-        let q = IocQuery {
-            order: order(by, false),
-            ..Default::default()
+
+    //       name   SID    privilege     status      entries on (and the hosts they link)
+    //   a1  col-b  none   service       reviewed    the 1st (HOST-A, HOST-B), the 3rd
+    //   a2  col-a  -1105  local_admin   reviewed    none
+    //   a3  col-c  -1104  domain_admin  unreviewed  the 5th (HOST-A), the 6th
+    //   a4  col-d  -1106  standard      reviewed    the 2nd
+    let account =
+        |case: &mut Case, name: &str, rid: Option<&str>, privilege: Privilege, by: &Actor| {
+            let spec = AccountSpec {
+                sid: rid.map(|rid| format!("S-1-5-21-1-2-3-{rid}")),
+                privilege,
+                ..account_spec(name, None)
+            };
+            upsert_account(case, &spec, by).unwrap().id
         };
-        assert_eq!(code(iocs(&case, &q, 10, 0)).0, "invalid", "{by:?}");
-    }
+    let a1 = account(&mut case, "col-b", None, Privilege::Service, &analyst());
+    let a2 = account(
+        &mut case,
+        "col-a",
+        Some("1105"),
+        Privilege::LocalAdmin,
+        &analyst(),
+    );
+    let a3 = account(
+        &mut case,
+        "col-c",
+        Some("1104"),
+        Privilege::DomainAdmin,
+        &agent(),
+    );
+    let a4 = account(
+        &mut case,
+        "col-d",
+        Some("1106"),
+        Privilege::Standard,
+        &analyst(),
+    );
+    seen(&mut case, RecordKind::Account, a1, 1, &[host_a, host_b]);
+    seen(&mut case, RecordKind::Account, a1, 3, &[]);
+    seen(&mut case, RecordKind::Account, a3, 5, &[host_a]);
+    seen(&mut case, RecordKind::Account, a3, 6, &[]);
+    seen(&mut case, RecordKind::Account, a4, 2, &[]);
+
+    //       value      type            tool      status      entries on (and the hosts they link)
+    //   i1  col-a.exe  other           none      reviewed    the 1st (HOST-A), the 3rd
+    //   i2  col-c.exe  scheduled_task  mimikatz  reviewed    none
+    //   i3  col-d.exe  service         Rclone    unreviewed  the 2nd (HOST-B)
+    //   i4  col-b.exe  file_name       PsExec    reviewed    the 2nd (HOST-A), the 5th (HOST-B)
+    let ioc = |case: &mut Case, value: &str, ioc_type: IocType, tool: Option<&str>, by: &Actor| {
+        let spec = IocSpec {
+            tool: tool.map(str::to_string),
+            ..ioc_spec(ioc_type, value)
+        };
+        upsert_ioc(case, &spec, by).unwrap().id
+    };
+    let i1 = ioc(&mut case, "col-a.exe", IocType::Other, None, &analyst());
+    let i2 = ioc(
+        &mut case,
+        "col-c.exe",
+        IocType::ScheduledTask,
+        Some("mimikatz"),
+        &analyst(),
+    );
+    let i3 = ioc(
+        &mut case,
+        "col-d.exe",
+        IocType::Service,
+        Some("Rclone"),
+        &agent(),
+    );
+    let i4 = ioc(
+        &mut case,
+        "col-b.exe",
+        IocType::FileName,
+        Some("PsExec"),
+        &analyst(),
+    );
+    seen(&mut case, RecordKind::Ioc, i1, 1, &[host_a]);
+    seen(&mut case, RecordKind::Ioc, i1, 3, &[]);
+    seen(&mut case, RecordKind::Ioc, i3, 2, &[host_b]);
+    seen(&mut case, RecordKind::Ioc, i4, 2, &[host_a]);
+    seen(&mut case, RecordKind::Ioc, i4, 5, &[host_b]);
+
+    // Each column ascending, then descending. Equal values go by id, either way.
+    assert_columns_told_apart(
+        "host",
+        [h1, h2, h3, h4],
+        &[
+            (By::Name, [h4, h3, h1, h2], [h2, h1, h3, h4]),
+            // Case ignored (as written, `Server` comes before `admin`); an empty role is text, before any other.
+            (By::Role, [h1, h3, h4, h2], [h2, h4, h1, h3]),
+            (By::Entries, [h1, h3, h2, h4], [h2, h4, h3, h1]),
+            // No time sorts last, either way.
+            (By::FirstSeen, [h4, h2, h3, h1], [h3, h2, h4, h1]),
+            (By::LastSeen, [h3, h4, h2, h1], [h2, h3, h4, h1]),
+            // `reviewed` before `unreviewed`.
+            (By::Status, [h1, h2, h4, h3], [h3, h1, h2, h4]),
+        ],
+        |order, offset| {
+            let page = hosts_ordered(&case, Some("col-"), Some(order), 2, offset)?;
+            Ok(page.items.iter().map(|h| h.id).collect())
+        },
+    );
+    assert_columns_told_apart(
+        "account",
+        [a1, a2, a3, a4],
+        &[
+            (By::Name, [a2, a1, a3, a4], [a4, a3, a1, a2]),
+            // No SID sorts last, either way.
+            (By::Sid, [a3, a2, a4, a1], [a4, a2, a3, a1]),
+            // As stored: `domain_admin`, `local_admin`, `service`, `standard`.
+            (By::Privilege, [a3, a2, a1, a4], [a4, a1, a2, a3]),
+            (By::Entries, [a2, a4, a1, a3], [a1, a3, a4, a2]),
+            // By how many hosts: none, then one, then two.
+            (By::HostsSeen, [a2, a4, a3, a1], [a1, a3, a2, a4]),
+            (By::FirstSeen, [a1, a4, a3, a2], [a3, a4, a1, a2]),
+            (By::LastSeen, [a4, a1, a3, a2], [a3, a1, a4, a2]),
+            (By::Status, [a1, a2, a4, a3], [a3, a1, a2, a4]),
+        ],
+        |order, offset| {
+            let page = accounts_ordered(&case, Some("col-"), Some(order), 2, offset)?;
+            Ok(page.items.iter().map(|a| a.id).collect())
+        },
+    );
+    assert_columns_told_apart(
+        "ioc",
+        [i1, i2, i3, i4],
+        &[
+            (By::Value, [i1, i4, i2, i3], [i3, i2, i4, i1]),
+            // As stored: `file_name`, `other`, `scheduled_task`, `service`.
+            (By::Type, [i4, i1, i2, i3], [i3, i2, i1, i4]),
+            // Case ignored (as written, `PsExec` and `Rclone` come before `mimikatz`); no tool last, either way.
+            (By::Tool, [i2, i4, i3, i1], [i3, i4, i2, i1]),
+            (By::Entries, [i2, i3, i1, i4], [i1, i4, i3, i2]),
+            // No host, then one host by its name, then two.
+            (By::HostsSeen, [i2, i1, i3, i4], [i4, i3, i1, i2]),
+            (By::FirstSeen, [i1, i3, i4, i2], [i3, i4, i1, i2]),
+            (By::LastSeen, [i3, i1, i4, i2], [i4, i1, i3, i2]),
+            (By::Status, [i1, i2, i4, i3], [i3, i1, i2, i4]),
+        ],
+        |order, offset| {
+            let q = IocQuery {
+                text: Some("col-".into()),
+                order: Some(order),
+                ..Default::default()
+            };
+            Ok(iocs(&case, &q, 2, offset)?
+                .items
+                .iter()
+                .map(|i| i.id)
+                .collect())
+        },
+    );
     drop(case);
     drop(d);
 }

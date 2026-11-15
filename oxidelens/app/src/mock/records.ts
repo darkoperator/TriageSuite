@@ -26,6 +26,7 @@ import type { MarkState } from "../contract/generated/MarkState";
 import type { Note } from "../contract/generated/Note";
 import type { PromoteOutcome } from "../contract/generated/PromoteOutcome";
 import type { RecordKind } from "../contract/generated/RecordKind";
+import type { RecordOrderBy } from "../contract/generated/RecordOrderBy";
 import type { RecordQuery } from "../contract/generated/RecordQuery";
 import type { RecordSpec } from "../contract/generated/RecordSpec";
 import type { RecordStatus } from "../contract/generated/RecordStatus";
@@ -291,6 +292,17 @@ function recentOrder(x: StoredEntry, y: StoredEntry): number {
   return y.id - x.id;
 }
 
+/**
+ * The engine's order by hosts seen (`hosts_seen_order`), ascending, for two records' host names, each list sorted as a
+ * record carries it: how many hosts, compared as numbers, then the names as the sheet shows them, joined with ", ".
+ * Negative when `a` sorts first, positive when `b` does, 0 when neither does.
+ */
+export function hostsSeenOrder(a: readonly string[], b: readonly string[]): number {
+  if (a.length !== b.length) return a.length - b.length;
+  const [x, y] = [a.join(", "), b.join(", ")];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 export function entriesList(r: MockRecords, q: EntryQuery, limit: number, offset: number): Listing<Entry> {
   const text = q.text?.toLowerCase();
   const all = [...r.entries.values()]
@@ -343,15 +355,13 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
   // The sheet's order, as the engine's `order_by`: one column either way, no value last, then the id.
   const order = q.order ?? null;
   if (order !== null) {
-    const value = (x: CaseRecord): string | number | null => {
-      switch (order.by) {
+    // One column's value. Hosts seen is two keys, not one value: `hostsSeenOrder` compares them.
+    const value = (by: Exclude<RecordOrderBy, "hosts_seen">, x: CaseRecord): string | number | null => {
+      switch (by) {
         case "name": return x.kind === "host" ? x.name.toLowerCase() : x.kind === "account" ? shown(x as unknown as StoredRecord) : fail("invalid", "IOCs do not order by name");
         case "role": return x.kind === "host" ? x.role.toLowerCase() : fail("invalid", `${x.kind} records do not order by role`);
         case "sid": return x.kind === "account" ? x.sid : fail("invalid", `${x.kind} records do not order by sid`);
         case "privilege": return x.kind === "account" ? x.privilege : fail("invalid", `${x.kind} records do not order by privilege`);
-        // The count, then the names as the sheet shows them (sorted, joined with ", "): one key whose fixed-width count
-        // sorts first.
-        case "hosts_seen": return x.kind === "host" ? fail("invalid", "host records do not order by hosts_seen") : `${String(x.hosts_seen.length).padStart(6, "0")}${x.hosts_seen.join(", ")}`;
         case "tool": return x.kind === "ioc" ? (x.tool?.toLowerCase() ?? null) : fail("invalid", `${x.kind} records do not order by tool`);
         case "status": return x.status;
         case "entries": return x.entries;
@@ -361,10 +371,12 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
         case "value": return x.kind === "ioc" ? x.value.toLowerCase() : fail("invalid", `${x.kind} records do not order by value`);
       }
     };
+    const hosts = (x: CaseRecord) => (x.kind === "host" ? fail("invalid", "host records do not order by hosts_seen") : x.hosts_seen);
     const dir = order.descending ? -1 : 1;
     shownAll.sort((x, y) => {
-      const a = value(x);
-      const b = value(y);
+      if (order.by === "hosts_seen") return hostsSeenOrder(hosts(x), hosts(y)) * dir || x.id - y.id;
+      const a = value(order.by, x);
+      const b = value(order.by, y);
       if (a === b) return x.id - y.id;
       if (a === null) return 1;
       if (b === null) return -1;

@@ -18,6 +18,7 @@ import { MOCK_COMMANDS, mockCall, mockOn, resetMock, setMockLatency, setMockMark
 import {
   HOSTILE, HOSTILE_RECORD, HAYABUSA_COLUMNS, HAYABUSA_FIRST_ID, EVENT_COLUMNS, EVENT_ROWS, eventRows, hayabusaRows,
 } from "./generated";
+import { hostsSeenOrder } from "./records";
 
 const apiCommands = [...apiSource.matchAll(/\bcall(?:<[^(]*>)?\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
 
@@ -430,5 +431,12 @@ describe("the record order", () => {
       })).items.map((r) => r.id);
     expect(await ids(false)).toEqual([none, oneQuote, oneHash, two]);
     expect(await ids(true)).toEqual([two, oneHash, oneQuote, none]);
+  });
+
+  it("compares the hosts seen count as a number, however many digits it has", () => {
+    const hosts = (count: number) => Array.from({ length: count }, () => "H");
+    // As text of a fixed width of six, 1,000,000 sorts before 999,999.
+    expect(hostsSeenOrder(hosts(999_999), hosts(1_000_000))).toBeLessThan(0);
+    expect(hostsSeenOrder(hosts(1_000_000), hosts(999_999))).toBeGreaterThan(0);
   });
 });
