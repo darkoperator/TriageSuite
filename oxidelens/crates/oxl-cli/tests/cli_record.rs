@@ -1278,6 +1278,65 @@ fn reply_shapes_of_every_command() {
         (Some(1), Some(r2))
     );
 
+    let entry_keys = [
+        "agent_added",
+        "created_at",
+        "created_by",
+        "evidence_rows",
+        "id",
+        "modified_at",
+        "modified_by",
+        "needs_time",
+        "reviewed_by",
+        "shown",
+        "status",
+        "tactic",
+        "technique_ids",
+        "time",
+        "time_source",
+        "untrusted",
+    ];
+    let v = ok(
+        &p,
+        &[
+            "entry",
+            "edit",
+            "1",
+            "--title",
+            "t2",
+            "--description",
+            "d",
+            "--tactic",
+            "Execution",
+            "--technique",
+            "T1059",
+        ],
+    );
+    assert_eq!(v["command"], "entry edit");
+    assert_eq!(keys(&v["data"]), entry_keys);
+    assert_eq!(
+        (
+            v["data"]["id"].as_i64(),
+            v["data"]["shown"].as_str(),
+            v["data"]["status"].as_str(),
+            v["data"]["tactic"].as_str(),
+            v["data"]["time"].as_str()
+        ),
+        (
+            Some(1),
+            Some("E-1"),
+            Some("draft"),
+            Some("Execution"),
+            Some("2026-01-05T02:14:07.000000Z")
+        )
+    );
+    assert_eq!(v["data"]["technique_ids"], json!(["T1059"]));
+    let text = inner(&v["data"]["untrusted"]);
+    assert_eq!(
+        (text["title"].as_str(), text["description"].as_str()),
+        (Some("t2"), Some("d"))
+    );
+
     let v = ok(&p, &["entry", "status", "1", "reviewed"]);
     assert_eq!(v["command"], "entry status");
     assert_eq!(
@@ -1310,6 +1369,21 @@ fn reply_shapes_of_every_command() {
         .filter(|k| *k != "untrusted")
         .collect();
     assert_eq!(keys(&v["data"]["hosts"][0]), item);
+    let v = ok(&p, &["host", "edit", "1", "--role", "Server"]);
+    assert_eq!(v["command"], "host edit");
+    assert_eq!(keys(&v["data"]), with(&HOST_KEYS, &[]));
+    assert_eq!(
+        (
+            v["data"]["id"].as_i64(),
+            v["data"]["shown"].as_str(),
+            v["data"]["status"].as_str()
+        ),
+        (Some(1), Some("H-1"), Some("reviewed"))
+    );
+    assert_eq!(
+        inner(&v["data"]["untrusted"]),
+        json!({"id": 1, "name": "WS01", "role": "Server", "note": ""})
+    );
     ok(&p, &["host", "add", "--name", "SRV01"]);
     let v = ok(&p, &["host", "merge", "--from", "2", "--into", "1"]);
     assert_eq!(v["data"], json!({"from": 2, "into": 1}));
@@ -1352,6 +1426,38 @@ fn reply_shapes_of_every_command() {
     let v = ok(&p, &["account", "list"]);
     assert_eq!(keys(&v["data"]), ["accounts", "count", "untrusted"]);
     assert_eq!(v["data"]["count"], 2);
+    let v = ok(
+        &p,
+        &[
+            "account",
+            "edit",
+            "1",
+            "--privilege",
+            "local_admin",
+            "--note",
+            "n",
+        ],
+    );
+    assert_eq!(v["command"], "account edit");
+    assert_eq!(keys(&v["data"]), account_keys);
+    assert_eq!(
+        (
+            v["data"]["id"].as_i64(),
+            v["data"]["shown"].as_str(),
+            v["data"]["privilege"].as_str(),
+            v["data"]["status"].as_str()
+        ),
+        (Some(1), Some("A-1"), Some("local_admin"), Some("reviewed"))
+    );
+    let text = inner(&v["data"]["untrusted"]);
+    assert_eq!(
+        (
+            text["name"].as_str(),
+            text["domain"].as_str(),
+            text["note"].as_str()
+        ),
+        (Some("jdoe"), Some("ACME"), Some("n"))
+    );
     let v = ok(&p, &["account", "merge", "--from", "2", "--into", "1"]);
     assert_eq!(v["data"], json!({"from": 2, "into": 1}));
     let v = ok(&p, &["account", "status", "1", "unreviewed"]);
@@ -1399,6 +1505,35 @@ fn reply_shapes_of_every_command() {
     ok(
         &p,
         &["ioc", "add", "--type", "domain", "--value", "a.acme.local"],
+    );
+    let v = ok(
+        &p,
+        &[
+            "ioc",
+            "edit",
+            "1",
+            "--tool",
+            "rclone",
+            "--attack-id",
+            "T1567",
+        ],
+    );
+    assert_eq!(v["command"], "ioc edit");
+    assert_eq!(keys(&v["data"]), ioc_keys);
+    assert_eq!(
+        (
+            v["data"]["id"].as_i64(),
+            v["data"]["shown"].as_str(),
+            v["data"]["ioc_type"].as_str(),
+            v["data"]["status"].as_str()
+        ),
+        (Some(1), Some("I-1"), Some("ip"), Some("reviewed"))
+    );
+    assert_eq!(v["data"]["attack_ids"], json!(["T1567"]));
+    let text = inner(&v["data"]["untrusted"]);
+    assert_eq!(
+        (text["value"].as_str(), text["tool"].as_str()),
+        (Some("203.0.113.7"), Some("rclone"))
     );
     let v = ok(&p, &["ioc", "show", "1"]);
     assert_eq!(keys(&v["data"]), with(&ioc_keys, &["linked_entries"]));
@@ -1459,6 +1594,14 @@ fn reply_shapes_of_every_command() {
     let v = ok(&p, &["export", "timeline", &target]);
     assert_eq!(keys(&v["data"]), ["rows", "untrusted"]);
     assert_eq!(v["data"]["rows"], 1);
+    for (kind, name) in [("workbook", "shape.xlsx"), ("report", "shape.md")] {
+        let target = d.path().join(name).to_string_lossy().into_owned();
+        let v = ok(&p, &["export", kind, &target]);
+        assert_eq!(v["command"], format!("export {kind}"));
+        assert_eq!(keys(&v["data"]), ["rows", "untrusted"]);
+        assert!(v["data"]["rows"].as_u64().unwrap() >= 1, "{v}");
+        assert!(std::fs::metadata(&target).unwrap().len() > 0);
+    }
     let v = ok(&p, &["history", "--kind", "host"]);
     assert_eq!(keys(&v["data"]), ["entries", "untrusted"]);
     assert!(v["data"]["entries"].as_u64().unwrap() >= 3);
