@@ -1388,7 +1388,8 @@ fn hosts_and_accounts_narrow_by_text() {
     // In the name or the domain.
     assert_eq!(account_names("JDO"), ["jdoe"]);
     assert_eq!(account_names("acme"), ["jdoe"]);
-    assert_eq!(account_names("s"), ["asmith", "svc_backup"]);
+    // A name that starts with the text before one that holds it further in.
+    assert_eq!(account_names("s"), ["svc_backup", "asmith"]);
     assert_eq!(account_names("nobody"), Vec::<String>::new());
     // A filter is bounded like the other sheets'.
     let long = "x".repeat(1_001);
@@ -1396,6 +1397,70 @@ fn hosts_and_accounts_narrow_by_text() {
     assert_eq!(
         code(accounts_matching(&case, Some(&long), 10, 0)).0,
         "invalid"
+    );
+    drop(case);
+    drop(d);
+}
+
+#[test]
+fn record_text_matches_rank_exact_then_prefix_then_substring() {
+    use oxl_engine::{accounts_matching, hosts_matching};
+    let (d, mut case) = loaded();
+    // 200 hosts that hold the text, sorted before the one named it exactly.
+    for i in 0..200 {
+        upsert_host(&mut case, &host_spec(&format!("A-ZZZ-{i:03}")), &analyst()).unwrap();
+    }
+    upsert_host(&mut case, &host_spec("ZZZ-1"), &analyst()).unwrap();
+    upsert_host(&mut case, &host_spec("ZZZ"), &analyst()).unwrap();
+    let page = hosts_matching(&case, Some("zzz"), 200, 0).unwrap();
+    let names: Vec<&str> = page.items.iter().map(|h| h.name.as_str()).collect();
+    assert_eq!(names[..3], ["ZZZ", "ZZZ-1", "A-ZZZ-000"]);
+    assert!(page.truncated);
+    // No text: the sheet's order, by name.
+    assert_eq!(hosts(&case, 1, 0).unwrap().items[0].name, "A-ZZZ-000");
+
+    for (name, domain) in [("xjdoe", None), ("jdoe2", None), ("jdoe", Some("ACME"))] {
+        upsert_account(&mut case, &account_spec(name, domain), &analyst()).unwrap();
+    }
+    let accounts: Vec<String> = accounts_matching(&case, Some("JDOE"), 10, 0)
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|a| a.name)
+        .collect();
+    assert_eq!(accounts, ["jdoe", "jdoe2", "xjdoe"]);
+
+    for value in ["x-abc.example", "abc.example.org", "abc.example"] {
+        upsert_ioc(&mut case, &ioc_spec(IocType::Domain, value), &analyst()).unwrap();
+    }
+    upsert_ioc(
+        &mut case,
+        &ioc_spec(IocType::Other, "zabc.example"),
+        &analyst(),
+    )
+    .unwrap();
+    let values: Vec<String> = iocs(
+        &case,
+        &IocQuery {
+            text: Some("ABC.example".into()),
+            ..Default::default()
+        },
+        10,
+        0,
+    )
+    .unwrap()
+    .items
+    .into_iter()
+    .map(|i| i.value)
+    .collect();
+    assert_eq!(
+        values,
+        [
+            "abc.example",
+            "abc.example.org",
+            "x-abc.example",
+            "zabc.example"
+        ]
     );
     drop(case);
     drop(d);

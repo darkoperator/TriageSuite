@@ -326,7 +326,8 @@ fn check_filter(what: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
-/// Up to `limit` live IOC records from `offset` that `q` selects, by type
+/// Up to `limit` live IOC records from `offset` that `q` selects, the
+/// values closest to `q.text` first (`match_rank`), then by type
 /// (as spelled), then value (case ignored), then id. A case without the
 /// record tables has none. `Invalid` for a tool or text over 1,000
 /// characters, a `limit` of 0 or over `MAX_LIMIT`, or an `offset` past
@@ -360,14 +361,18 @@ pub fn iocs(case: &Case, q: &IocQuery, limit: u32, offset: u64) -> Result<Listin
             truncated: false,
         });
     }
+    // The closest values to the text first (`match_rank`), then the sheet's order.
+    let rank_text = q.text.clone().map_or(SqlValue::Null, SqlValue::Text);
+    params.extend(std::iter::repeat_n(rank_text, super::MATCH_RANK_PARAMS));
     params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
     let raw: Vec<RawIoc> = case
         .conn()
         .prepare(&format!(
-            "{} WHERE {} ORDER BY r.type, lower(r.value), r.id LIMIT ? OFFSET ?",
+            "{} WHERE {} ORDER BY {}, r.type, lower(r.value), r.id LIMIT ? OFFSET ?",
             ioc_select(),
-            filters.join(" AND ")
+            filters.join(" AND "),
+            super::match_rank("r.value")
         ))?
         .query_map(params_from_iter(params), raw_ioc)?
         .collect::<std::result::Result<_, _>>()?;

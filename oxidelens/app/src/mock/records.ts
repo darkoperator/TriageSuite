@@ -322,7 +322,10 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
       .filter((x) => !text || [x.value, x.tool, x.note].some((v) => v?.toLowerCase().includes(text)));
   }
   const key = (x: StoredRecord) => (x.name ?? x.value ?? "").toLowerCase();
-  all = [...all].sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : x.id - y.id));
+  // The engine's `match_rank`: the whole text first, then a value that starts with it, then one that holds it.
+  const typed = q.text?.toLowerCase();
+  const rank = (x: StoredRecord) => (!typed ? 0 : key(x) === typed ? 0 : key(x).startsWith(typed) ? 1 : 2);
+  all = [...all].sort((x, y) => rank(x) - rank(y) || (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : x.id - y.id));
   return page(all.map((x) => shownRecord(r, q.kind, x)), limit, offset);
 }
 

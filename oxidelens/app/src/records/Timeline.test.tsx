@@ -4,6 +4,7 @@
 // `api.ts`, in the whole shell, so a write's `case-changed` re-reads the sheet and the pane as the app does.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candidate } from "../contract/generated/Candidate";
 import type { Entry } from "../contract/generated/Entry";
@@ -414,6 +415,15 @@ describe("Host lanes", () => {
     await waitFor(() => expect(sheet()).toHaveFocus());
   });
 
+  it("the_lanes_show_where_the_focus_is", () => {
+    // With every entry undated the focus lands on the lanes themselves: they draw a focus indicator, never none.
+    const css = readFileSync("src/records/records.css", "utf8");
+    const rule = /\.host-lanes:focus(?:-visible)?\s*\{([^}]*)\}/.exec(css);
+    expect(rule).not.toBeNull();
+    expect(rule![1]).toMatch(/outline:\s*\d+px solid/);
+    expect(css).not.toMatch(/\.host-lanes:focus\s*\{\s*outline:\s*none/);
+  });
+
   it("n_works_in_lanes_with_only_undated_entries", async () => {
     const items = [entryOf({ id: 1, hosts: ["WS01"] }), entryOf({ id: 2 })];
     overrideCommand("entries_list", async () => ({ items, truncated: false }));
@@ -507,6 +517,25 @@ describe("linking a record by hand", () => {
     await user.click(found);
     await waitFor(() => expect(callsOf("record_link").map((c) => c.args)).toEqual([{ entryId: 1, kind: "host", recordId: 4242 }]));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("typing_a_full_name_lists_that_record_first", async () => {
+    // 200 hosts hold "ZZZ" and sort before the host named "ZZZ": the engine ranks the exact name first, and the picker
+    // shows its answer in that order.
+    const user = await openTimeline();
+    await act(async () => {
+      for (let i = 0; i < 200; i++) {
+        await mockCall("record_upsert", { spec: { kind: "host", id: null, name: `A-ZZZ-${String(i).padStart(3, "0")}`, role: "", note: "" } });
+      }
+      await mockCall("record_upsert", { spec: { kind: "host", id: null, name: "ZZZ", role: "", note: "" } });
+    });
+    const editor = await select(user, 1);
+    await user.click(await within(editor).findByRole("button", { name: "+ link a host, account or IOC" }));
+    const dialog = await screen.findByRole("dialog", { name: "Link a record" });
+    const list = within(dialog).getByRole("listbox", { name: "Records" });
+    await user.type(within(dialog).getByRole("searchbox", { name: "Filter records" }), "ZZZ");
+    await waitFor(() => expect(within(list).getAllByRole("option")[0].textContent).toBe("ZZZ"));
+    expect(within(list).getAllByRole("option")).toHaveLength(200);
   });
 
   it("closing_the_link_picker_cancels_its_read", async () => {

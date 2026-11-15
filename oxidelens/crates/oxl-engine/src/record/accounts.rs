@@ -319,7 +319,8 @@ pub fn accounts(case: &Case, limit: u32, offset: u64) -> Result<Listing<AccountR
 }
 
 /// [`accounts`] narrowed to the accounts whose name or domain holds `text`
-/// (case ignored); `None` lists every one. `Invalid` as `accounts` is, and
+/// (case ignored), the closest names first (`match_rank`); `None` lists
+/// every one. `Invalid` as `accounts` is, and
 /// for a text over 1,000 characters.
 pub fn accounts_matching(
     case: &Case,
@@ -344,11 +345,21 @@ pub fn accounts_matching(
             "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
              OR contains(lower(r.name), lower(?)) \
              OR contains(lower(coalesce(r.domain, '')), lower(?))) \
-             ORDER BY lower(r.name), lower(r.domain) NULLS FIRST, r.id LIMIT ? OFFSET ?",
-            account_select()
+             ORDER BY {}, lower(r.name), lower(r.domain) NULLS FIRST, r.id LIMIT ? OFFSET ?",
+            account_select(),
+            super::match_rank("r.name")
         ))?
         .query_map(
-            params![text, text, text, fetch_limit(limit), offset],
+            params![
+                text,
+                text,
+                text,
+                text,
+                text,
+                text,
+                fetch_limit(limit),
+                offset
+            ],
             raw_account,
         )?
         .collect::<std::result::Result<_, _>>()?;

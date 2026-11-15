@@ -296,8 +296,8 @@ pub fn hosts(case: &Case, limit: u32, offset: u64) -> Result<Listing<HostRecord>
     hosts_matching(case, None, limit, offset)
 }
 
-/// [`hosts`] narrowed to the hosts whose name holds `text` (case ignored);
-/// `None` lists every one. `Invalid` as `hosts` is, and for a text over
+/// [`hosts`] narrowed to the hosts whose name holds `text` (case ignored),
+/// the closest matches first (`match_rank`); `None` lists every one. `Invalid` as `hosts` is, and for a text over
 /// 1,000 characters.
 pub fn hosts_matching(
     case: &Case,
@@ -321,10 +321,14 @@ pub fn hosts_matching(
         .prepare(&format!(
             "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
              OR contains(lower(r.name), lower(?))) \
-             ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?",
-            host_select()
+             ORDER BY {}, lower(r.name), r.id LIMIT ? OFFSET ?",
+            host_select(),
+            super::match_rank("r.name")
         ))?
-        .query_map(params![text, text, fetch_limit(limit), offset], raw_host)?
+        .query_map(
+            params![text, text, text, text, text, fetch_limit(limit), offset],
+            raw_host,
+        )?
         .collect::<std::result::Result<_, _>>()?;
     let items = raw
         .into_iter()

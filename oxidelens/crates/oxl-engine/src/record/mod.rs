@@ -104,6 +104,24 @@ pub(crate) fn check_name_filter(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// How well `column` (SQL over a record) matches the text a list is
+/// narrowed by, as an `ORDER BY` key ahead of the list's own order: `0` for
+/// the whole text (case ignored), `1` for a value that starts with it, `2`
+/// for one that holds it elsewhere, and `0` for every record when there is
+/// no text. One ranking for the Hosts, Accounts and IOCs lists, so the
+/// record typed in full comes first however many others hold it. It takes
+/// `MATCH_RANK_PARAMS` bound values, each the text (or `NULL`).
+pub(crate) fn match_rank(column: &str) -> String {
+    format!(
+        "CASE WHEN CAST(? AS VARCHAR) IS NULL THEN 0 \
+         WHEN lower({column}) = lower(?) THEN 0 \
+         WHEN starts_with(lower({column}), lower(?)) THEN 1 ELSE 2 END"
+    )
+}
+
+/// How many values `match_rank`'s expression binds.
+pub(crate) const MATCH_RANK_PARAMS: usize = 3;
+
 /// Whether `case` has the record tables.
 pub(crate) fn has_records(case: &Case) -> bool {
     case.format() >= RECORD_FORMAT
