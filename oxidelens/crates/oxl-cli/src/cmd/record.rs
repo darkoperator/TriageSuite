@@ -156,6 +156,7 @@ pub fn entry(ctx: &Ctx, cmd: &EntryCmd) -> Result<Reply> {
                 tactic: tactic.clone(),
                 text: text.clone(),
                 row: None,
+                order: None,
             };
             let case = ctx.read_case()?;
             let list = oxl_engine::entries(&case, &q, page.limit, page.offset)?;

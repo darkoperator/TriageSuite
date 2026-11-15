@@ -30,6 +30,9 @@ export interface GroupBodyProps {
   pinLeft: readonly (number | null)[];
   width: number;
   rowHeight: number;
+  /** The focused data row (by row id) and column; the grid moves it with the arrows and the row keys act on it. */
+  focus: { rowId: number; col: number } | null;
+  onRowClick(rowId: number, col: number): void;
   onToggle(path: Key[]): void;
   onOpen(path: Key[]): void;
   onMore(kind: "groups" | "rows", path: Key[]): void;
@@ -91,13 +94,17 @@ export default function GroupBody(p: GroupBodyProps): ReactNode {
           case "row": {
             const mark = item.page.marks[item.k] ?? null;
             const cells = item.page.cells[item.k];
+            const rowId = item.page.row_ids[item.k];
+            const focused = p.focus !== null && p.focus.rowId === rowId;
             return (
               <div
                 key={item.id}
                 role="row"
                 data-kind="row"
                 data-depth={item.depth}
-                className={`grid-row${odd}`}
+                data-row-id={rowId}
+                aria-selected={focused}
+                className={`grid-row${odd}${focused ? " row-selected" : ""}`}
                 style={style}
               >
                 <div role="gridcell" className="cell cell-mark" style={{ width: MARK_WIDTH }}>
@@ -108,11 +115,14 @@ export default function GroupBody(p: GroupBodyProps): ReactNode {
                   const cell = at >= 0 ? cells[at] : undefined;
                   const left = p.pinLeft[c];
                   return (
+                    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- the grid (Grid.tsx) holds focus and moves the focused row and cell with the arrow keys; a cell is not a tab stop
                     <div
                       key={c}
                       role="gridcell"
                       className={left === null ? "cell" : "cell cell-pinned"}
+                      data-focused={focused && p.focus?.col === c ? "true" : undefined}
                       style={{ width: w, left: left ?? undefined }}
+                      onClick={() => p.onRowClick(rowId, c)}
                     >
                       {cell && <CellText cell={cell} />}
                     </div>

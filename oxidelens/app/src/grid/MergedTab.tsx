@@ -7,7 +7,7 @@
 // listed, by their row ids, so a re-read after a write keeps what is checked. M shows its entry in the right pane.
 //
 // One read per page, on slot `tab:<id>:merged:<offset>`; a read belongs to a key (zone and case generation) and is drawn
-// only while that key is current. Reads pause while the tab is hidden.
+// only while that key is current. A new key reads again as many pages as the list held. Reads pause while the tab is hidden.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { isCmdError, mergedPage, newQueryId, queryCancel } from "../api";
 import type { MergedView } from "../contract/generated/MergedView";
@@ -62,13 +62,26 @@ export function MergedTab({ tab, active }: { tab: Tab; active: boolean }): React
     [source, summary.display_zone, tab.id, reportError],
   );
 
+  // How many rows the list holds, so a re-read (a write's `case-changed`, a zone) reads as many pages again: rows the
+  // analyst loaded with *Load more*, and checked, stay listed and stay checked.
+  const heldRows = useRef(0);
+  useEffect(() => {
+    if (loaded) heldRows.current = loaded.items.length;
+  }, [loaded]);
   useEffect(() => {
     if (!active) return;
     let live = true;
     const ids = inFlight.current;
-    void read(key, 0).then((first) => {
-      if (live && first) setLoaded(first);
-    });
+    const want = heldRows.current;
+    void (async () => {
+      let acc = await read(key, 0);
+      while (live && acc && acc.truncated && acc.items.length < want) {
+        const next = await read(key, acc.items.length);
+        if (!next) return;
+        acc = { key, items: [...acc.items, ...next.items], truncated: next.truncated };
+      }
+      if (live && acc) setLoaded(acc);
+    })();
     return () => {
       live = false;
       if (ids.size > 0) void queryCancel([...ids]).catch(() => {});

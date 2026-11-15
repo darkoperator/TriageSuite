@@ -2,7 +2,7 @@
 // are offered to pick from; the name is the engine's to check, and its refusal is shown here. Rows it did not take are
 // said in the status bar.
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { tagAdd, tagRemove, tagsList } from "../api";
+import { newQueryId, queryCancel, tagAdd, tagRemove, tagsList } from "../api";
 import type { TagInfo } from "../contract/generated/TagInfo";
 import { displaySafe } from "../text";
 import { isStale, messageOf, rowRefusals } from "./outcomes";
@@ -26,15 +26,23 @@ export default function TagDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Read once when the dialog opens; closing it before the answer cancels the read and drops the answer.
     let live = true;
-    tagsList(OFFERED, 0, "dialog:tags").then(
-      (page) => live && setKnown(page.items),
+    let settled = false;
+    const id = newQueryId();
+    tagsList(OFFERED, 0, "dialog:tags", id).then(
+      (page) => {
+        settled = true;
+        if (live) setKnown(page.items);
+      },
       (e: unknown) => {
+        settled = true;
         if (live && !isStale(e)) report(e);
       },
     );
     return () => {
       live = false;
+      if (!settled) void queryCancel([id]).catch(() => {});
     };
   }, [report]);
 
@@ -60,7 +68,7 @@ export default function TagDialog({
       <p className="form-hint">{`${fmt(rows.length)} ${rows.length === 1 ? "row" : "rows"}`}</p>
       <label className="form-field">
         <span>Tag</span>
-        <input type="text" aria-label="Tag" value={tag} maxLength={200} onChange={(e) => setTag(e.target.value)} onKeyDown={onKey} />
+        <input type="text" aria-label="Tag" value={tag} onChange={(e) => setTag(e.target.value)} onKeyDown={onKey} />
       </label>
       {known.length > 0 && (
         <div className="record-picks" role="group" aria-label="Tags in the case">

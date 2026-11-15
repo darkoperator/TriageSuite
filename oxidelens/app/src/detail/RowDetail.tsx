@@ -8,7 +8,7 @@
 // only while the screen still has that key, so a slow old row never replaces a new one, and leaving a key cancels what
 // is still running. Writes go to the engine as typed; a refusal is shown in the status bar with the engine's reason, and
 // the `case-changed` that follows a write re-reads the pane.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   aroundTotals, entriesList, isCmdError, markClear, markSet, newQueryId, noteAdd, noteDelete, queryCancel, rowsPromote, rowView, tagAdd,
   tagRemove,
@@ -99,7 +99,7 @@ export default function RowDetail({ rowId, onFilter, onShowRow, onShowEntry }: R
     let live = true;
     const id = newQueryId();
     let settled = false;
-    const query = { status: [], host: null, tactic: null, text: null, row: rowId };
+    const query = { status: [], host: null, tactic: null, text: null, row: rowId, order: null };
     entriesList(query, LINKED, 0, "detail:entries", id).then(
       (page) => {
         settled = true;
@@ -144,6 +144,45 @@ export default function RowDetail({ rowId, onFilter, onShowRow, onShowEntry }: R
   const view = record?.about === about ? record.view : null;
   const totals = aroundRecord?.about === String(rowId) ? aroundRecord.totals : null;
   const entries = linked?.about === String(rowId) ? linked : null;
+
+  // *Show more* reads the next page of linked entries for the key it was asked under; a newer key (another row, a
+  // write) cancels it and drops its answer.
+  const keyRef = useRef(aroundKey);
+  const moreRead = useRef<string | null>(null);
+  // The key a *Show more* read runs for: busy only while that key is shown.
+  const [moreFor, setMoreFor] = useState<string | null>(null);
+  const moreBusy = moreFor === aroundKey;
+  useEffect(() => {
+    keyRef.current = aroundKey;
+    const id = moreRead.current;
+    moreRead.current = null;
+    if (id) void queryCancel([id]).catch(() => {});
+  }, [aroundKey]);
+  useEffect(
+    () => () => {
+      if (moreRead.current) void queryCancel([moreRead.current]).catch(() => {});
+    },
+    [],
+  );
+  const showMore = async () => {
+    if (!entries || moreRead.current) return;
+    const forKey = aroundKey;
+    const about = String(rowId);
+    const id = newQueryId();
+    moreRead.current = id;
+    setMoreFor(forKey);
+    try {
+      const query = { status: [], host: null, tactic: null, text: null, row: rowId, order: null };
+      const page = await entriesList(query, LINKED, entries.items.length, "detail:entries:more", id);
+      if (keyRef.current !== forKey) return;
+      setLinked((l) => (l && l.about === about ? { about, items: [...l.items, ...page.items], truncated: page.truncated } : l));
+    } catch (e) {
+      if (keyRef.current === forKey && !obsolete(e)) reportError(e);
+    } finally {
+      if (moreRead.current === id) moreRead.current = null;
+      setMoreFor((k) => (k === forKey ? null : k));
+    }
+  };
 
   /** One write of the pane's at a time; what the engine refuses goes to the status bar. */
   const write = async (work: () => Promise<string | null | void>) => {
@@ -333,7 +372,6 @@ export default function RowDetail({ rowId, onFilter, onShowRow, onShowEntry }: R
             type="text"
             aria-label="New tag"
             value={newTag}
-            maxLength={200}
             onChange={(e) => setNewTag(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && newTag !== "") void addTag();
@@ -383,7 +421,11 @@ export default function RowDetail({ rowId, onFilter, onShowRow, onShowEntry }: R
             ))}
           </ul>
         )}
-        {entries?.truncated && <p className="detail-note">{`The first ${LINKED} entries.`}</p>}
+        {entries?.truncated && (
+          <button type="button" disabled={moreBusy} onClick={() => void showMore()}>
+            Show more
+          </button>
+        )}
       </section>
     </div>
   );

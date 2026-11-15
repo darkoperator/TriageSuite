@@ -11,7 +11,7 @@ import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
 import {
-  columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowIds, gridRowOffset, gridRowPositions, isCmdError,
+  cellValue as readCell, columns as readColumns, defaultColourRules, gridEmptyColumns, gridExport, gridPage, gridRowIds, gridRowOffset, gridRowPositions, isCmdError,
   newQueryId, queryCancel, viewSave,
 } from "../api";
 import { pickCsvSavePath } from "../dialogs";
@@ -84,6 +84,10 @@ let revealCount = 0;
 /** A token no other reveal request of this window has: a counter and some randomness (never a clock). */
 const revealToken = () => `${(revealCount++).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
+/** The same rows picked: the eager resolve filling in `ids` is not a new pick. */
+const sameRows = (a: Selection, b: Selection) =>
+  a === b || (a.ranges.length === b.ranges.length && a.ranges.every(([x, y], i) => b.ranges[i][0] === x && b.ranges[i][1] === y));
+
 interface Focus {
   row: number;
   col: number;
@@ -102,6 +106,8 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const grouped = by.length > 0;
   const [selection, setSelection] = useState<Selection>(emptySelection);
   const [focus, setFocus] = useState<Focus | null>(null);
+  // A grouped list's focused data row (by row id, as group items move when groups open and close) and column.
+  const [groupFocus, setGroupFocus] = useState<{ rowId: number; col: number } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [viewer, setViewer] = useState<{ rowId: number; column: string } | null>(null);
   const [allMetas, setAllMetas] = useState<ColumnMeta[] | null>(null);
@@ -216,6 +222,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   const changeState = useCallback((edit: (s: GridState) => GridState) => {
     setState(edit);
     setSelection(emptySelection);
+    setGroupFocus(null);
     setMenu(null);
   }, []);
 
@@ -816,8 +823,43 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   useEffect(() => {
     focusRef.current = focus;
   });
+  // The `grid_row_ids` an action is waiting on: cancelled when the state or the selection it was asked for moves on, or
+  // the tab closes, so the engine stops reading for an answer that would act on nothing.
+  const actionRead = useRef<{ queryId: string; sel: Selection; key: string } | null>(null);
+  useEffect(() => {
+    const r = actionRead.current;
+    if (r && (r.key !== shownKey || !sameRows(r.sel, selection))) {
+      actionRead.current = null;
+      void queryCancel([r.queryId]).catch(() => {});
+    }
+  }, [shownKey, selection]);
+  useEffect(
+    () => () => {
+      const r = actionRead.current;
+      actionRead.current = null;
+      if (r) void queryCancel([r.queryId]).catch(() => {});
+    },
+    [],
+  );
+  const groupFocusRef = useRef(groupFocus);
+  const itemsRef = useRef(tree.items);
+  useEffect(() => {
+    groupFocusRef.current = groupFocus;
+    itemsRef.current = tree.items;
+  });
+  /** The grouped list's focused data row, as the tree holds it now; null when it is not listed (a group closed). */
+  const groupRow = () => {
+    const g = groupFocusRef.current;
+    if (!g) return null;
+    const item = itemsRef.current.find((it) => it.kind === "row" && it.page.row_ids[it.k] === g.rowId);
+    return item && item.kind === "row" ? { ...g, item } : null;
+  };
   const rowSource: RowSource = {
     rows: async () => {
+      if (grouped) {
+        const g = groupRow();
+        return g ? [g.rowId] : null;
+      }
       const sel = selectionRef.current;
       const f = focusRef.current;
       const picked = size(sel) > 0 ? sel : f ? selectOnly(f.row) : null;
@@ -829,10 +871,21 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       if (inMemory !== null) return inMemory;
       const key = shownKeyRef.current;
       const ranges = picked.ranges.map(([a, b]): [number, number] => [a, b]);
-      const ids = await gridRowIds(shownStateRef.current, ranges, `tab:${tab.id}:action`);
-      return shownKeyRef.current === key && selectionRef.current === sel ? ids : null;
+      const queryId = newQueryId();
+      actionRead.current = { queryId, sel, key };
+      try {
+        const ids = await gridRowIds(shownStateRef.current, ranges, `tab:${tab.id}:action`, queryId);
+        return shownKeyRef.current === key && sameRows(selectionRef.current, sel) ? ids : null;
+      } catch (e) {
+        // A read cancelled because the view moved on acts on nothing and says nothing.
+        if (actionRead.current?.queryId !== queryId) return null;
+        throw e;
+      } finally {
+        if (actionRead.current?.queryId === queryId) actionRead.current = null;
+      }
     },
     noteRow: () => {
+      if (grouped) return groupRow()?.rowId ?? null;
       const f = focusRef.current;
       if (f) return rowAt(f.row)?.id ?? null;
       const sel = selectionRef.current;
@@ -840,6 +893,17 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       return sel.ids?.[0] ?? known(sel)?.[0] ?? null;
     },
     cellValue: async () => {
+      if (grouped) {
+        const g = groupRow();
+        const column = g ? names[g.col] : undefined;
+        if (!g || column === undefined) return null;
+        const at = g.item.page.columns.findIndex((c) => c.name === column);
+        const cell = at >= 0 ? g.item.page.cells[g.item.k][at] : null;
+        if (!cell) return null;
+        if (!cell.clipped) return cell.text ?? "";
+        const whole = await readCell(g.rowId, column, `tab:${tab.id}:ioc`);
+        return groupFocusRef.current?.rowId === g.rowId ? (whole.text ?? "") : null;
+      }
       const f = focusRef.current;
       if (!f) return null;
       const row = rowAt(f.row);
@@ -854,11 +918,33 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   };
   const rowActions = useRowActions(rowSource, { report: reportError, onEntry: setDetailEntry, enabled: active });
 
+  /** Moves the grouped list's focus to the next or previous data row (`dr`) or column (`dc`). */
+  const moveGroupFocus = (dr: number, dc: number) => {
+    const rows = tree.items.flatMap((it, i) => (it.kind === "row" ? [{ i, rowId: it.page.row_ids[it.k] }] : []));
+    if (rows.length === 0 || names.length === 0) return;
+    const at = groupFocus ? rows.findIndex((r) => r.rowId === groupFocus.rowId) : -1;
+    const next = rows[Math.min(rows.length - 1, Math.max(0, at < 0 ? 0 : at + dr))];
+    const col = Math.min(names.length - 1, Math.max(0, (groupFocus?.col ?? 0) + dc));
+    setGroupFocus({ rowId: next.rowId, col });
+    virtualizer.scrollToIndex(next.i, { align: "auto" });
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
     if (isTypingTarget(t) || t.tagName === "INPUT") return;
-    // The shortcuts below work on the flat list's offsets; the group list has its own (buttons, native Space and Enter).
-    if (grouped) return;
+    // The shortcuts below work on the flat list's offsets. The group list has its own (buttons, native Space and Enter),
+    // and its data rows take the arrows and the row keys, which act on the focused data row's id.
+    if (grouped) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        moveGroupFocus(e.key === "ArrowDown" ? 1 : -1, 0);
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        moveGroupFocus(0, e.key === "ArrowRight" ? 1 : -1);
+      } else rowActions.onKey(e);
+      return;
+    }
     const height = scrollRef.current?.clientHeight ?? 0;
     const page = height > 0 ? Math.max(1, Math.floor(height / rowHeight) - 1) : 10;
     const mod = e.ctrlKey || e.metaKey;
@@ -939,6 +1025,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   // ---- grouping ---------------------------------------------------------------------------------------------------
   const changeBy = useCallback((next: string[]) => {
+    setGroupFocus(null);
     setBy(next);
     setSelection(emptySelection);
     setFocus(null);
@@ -1178,6 +1265,11 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
               pinLeft={pinLeft}
               width={width}
               rowHeight={rowHeight}
+              focus={groupFocus}
+              onRowClick={(rowId, col) => {
+                setGroupFocus({ rowId, col });
+                showRow(rowId);
+              }}
               onToggle={tree.toggle}
               onOpen={openGroup}
               onMore={tree.more}

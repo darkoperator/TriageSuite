@@ -12,6 +12,8 @@ import type { GridPage } from "../contract/generated/GridPage";
 import type { GridState } from "../contract/generated/GridState";
 import type { MergedSource } from "../contract/generated/MergedSource";
 import Grid from "../grid/Grid";
+import { initialGridState } from "../grid/gridState";
+import type { Entry } from "../contract/generated/Entry";
 import { HAYABUSA_FIRST_ID, hayabusaRows } from "../mock/generated";
 import { mockCall, setMockMarks } from "../mock/backend";
 import { ShellCtx, type ShellContext } from "../shell/context";
@@ -101,7 +103,8 @@ async function mountGrid(tab: Tab, prepare: () => void = () => {}) {
       <Grid tab={tab} active scrollOffset={0} onScroll={() => {}} />
     </ShellCtx.Provider>,
   );
-  await waitFor(() => expect(dataRows().length).toBeGreaterThan(0));
+  // A grouped list has group rows, not the flat list's indexed rows.
+  if (!tab.seed?.by.length) await waitFor(() => expect(dataRows().length).toBeGreaterThan(0));
   return { ctx, user: userEvent.setup() };
 }
 const eventsTab: Tab = { id: "dataset:mock_events", kind: "dataset", relation: "mock_events" };
@@ -639,15 +642,230 @@ describe("left pane", () => {
     expect(within(rail).getByLabelText("1 malicious")).toBeInTheDocument();
     expect(within(rail).getByLabelText("1 agent: malicious")).toBeInTheDocument();
   });
+});
 
-  it("the_key_strip_lists_the_live_keys", async () => {
-    render(<Shell />);
+// ---- fix round 1 ----------------------------------------------------------------------------------------------------------
+/** The query id of the last call of `cmd` that `pick` takes. */
+const queryIdOf = (cmd: string, pick: (args: Record<string, unknown>) => boolean = () => true) =>
+  (callsOf(cmd).filter((c) => pick(c.args as Record<string, unknown>)).at(-1)!.args as { queryId: string }).queryId;
+const cancelledIds = () => callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds);
+
+describe("fix round 1", () => {
+  it("grouped_rows_take_the_row_keys", async () => {
+    const grouped: Tab = {
+      id: "scoped:grouped", kind: "dataset", relation: "mock_events", title: "grouped",
+      seed: { state: initialGridState("mock_events"), by: ["Channel"] },
+    };
+    const { user } = await mountGrid(grouped);
+    const toggle = await screen.findAllByRole("button", { name: /^Expand Channel/ });
+    await user.click(toggle[0]);
+    await waitFor(() => expect(document.querySelectorAll("[data-kind='row']").length).toBeGreaterThan(2));
+    const rows = () => [...document.querySelectorAll<HTMLElement>("[data-kind='row']")];
+    // The cells of a group row are drawn in the header's order after the mark cell; Channel is plain text.
+    const names = screen.getAllByRole("columnheader").flatMap((h) => (h.querySelector(".col-name") ? [h.querySelector(".col-name")!.textContent] : []));
+    const channel = names.indexOf("Channel") + 1;
+    const first = rows()[0];
+    const firstId = Number(first.getAttribute("data-row-id"));
+    expect(firstId).toBeGreaterThan(0);
+    await user.click(within(first).getAllByRole("gridcell")[channel]);
+    expect(rows()[0]).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("s");
+    await waitFor(() => expect(rowsOf("mark_set")).toEqual([[firstId]]));
+    // The arrows move to the next data row; U acts on it.
+    await user.keyboard("{ArrowDown}");
+    const secondId = Number(rows()[1].getAttribute("data-row-id"));
+    expect(rows()[1]).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("u");
+    await waitFor(() => expect(rowsOf("mark_clear")).toEqual([[secondId]]));
+    // I takes the focused cell's value.
+    await user.keyboard("i");
+    const dialog = await screen.findByRole("dialog", { name: "Add IOC" });
+    expect((within(dialog).getByRole("textbox", { name: "IOC value" }) as HTMLInputElement).value).toBe(
+      within(rows()[1]).getAllByRole("gridcell")[channel].textContent,
+    );
+  });
+
+  it("the_key_strip_follows_the_active_tab", async () => {
     const user = userEvent.setup();
+    render(<Shell />);
     await user.click(await screen.findByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ }));
     await screen.findByRole("tab", { name: "Overview" });
-    expect(screen.getByLabelText("Keys").textContent).toBe(
+    const strip = () => screen.getByLabelText("Keys").textContent;
+    expect(strip()).toBe("Ctrl+[ Ctrl+] panes");
+    const left = screen.getByRole("complementary", { name: "Case" });
+    await user.click(within(left).getByRole("button", { name: /^mock_events/ }));
+    await screen.findByRole("tab", { name: /mock_events/, selected: true });
+    expect(strip()).toBe(
       "S suspicious · U clear mark · M malicious → timeline · T tag · N note · A attach · I add as IOC · " +
         "Space full value · Enter row detail · Ctrl+C copy · Ctrl+Shift+C copy rows · Ctrl+[ Ctrl+] panes",
     );
+    await user.click(within(left).getByRole("button", { name: "Suspicious 3" }));
+    await screen.findByRole("tab", { name: /Suspicious rows/, selected: true });
+    expect(strip()).toBe("S suspicious · U clear mark · M malicious → timeline · T tag · N note · A attach · Ctrl+[ Ctrl+] panes");
+  });
+
+  it("a_lists_the_newest_entries_first", async () => {
+    const user = await openShell();
+    await user.click(cellOf(rowOf(0), "Channel"));
+    await user.keyboard("a");
+    const dialog = await screen.findByRole("dialog", { name: "Attach to an entry" });
+    await waitFor(() => expect(within(dialog).getAllByRole("option").length).toBe(4));
+    expect(within(dialog).getAllByRole("option").map((o) => o.querySelector(".record-id")!.textContent)).toEqual(["E-4", "E-3", "E-2", "E-1"]);
+    expect((callsOf("entries_list").at(-1)!.args as { query: { order: string | null } }).query.order).toBe("recent");
+  });
+
+  it("an_agents_entry_says_added_by_agent_before_and_after_review", async () => {
+    const user = await openShell();
+    await user.click(cellOf(rowOf(await indexOf(12)), "Channel"));
+    const linked = await within(rightPane()).findByRole("region", { name: "Linked entries" });
+    await user.click(await within(linked).findByRole("button", { name: /E-2/ }));
+    const card = await within(rightPane()).findByRole("region", { name: "Entry E-2" });
+    await waitFor(() => expect(card.textContent).toContain("added by agent: triage-bot"));
+    expect(card.textContent).toContain("unreviewed");
+    await act(async () => {
+      await mockCall("entry_status", { id: 2, status: "reviewed" });
+    });
+    await waitFor(() => expect(within(rightPane()).getByRole("region", { name: "Entry E-2" }).textContent).toContain("reviewed by"));
+    expect(within(rightPane()).getByRole("region", { name: "Entry E-2" }).textContent).toContain("added by agent: triage-bot");
+    // An analyst's entry names its author as stored.
+    await user.click(cellOf(rowOf(await indexOf(7)), "Channel"));
+    await user.click(await within(await within(rightPane()).findByRole("region", { name: "Linked entries" })).findByRole("button", { name: /E-1/ }));
+    const own = await within(rightPane()).findByRole("region", { name: "Entry E-1" });
+    await waitFor(() => expect(own.textContent).toContain("analyst:analyst01"));
+    expect(own.textContent).not.toContain("added by agent");
+  });
+
+  it("linked_entries_page_past_fifty", async () => {
+    await caseOpen("/cases/x.duckdb");
+    const template = await mockCall<Entry>("entry_get", { queryId: "t", slot: "t", id: 1 });
+    const all: Entry[] = Array.from({ length: 51 }, (_, i) => ({ ...template, id: 100 + i, title: `Linked ${i}` }));
+    overrideCommand("entries_list", async (args) => {
+      const a = args as { query: { row: number | null }; limit: number; offset: number };
+      if (a.query.row === null) return mockCall("entries_list", args);
+      return { items: all.slice(a.offset, a.offset + a.limit), truncated: a.offset + a.limit < all.length };
+    });
+    const user = await openShell();
+    await user.click(cellOf(rowOf(0), "Channel"));
+    const linked = await within(rightPane()).findByRole("region", { name: "Linked entries" });
+    await waitFor(() => expect(within(linked).getAllByRole("button", { name: /^E-/ })).toHaveLength(50));
+    await user.click(within(linked).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(linked).getAllByRole("button", { name: /^E-/ })).toHaveLength(51));
+    expect(within(linked).getByRole("button", { name: /E-150/ })).toBeInTheDocument();
+    expect(within(linked).queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("a_worklist_selection_past_page_one_survives_a_refresh", async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    await user.click(await screen.findByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ }));
+    await screen.findByRole("tab", { name: "Overview" });
+    setMockMarks(Array.from({ length: 250 }, (_, i) => [100 + i, "suspicious"] as const));
+    await act(async () => {
+      await mockCall("display_zone_set", { zone: "UTC" });
+    });
+    const left = screen.getByRole("complementary", { name: "Case" });
+    await user.click(await within(left).findByRole("button", { name: "Suspicious 250" }));
+    const panel = await screen.findByRole("tabpanel", { name: /Suspicious rows/ });
+    await waitFor(() => expect(within(panel).getAllByRole("checkbox")).toHaveLength(200));
+    await user.click(within(panel).getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(within(panel).getAllByRole("checkbox")).toHaveLength(250));
+    await user.click(within(panel).getByRole("checkbox", { name: "Select row 320" }));
+    const reads = callsOf("merged_page").length;
+    await act(async () => {
+      await mockCall("display_zone_set", { zone: "UTC" });
+    });
+    await waitFor(() => expect(callsOf("merged_page").length).toBeGreaterThanOrEqual(reads + 2));
+    await waitFor(() => expect(within(panel).getAllByRole("checkbox")).toHaveLength(250));
+    const again = within(panel).getByRole("checkbox", { name: "Select row 320" });
+    expect(again).toBeChecked();
+    again.focus();
+    await user.keyboard("t");
+    const dialog = await screen.findByRole("dialog", { name: "Tag rows" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Tag" }), "late");
+    await user.click(within(dialog).getByRole("button", { name: "Add tag" }));
+    await waitFor(() => expect(callsOf("tag_add").map((c) => c.args)).toEqual([{ rows: [320], tag: "late" }]));
+  });
+
+  it("a_deleted_entry_shows_as_gone", async () => {
+    const user = await openShell();
+    await user.click(cellOf(rowOf(3), "Channel"));
+    await user.keyboard("m");
+    const card = await within(rightPane()).findByRole("region", { name: "Entry E-5" });
+    await waitFor(() => expect(card.textContent).toContain("draft"));
+    await act(async () => {
+      await mockCall("entry_delete", { id: 5 });
+    });
+    await waitFor(() => expect(within(rightPane()).getByRole("region", { name: "Entry E-5" }).textContent).toContain("This entry was deleted."));
+    expect(within(rightPane()).getByRole("region", { name: "Entry E-5" }).textContent).not.toContain("draft");
+  });
+
+  it("closing_the_tag_dialog_cancels_its_read", async () => {
+    const user = await openShell();
+    overrideCommand("tags_list", () => new Promise(() => {}));
+    await user.click(cellOf(rowOf(0), "Channel"));
+    await user.keyboard("t");
+    await screen.findByRole("dialog", { name: "Tag rows" });
+    await waitFor(() => expect(callsOf("tags_list")).toHaveLength(1));
+    const id = queryIdOf("tags_list");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(cancelledIds()).toContain(id));
+  });
+
+  it("a_state_change_cancels_the_actions_row_ids", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("grid_row_ids", async (args) => {
+      await gate;
+      return mockCall("grid_row_ids", args);
+    });
+    const { user } = await mountGrid(eventsTab);
+    await waitFor(() => expect(cellOf(rowOf(0), "Channel").textContent).not.toBe(""));
+    await user.click(cellOf(rowOf(10), "Channel"));
+    scrollTops.set(screen.getByTestId("grid-scroll"), 1500 * 22);
+    await act(async () => {
+      fireEvent.scroll(screen.getByTestId("grid-scroll"));
+    });
+    await waitFor(() => expect(rowOf(1500)).toBeTruthy());
+    await waitFor(() => expect(cellOf(rowOf(1500), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(1500), "Channel"));
+    await user.keyboard("{/Shift}");
+    await user.keyboard("s");
+    const isAction = (a: Record<string, unknown>) => String(a.slot).endsWith(":action");
+    await waitFor(() => expect(callsOf("grid_row_ids").filter((c) => isAction(c.args as Record<string, unknown>))).toHaveLength(1));
+    const id = queryIdOf("grid_row_ids", isAction);
+    // Hiding a column changes the state the indexes belong to: the action's read is cancelled and nothing is written.
+    fireEvent.contextMenu(header("Channel"));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Hide" }));
+    await waitFor(() => expect(cancelledIds()).toContain(id));
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(callsOf("mark_set")).toHaveLength(0);
+  }, 30_000);
+
+  it("a_long_tag_reaches_the_engine_and_its_refusal_is_shown", async () => {
+    overrideCommand("tag_add", async (args) => {
+      const tag = (args as { tag: string }).tag;
+      throw { code: "invalid", message: `a tag is at most 64 characters, not ${tag.length}` };
+    });
+    const user = await openShell();
+    await user.click(cellOf(rowOf(0), "Channel"));
+    const tags = await within(rightPane()).findByRole("region", { name: "Tags" });
+    const long = "x".repeat(210);
+    const input = within(tags).getByRole("textbox", { name: "New tag" });
+    expect(input).not.toHaveAttribute("maxlength");
+    await user.click(input);
+    await user.paste(long);
+    await user.click(within(tags).getByRole("button", { name: "Add tag" }));
+    await waitFor(() => expect(callsOf("tag_add").map((c) => (c.args as { tag: string }).tag)).toEqual([long]));
+    expect((await screen.findByRole("alert")).textContent).toContain("a tag is at most 64 characters, not 210");
+    // The tag dialog has no cap of its own either.
+    await user.click(screen.getByRole("button", { name: "Dismiss error" }));
+    await user.click(cellOf(rowOf(0), "Channel"));
+    await user.keyboard("t");
+    const dialog = await screen.findByRole("dialog", { name: "Tag rows" });
+    expect(within(dialog).getByRole("textbox", { name: "Tag" })).not.toHaveAttribute("maxlength");
   });
 });

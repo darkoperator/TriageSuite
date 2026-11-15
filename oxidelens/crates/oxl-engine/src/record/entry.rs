@@ -123,6 +123,30 @@ pub struct EntryEdit {
     pub technique_ids: Option<Vec<String>>,
 }
 
+/// The order a list of entries comes in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum EntryOrder {
+    /// The Timeline's: by time, the undated after every dated one, then by
+    /// id.
+    #[default]
+    Timeline,
+    /// The most recently created or changed first (`modified_at`, which a
+    /// new entry starts with), then the newest id: the attach picker's.
+    Recent,
+}
+
+impl EntryOrder {
+    /// The `ORDER BY` of `ox.entry e`: fixed text, never from input.
+    fn sql(self) -> &'static str {
+        match self {
+            EntryOrder::Timeline => "e.\"time\" ASC NULLS LAST, e.id",
+            EntryOrder::Recent => "e.modified_at DESC, e.id DESC",
+        }
+    }
+}
+
 /// Which entries the Timeline lists. Every field narrows; the default
 /// lists every live entry.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
@@ -140,6 +164,8 @@ pub struct EntryQuery {
     /// Holding row `row` (its `_ox_row`) as evidence: the entries a row's
     /// detail lists.
     pub row: Option<i64>,
+    /// The order of the list; `None` is the Timeline's.
+    pub order: Option<EntryOrder>,
 }
 
 /// An entry as stored, deleted or not: what history records and what a
@@ -780,17 +806,24 @@ pub fn entries(case: &Case, q: &EntryQuery, limit: u32, offset: u64) -> Result<L
             truncated: false,
         });
     }
-    list_entries(case, filters, params, limit, offset)
+    list_entries(
+        case,
+        filters,
+        params,
+        q.order.unwrap_or_default(),
+        limit,
+        offset,
+    )
 }
 
 /// Up to `limit` live entries from `offset` that every one of `filters`
-/// (SQL over `ox.entry e`, its values in `params`) selects, in the
-/// Timeline's order. The caller has checked the case has the record
+/// (SQL over `ox.entry e`, its values in `params`) selects, in `order`. The caller has checked the case has the record
 /// tables, `limit` and `offset`.
 pub(super) fn list_entries(
     case: &Case,
     mut filters: Vec<String>,
     mut params: Vec<SqlValue>,
+    order: EntryOrder,
     limit: u32,
     offset: u64,
 ) -> Result<Listing<Entry>> {
@@ -800,8 +833,9 @@ pub(super) fn list_entries(
     let raw: Vec<RawEntry> = case
         .conn()
         .prepare(&format!(
-            "{ENTRY_SELECT} WHERE {} ORDER BY e.\"time\" ASC NULLS LAST, e.id LIMIT ? OFFSET ?",
-            filters.join(" AND ")
+            "{ENTRY_SELECT} WHERE {} ORDER BY {} LIMIT ? OFFSET ?",
+            filters.join(" AND "),
+            order.sql()
         ))?
         .query_map(params_from_iter(params), raw_entry)?
         .collect::<std::result::Result<_, _>>()?;

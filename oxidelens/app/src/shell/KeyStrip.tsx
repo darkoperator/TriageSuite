@@ -1,11 +1,12 @@
-// The key strip: only the keys that are live in this step.
+// The key strip: only the keys that are live on the tab being shown.
 import { Fragment } from "react";
-import { KEY_STRIP } from "./keys";
+import { keyStrip } from "./keys";
+import type { Tab } from "./tabs";
 
-export default function KeyStrip() {
+export default function KeyStrip({ kind }: { kind: Tab["kind"] | null }) {
   return (
     <div className="key-strip" aria-label="Keys">
-      {KEY_STRIP.map(([key, what], ix) => (
+      {keyStrip(kind).map(([key, what], ix) => (
         <Fragment key={key}>
           {ix > 0 && " · "}
           <kbd>{key}</kbd>

@@ -10,21 +10,32 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   return !["button", "checkbox", "radio", "submit", "reset", "range", "color", "file", "image"].includes(type);
 }
 
-/** The keys live in step 3, in the order the key strip shows them (F and K arrive in step 4). */
-export const KEY_STRIP: ReadonlyArray<readonly [string, string]> = [
+type KeyLine = ReadonlyArray<readonly [string, string]>;
+
+/** The row keys of a grid (F and K arrive in step 4); a merged tab has no cell to take I from. */
+const ROW_KEYS: KeyLine = [
   ["S", "suspicious"],
   ["U", "clear mark"],
   ["M", "malicious → timeline"],
   ["T", "tag"],
   ["N", "note"],
   ["A", "attach"],
+];
+const CELL_KEYS: KeyLine = [
   ["I", "add as IOC"],
   ["Space", "full value"],
   ["Enter", "row detail"],
   ["Ctrl+C", "copy"],
   ["Ctrl+Shift+C", "copy rows"],
-  ["Ctrl+[ Ctrl+]", "panes"],
 ];
+const PANE_KEYS: KeyLine = [["Ctrl+[ Ctrl+]", "panes"]];
+
+/** The keys live on a tab of `kind`, in the order the key strip shows them: only what works there. */
+export function keyStrip(kind: "overview" | "dataset" | "merged" | null): KeyLine {
+  if (kind === "dataset") return [...ROW_KEYS, ...CELL_KEYS, ...PANE_KEYS];
+  if (kind === "merged") return [...ROW_KEYS, ...PANE_KEYS];
+  return PANE_KEYS;
+}
 
 export interface ShellKeys {
   toggleLeft(): void;

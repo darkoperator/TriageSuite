@@ -59,11 +59,11 @@ pub use record::{
     guess_ioc_type, host_record, hosts, ioc_record, ioc_sightings, iocs, link, logon_summary,
     merge_records, new_entry, promote_rows, record_entries, set_entry_status, set_record_status,
     unlink, upsert_account, upsert_host, upsert_ioc, validate_attack_id, validate_ioc,
-    validate_sid, AccountRecord, AccountSpec, Candidate, Entry, EntryEdit, EntryQuery, EntryStatus,
-    Evidence, EvidenceStanding, HostRecord, HostSpec, IocQuery, IocRecord, IocSpec, IocType,
-    LogonCount, LogonOutcome, LogonSummary, Privilege, PromoteOutcome, RecordKind, RecordStatus,
-    Sightings, MAX_DESCRIPTION, MAX_IOC_VALUE, MAX_RECORD_LABEL, MAX_RECORD_NAME, MAX_RECORD_NOTE,
-    MAX_TECHNIQUES, MAX_TITLE, TACTICS,
+    validate_sid, AccountRecord, AccountSpec, Candidate, Entry, EntryEdit, EntryOrder, EntryQuery,
+    EntryStatus, Evidence, EvidenceStanding, HostRecord, HostSpec, IocQuery, IocRecord, IocSpec,
+    IocType, LogonCount, LogonOutcome, LogonSummary, Privilege, PromoteOutcome, RecordKind,
+    RecordStatus, Sightings, MAX_DESCRIPTION, MAX_IOC_VALUE, MAX_RECORD_LABEL, MAX_RECORD_NAME,
+    MAX_RECORD_NOTE, MAX_TECHNIQUES, MAX_TITLE, TACTICS,
 };
 #[cfg(feature = "test-support")]
 pub use record::{

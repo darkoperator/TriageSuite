@@ -12,6 +12,15 @@ import { displaySafe, displaySafeMultiline } from "../text";
 import { isStale } from "./outcomes";
 import "./records.css";
 
+const AGENT = "agent:";
+/** Who added it: "added by agent: <name>" for an agent's entry, reviewed or not (`agent_added` says so), else the
+ *  author as stored. */
+function addedBy(entry: Entry): string {
+  if (!entry.agent_added) return displaySafe(entry.created_by);
+  const name = entry.created_by.startsWith(AGENT) ? entry.created_by.slice(AGENT.length) : entry.created_by;
+  return `added by agent: ${displaySafe(name)}`;
+}
+
 export default function EntryCard({ entryId, onBack }: { entryId: number; onBack?: (() => void) | null }): ReactNode {
   const { change, reportError } = useShell();
   const [held, setHeld] = useState<{ id: number; entry: Entry } | null>(null);
@@ -24,12 +33,18 @@ export default function EntryCard({ entryId, onBack }: { entryId: number; onBack
     entryGet(entryId, "detail:entry", id).then(
       (entry) => {
         settled = true;
-        if (live) setHeld({ id: entryId, entry });
+        if (!live) return;
+        setHeld({ id: entryId, entry });
+        setGone(null);
       },
       (e: unknown) => {
         settled = true;
         if (!live || isStale(e)) return;
-        if (isCmdError(e) && e.code === "not_found") setGone(entryId);
+        if (isCmdError(e) && e.code === "not_found") {
+          // Deleted since it was shown: the old answer is dropped, not kept up.
+          setHeld(null);
+          setGone(entryId);
+        }
         else reportError(e);
       },
     );
@@ -65,7 +80,13 @@ export default function EntryCard({ entryId, onBack }: { entryId: number; onBack
           <dt>Status</dt>
           <dd>{entry.status}</dd>
           <dt>Added by</dt>
-          <dd>{displaySafe(entry.created_by)}</dd>
+          <dd>{addedBy(entry)}</dd>
+          {entry.reviewed_by !== null && (
+            <>
+              <dt>Reviewed</dt>
+              <dd>{`reviewed by ${displaySafe(entry.reviewed_by)}`}</dd>
+            </>
+          )}
           <dt>Hosts</dt>
           <dd>{entry.hosts.length === 0 ? "none" : entry.hosts.map((h) => displaySafe(h)).join(", ")}</dd>
           <dt>Evidence</dt>

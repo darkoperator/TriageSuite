@@ -482,7 +482,7 @@ export default function Shell() {
           )}
         </div>
         <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
-        <KeyStrip />
+        <KeyStrip kind={tabs.tabs.find((t) => t.id === tabs.active)?.kind ?? null} />
       </div>
     </ShellCtx.Provider>
   );

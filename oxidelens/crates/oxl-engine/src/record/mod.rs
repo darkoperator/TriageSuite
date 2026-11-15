@@ -26,7 +26,7 @@ mod validate;
 
 pub use entry::{
     delete_entry, edit_entry, entries, entry, new_entry, set_entry_status, Entry, EntryEdit,
-    EntryQuery, EntryStatus, MAX_DESCRIPTION, MAX_TECHNIQUES, MAX_TITLE,
+    EntryOrder, EntryQuery, EntryStatus, MAX_DESCRIPTION, MAX_TECHNIQUES, MAX_TITLE,
 };
 pub use evidence::{
     attach_rows, detach_row, evidence, promote_rows, Evidence, EvidenceStanding, PromoteOutcome,

@@ -293,7 +293,7 @@ const SAMPLES: { [C in Command]: CommandArgs[C] } = {
   note_add: { rowId: 3, text: HOSTILE.html },
   note_delete: { id: 1 },
   notes_list: { ...q("n"), rowId: 5, limit: 10, offset: 0 },
-  entries_list: { ...q("tl"), query: { status: [], host: null, tactic: null, text: null, row: null }, limit: 50, offset: 0 },
+  entries_list: { ...q("tl"), query: { status: [], host: null, tactic: null, text: null, row: null, order: null }, limit: 50, offset: 0 },
   entry_get: { ...q("e"), id: 2 },
   entry_new: { edit: { ...noEntryEdit, title: "Lateral movement" } },
   entry_edit: { id: 3, edit: { ...noEntryEdit, time: { set: "2026-01-05T03:00:00Z" } } },

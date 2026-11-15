@@ -6,7 +6,7 @@
 //! A record's history rows carry the record as stored (`row_json`), before
 //! and after; a link's carry the link, as `entry.rs` writes them.
 
-use super::entry::{changeable, list_entries};
+use super::entry::{changeable, list_entries, EntryOrder};
 use super::hosts::{evidence_holder, link_hosts, refuse_evidence_name};
 use super::{clip, has_records, require_records, Entry};
 use crate::actor::Actor;
@@ -652,6 +652,7 @@ pub fn record_entries(
             kind.link_table()
         )],
         vec![SqlValue::BigInt(id)],
+        EntryOrder::Timeline,
         limit,
         offset,
     )

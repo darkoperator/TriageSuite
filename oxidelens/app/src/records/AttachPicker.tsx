@@ -1,5 +1,5 @@
 // A: the rows the selection was resolved to, attached as evidence to an entry the analyst picks. The entries are the
-// Timeline's (`entries_list`); typing narrows them through the engine's text filter, one read at a time on one slot, and
+// Timeline's (`entries_list`), the most recently created or changed first (the engine's `recent` order); typing narrows them through the engine's text filter, one read at a time on one slot, and
 // only the answer for what the box holds now is drawn.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { entriesList, newQueryId, queryCancel, rowsAttach } from "../api";
@@ -34,7 +34,7 @@ export default function AttachPicker({
     const asked = text;
     const id = newQueryId();
     let settled = false;
-    const query = { status: [], host: null, tactic: null, text: asked === "" ? null : asked, row: null };
+    const query = { status: [], host: null, tactic: null, text: asked === "" ? null : asked, row: null, order: "recent" as const };
     entriesList(query, LISTED, 0, "dialog:attach", id).then(
       (page) => {
         settled = true;

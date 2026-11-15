@@ -237,6 +237,12 @@ function timelineOrder(x: StoredEntry, y: StoredEntry): number {
   return x.id - y.id;
 }
 
+/** The attach picker's order: the most recently changed first, then the newest id. */
+function recentOrder(x: StoredEntry, y: StoredEntry): number {
+  if (x.modified_at !== y.modified_at) return x.modified_at < y.modified_at ? 1 : -1;
+  return y.id - x.id;
+}
+
 export function entriesList(r: MockRecords, q: EntryQuery, limit: number, offset: number): Listing<Entry> {
   const text = q.text?.toLowerCase();
   const all = [...r.entries.values()]
@@ -246,7 +252,7 @@ export function entriesList(r: MockRecords, q: EntryQuery, limit: number, offset
     .filter((e) => !q.tactic || e.tactic === q.tactic)
     .filter((e) => !text || e.title.toLowerCase().includes(text) || e.description.toLowerCase().includes(text))
     .filter((e) => q.row === null || q.row === undefined || (r.evidence.get(e.id) ?? []).some((ev) => ev.row_id === q.row))
-    .sort(timelineOrder);
+    .sort(q.order === "recent" ? recentOrder : timelineOrder);
   return page(all, limit, offset);
 }
 

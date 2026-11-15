@@ -100,7 +100,9 @@ fn sample(cmd: &str, arg: &str, dir: &Path) -> Value {
     match arg {
         "kind" if record => json!("host"),
         "query" if record => json!({ "kind": "ioc", "ioc_type": null, "tool": null, "text": null }),
-        "query" => json!({ "status": [], "host": null, "tactic": null, "text": null, "row": null }),
+        "query" => {
+            json!({ "status": [], "host": null, "tactic": null, "text": null, "row": null, "order": null })
+        }
         "status" => json!("reviewed"),
         "rows" => json!([1]),
         "tag" | "text" => json!("sample"),

@@ -7,7 +7,7 @@ use common::{agent, analyst, loaded, n};
 use oxl_engine::{
     attach_rows, delete_entry, detach_row, edit_entry, entries, evidence, history, load_file,
     mark_suspicious, new_entry, promote_rows, set_entry_status, set_primary_time, Case, Entry,
-    EntryEdit, EntryQuery, EntryStatus, EvidenceStanding, FileOptions,
+    EntryEdit, EntryOrder, EntryQuery, EntryStatus, EvidenceStanding, FileOptions,
 };
 use std::cell::RefCell;
 use triage_testkit::boundary::assert_total;
@@ -1043,4 +1043,49 @@ fn a_batch_takes_at_most_max_action_rows_from_anyone() {
     let mut repeated = ok_rows.clone();
     repeated.extend(&ok_rows);
     assert_eq!(code(mark_suspicious(&mut case, &repeated, &a)).0, "ok");
+}
+
+/// The attach picker's order: the most recently created or changed entry
+/// first, whatever the entries' times; the Timeline's order is unchanged.
+#[test]
+fn entries_list_newest_first_on_request() {
+    let (_d, mut case) = loaded();
+    let early = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let late = promote_at(&mut case, SHARE_SRV01, &analyst());
+    let undated = new_entry(&mut case, &titled("Undated"), &analyst())
+        .unwrap()
+        .id;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    // The first entry is changed last: it is the most recent.
+    edit_entry(&mut case, early, &titled("Changed last"), &analyst()).unwrap();
+    let ids = |q: EntryQuery| -> Vec<i64> {
+        entries(&case, &q, 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|e| e.id)
+            .collect()
+    };
+    let recent = ids(EntryQuery {
+        order: Some(EntryOrder::Recent),
+        ..Default::default()
+    });
+    assert_eq!(recent[0], early);
+    assert_eq!(recent.len(), 3);
+    let timeline = ids(EntryQuery::default());
+    assert_eq!(*timeline.last().unwrap(), undated);
+    assert_ne!(timeline, recent);
+    assert!(timeline.contains(&late));
+    // The order is applied before the page: one row of the recent order is the newest.
+    let first = entries(
+        &case,
+        &EntryQuery {
+            order: Some(EntryOrder::Recent),
+            ..Default::default()
+        },
+        1,
+        0,
+    )
+    .unwrap();
+    assert_eq!(first.items[0].id, early);
 }
