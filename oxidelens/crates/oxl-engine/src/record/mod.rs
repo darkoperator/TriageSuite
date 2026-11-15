@@ -13,6 +13,7 @@
 //! upgraded the case).
 
 mod accounts;
+mod candidates;
 mod entry;
 mod evidence;
 pub(crate) mod hosts;
@@ -30,6 +31,7 @@ pub use evidence::{
 };
 
 pub use accounts::{account_record, accounts, upsert_account, AccountRecord, AccountSpec};
+pub use candidates::{candidates, Candidate};
 pub use hosts::{host_record, hosts, upsert_host, HostRecord, HostSpec};
 pub use iocs::{ioc_record, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec};
 pub use records::{

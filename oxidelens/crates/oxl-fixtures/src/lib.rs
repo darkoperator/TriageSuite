@@ -428,6 +428,320 @@ pub fn real_headers_run(dir: &Path) -> PathBuf {
 /// MFT entry 41, `rclone.exe`, every time the same.
 const MFT_ROW: &str = r"41,3,true,5,5,.\Users\svc_backup\stage,rclone.exe,.exe,1024,1,,false,false,false,false,false,false,Archive,Windows,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,2026-01-05T02:16:50.0000000Z,0,0,0,,,,C:\$MFT";
 
+/// The header AmcacheTriage writes for `associated_file_entries` and
+/// `unassociated_file_entries`: `FileEntryRecord`'s fields in order
+/// (`amc-triage/src/records.rs`).
+pub const AMCACHE_FILE_ENTRIES_HEADER: &str = "ApplicationName,ProgramId,FileKeyLastWriteTimestamp,SHA1,IsOsComponent,FullPath,Name,FileExtension,LinkDate,ProductName,Size,Version,ProductVersion,LongPathHash,BinaryType,IsPeFile,BinFileVersion,BinProductVersion,Usn,Language,Description";
+
+/// The header PETriage writes for `main`: `PrefetchRecord`'s fields in
+/// order (`pe-triage/src/lib.rs`).
+pub const PETRIAGE_MAIN_HEADER: &str = "Note,SourceFilename,SourceCreated,SourceModified,SourceAccessed,ExecutableName,Hash,Size,Version,RunCount,LastRun,PreviousRun0,PreviousRun1,PreviousRun2,PreviousRun3,PreviousRun4,PreviousRun5,PreviousRun6,Volume0Name,Volume0Serial,Volume0Created,Volume1Name,Volume1Serial,Volume1Created,Directories,FilesLoaded,ParsingError";
+
+/// The header BrowserTriage writes for `downloads`: `DownloadRecord`'s
+/// fields in order (`browser-triage/src/records.rs`).
+pub const BROWSER_DOWNLOADS_HEADER: &str = "Browser,Browser Channel,Profile,Record Type,Start Time,End Time,Last Access Time,Target Path,Current Path,Download URL,URL Chain,Referrer,Tab URL,Tab Referrer URL,Site URL,MIME Type,Original MIME Type,Received Bytes,Total Bytes,State,Danger Type,Interrupt Reason,Opened,By Extension,Hash (SHA-256),ETag,Last Modified Header,GUID,Download ID,Notes,Source File";
+
+/// The header BrowserTriage writes for `history`: `HistoryRecord`'s fields
+/// in order (`browser-triage/src/records.rs`).
+pub const BROWSER_HISTORY_HEADER: &str = "Browser,Browser Channel,Profile,Record Type,Visit Time,URL,Title,Visit Type,Transition Qualifiers,Transition Raw,Visit Source,Visit Duration (s),Visit Count,Typed Count,Last Visit Time,Hidden,From Visit ID,Opener Visit ID,Visit ID,URL ID,Frecency,Notes,Source File";
+
+/// The header RETriage writes for its TypedURLs datasets
+/// (`re-triage/src/plugins/typed_urls.rs`, `detail_columns_order_matches_fixture`).
+pub const RETRIAGE_TYPEDURLS_HEADER: &str = "Timestamp,BatchKeyPath,Url,BatchValueName,Slack";
+
+/// The header SrumETriage writes for `network_usage`: `NetworkUsageRecord`'s
+/// fields in order (`srume-triage/src/datasets.rs`).
+pub const SRUM_NETWORK_USAGE_HEADER: &str = "Id,Timestamp,ExeInfo,ExeInfoDescription,ExeTimestamp,SidType,Sid,UserName,UserId,AppId,BytesReceived,BytesSent,InterfaceLuid,InterfaceType,L2ProfileFlags,L2ProfileId,ProfileName";
+
+/// One CSV line of `header` holding `cells` in their named columns and
+/// nothing in the rest. Panics on a name the header lacks, or a value with
+/// a comma, quote or line break, which this writer does not quote.
+fn csv_line(header: &str, cells: &[(&str, &str)]) -> String {
+    for (name, value) in cells {
+        assert!(
+            header.split(',').any(|h| h == *name),
+            "{name} is not in the header"
+        );
+        assert!(
+            !value.contains([',', '"', '\n', '\r']),
+            "{value:?} needs quoting"
+        );
+    }
+    header
+        .split(',')
+        .map(|h| {
+            cells
+                .iter()
+                .find(|(name, _)| *name == h)
+                .map_or("", |(_, value)| *value)
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// A run of WS01 with one dataset of each relation the promotion
+/// candidates read beside the event log, each with the header its tool
+/// really writes. Run id `20260116000000-kkkk`. The rows, in each relation:
+///
+/// - `amcachetriage_unassociated_file_entries`: `rclone.exe`, SHA1
+///   `a94a8fe5ccb19ba61c4c0873d391e987982fbbd3`.
+/// - `amcachetriage_associated_file_entries`: `svch0st.exe`, SHA1
+///   `3c363836cf4e16666669a25da280a1865c2d2874`.
+/// - `petriage_main`: `RCLONE.EXE` with the header hash as the tool writes
+///   it (`B3A6E9D2`), and `SVCH0ST.EXE` with a 40-digit upper-case `Hash`
+///   (`DA39A3EE5E6B4B0D3255BFEF95601890AFD80709`).
+/// - `browsertriage_downloads`: `rclone.zip` from
+///   `https://files.example.com/rclone.zip` with a SHA-256, and a download
+///   whose URL (`javascript:void(0)`) and hash (`not-a-hash`) are neither.
+/// - `browsertriage_history`: `https://mega.example.org/folder/abc`, and
+///   `chrome://settings`.
+/// - `retriage_typedurls_ntuser_dat`: `http://198.51.100.9/stage/`.
+/// - `srumetriage_network_usage`: `svc_backup` with SID
+///   `S-1-5-21-1004336348-1177238915-682003330-1001`, `jdoe` with SID text
+///   `not-a-sid`, and SID `S-1-5-18` with no user name.
+pub fn candidate_sources_run(dir: &Path) -> PathBuf {
+    let ws = "Processed-WS01-20260116000000";
+    let line = |header: &str, cells: &[(&str, &str)]| csv_line(header, cells);
+    let unassociated = [line(
+        AMCACHE_FILE_ENTRIES_HEADER,
+        &[
+            ("ApplicationName", "Unassociated"),
+            ("FileKeyLastWriteTimestamp", "2026-01-05T02:16:51.0000000Z"),
+            ("SHA1", "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"),
+            ("IsOsComponent", "False"),
+            ("FullPath", r"c:\users\svc_backup\stage\rclone.exe"),
+            ("Name", "rclone.exe"),
+            ("FileExtension", ".exe"),
+            ("Size", "1024"),
+        ],
+    )];
+    let associated = [line(
+        AMCACHE_FILE_ENTRIES_HEADER,
+        &[
+            ("ApplicationName", "Updater"),
+            ("ProgramId", "0000f519feec486de87ed73cb92d3cac802400000000"),
+            ("FileKeyLastWriteTimestamp", "2026-01-05T02:15:45.0000000Z"),
+            ("SHA1", "3c363836cf4e16666669a25da280a1865c2d2874"),
+            ("IsOsComponent", "False"),
+            ("FullPath", r"c:\windows\temp\svch0st.exe"),
+            ("Name", "svch0st.exe"),
+            ("FileExtension", ".exe"),
+        ],
+    )];
+    let prefetch = [
+        line(
+            PETRIAGE_MAIN_HEADER,
+            &[
+                (
+                    "SourceFilename",
+                    r"C:\Windows\Prefetch\RCLONE.EXE-B3A6E9D2.pf",
+                ),
+                ("ExecutableName", "RCLONE.EXE"),
+                ("Hash", "B3A6E9D2"),
+                ("RunCount", "3"),
+                ("LastRun", "2026-01-05T02:17:02.7010000Z"),
+            ],
+        ),
+        line(
+            PETRIAGE_MAIN_HEADER,
+            &[
+                (
+                    "SourceFilename",
+                    r"C:\Windows\Prefetch\SVCH0ST.EXE-0B1D2C3E.pf",
+                ),
+                ("ExecutableName", "SVCH0ST.EXE"),
+                ("Hash", "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709"),
+                ("RunCount", "1"),
+                ("LastRun", "2026-01-05T02:15:44.4120000Z"),
+            ],
+        ),
+    ];
+    let downloads = [
+        line(
+            BROWSER_DOWNLOADS_HEADER,
+            &[
+                ("Browser", "Chrome"),
+                ("Profile", "Default"),
+                ("Record Type", "Download"),
+                ("Start Time", "2026-01-05T02:10:00.0000000Z"),
+                ("Target Path", r"C:\Users\svc_backup\Downloads\rclone.zip"),
+                ("Download URL", "https://files.example.com/rclone.zip"),
+                ("State", "Complete"),
+                (
+                    "Hash (SHA-256)",
+                    "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08",
+                ),
+            ],
+        ),
+        line(
+            BROWSER_DOWNLOADS_HEADER,
+            &[
+                ("Browser", "Chrome"),
+                ("Profile", "Default"),
+                ("Record Type", "Download"),
+                ("Start Time", "2026-01-05T02:11:00.0000000Z"),
+                ("Target Path", r"C:\Users\svc_backup\Downloads\blank.html"),
+                ("Download URL", "javascript:void(0)"),
+                ("State", "Cancelled"),
+                ("Hash (SHA-256)", "not-a-hash"),
+            ],
+        ),
+    ];
+    let history = [
+        line(
+            BROWSER_HISTORY_HEADER,
+            &[
+                ("Browser", "Chrome"),
+                ("Profile", "Default"),
+                ("Record Type", "Visit"),
+                ("Visit Time", "2026-01-05T02:09:00.0000000Z"),
+                ("URL", "https://mega.example.org/folder/abc"),
+                ("Title", "folder"),
+            ],
+        ),
+        line(
+            BROWSER_HISTORY_HEADER,
+            &[
+                ("Browser", "Chrome"),
+                ("Profile", "Default"),
+                ("Record Type", "Visit"),
+                ("Visit Time", "2026-01-05T02:08:00.0000000Z"),
+                ("URL", "chrome://settings"),
+                ("Title", "Settings"),
+            ],
+        ),
+    ];
+    let typed = [line(
+        RETRIAGE_TYPEDURLS_HEADER,
+        &[
+            ("Timestamp", "2026-01-05T02:07:00.0000000Z"),
+            (
+                "BatchKeyPath",
+                r"Software\Microsoft\Internet Explorer\TypedURLs",
+            ),
+            ("Url", "http://198.51.100.9/stage/"),
+            ("BatchValueName", "url1"),
+        ],
+    )];
+    let srum = [
+        line(
+            SRUM_NETWORK_USAGE_HEADER,
+            &[
+                ("Id", "1"),
+                ("Timestamp", "2026-01-05T03:00:00.0000000Z"),
+                (
+                    "ExeInfo",
+                    r"\device\harddiskvolume3\users\svc_backup\stage\rclone.exe",
+                ),
+                ("SidType", "UnknownOrUserSid"),
+                ("Sid", "S-1-5-21-1004336348-1177238915-682003330-1001"),
+                ("UserName", "svc_backup"),
+                ("BytesSent", "73400320"),
+            ],
+        ),
+        line(
+            SRUM_NETWORK_USAGE_HEADER,
+            &[
+                ("Id", "2"),
+                ("Timestamp", "2026-01-05T03:00:00.0000000Z"),
+                ("ExeInfo", "chrome.exe"),
+                ("Sid", "not-a-sid"),
+                ("UserName", "jdoe"),
+            ],
+        ),
+        line(
+            SRUM_NETWORK_USAGE_HEADER,
+            &[
+                ("Id", "3"),
+                ("Timestamp", "2026-01-05T03:00:00.0000000Z"),
+                ("ExeInfo", "svchost.exe"),
+                ("SidType", "LocalSystem"),
+                ("Sid", "S-1-5-18"),
+            ],
+        ),
+    ];
+    let (unassociated, associated, prefetch) =
+        (refs(&unassociated), refs(&associated), refs(&prefetch));
+    let (downloads, history, typed, srum) =
+        (refs(&downloads), refs(&history), refs(&typed), refs(&srum));
+    let paths = [
+        format!("{ws}/ProgramExecution/amcache_unassociated.csv"),
+        format!("{ws}/ProgramExecution/amcache_associated.csv"),
+        format!("{ws}/ProgramExecution/prefetch.csv"),
+        format!("{ws}/Browsers/downloads.csv"),
+        format!("{ws}/Browsers/history.csv"),
+        format!("{ws}/Registry/typedurls.csv"),
+        format!("{ws}/SRUM/network_usage.csv"),
+    ];
+    write_run(
+        &dir.join("run-20260116000000-kkkk"),
+        "20260116000000-kkkk",
+        vec![
+            untyped(
+                "AmcacheTriage",
+                "unassociated_file_entries",
+                "amcachetriage_unassociated_file_entries",
+                &paths[0],
+                AMCACHE_FILE_ENTRIES_HEADER,
+                &unassociated,
+            ),
+            untyped(
+                "AmcacheTriage",
+                "associated_file_entries",
+                "amcachetriage_associated_file_entries",
+                &paths[1],
+                AMCACHE_FILE_ENTRIES_HEADER,
+                &associated,
+            ),
+            untyped(
+                "PETriage",
+                "main",
+                "petriage_main",
+                &paths[2],
+                PETRIAGE_MAIN_HEADER,
+                &prefetch,
+            ),
+            untyped(
+                "BrowserTriage",
+                "downloads",
+                "browsertriage_downloads",
+                &paths[3],
+                BROWSER_DOWNLOADS_HEADER,
+                &downloads,
+            ),
+            untyped(
+                "BrowserTriage",
+                "history",
+                "browsertriage_history",
+                &paths[4],
+                BROWSER_HISTORY_HEADER,
+                &history,
+            ),
+            untyped(
+                "RETriage",
+                "typedurls_ntuser_dat",
+                "retriage_typedurls_ntuser_dat",
+                &paths[5],
+                RETRIAGE_TYPEDURLS_HEADER,
+                &typed,
+            ),
+            untyped(
+                "SrumETriage",
+                "network_usage",
+                "srumetriage_network_usage",
+                &paths[6],
+                SRUM_NETWORK_USAGE_HEADER,
+                &srum,
+            ),
+        ],
+    )
+}
+
+/// Each of `rows`, borrowed.
+fn refs(rows: &[String]) -> Vec<&str> {
+    rows.iter().map(String::as_str).collect()
+}
+
 /// [`two_hosts`] built in `dir/a`, and its run root copied to `dir/b`, which
 /// is returned: a run that moved after it was written, so its session file
 /// names the files where they were (`dir/a`), not where they are.
