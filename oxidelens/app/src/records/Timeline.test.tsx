@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candidate } from "../contract/generated/Candidate";
+import type { CaseRecord } from "../contract/generated/CaseRecord";
 import type { Entry } from "../contract/generated/Entry";
 import type { EntryQuery } from "../contract/generated/EntryQuery";
 import type { GridState } from "../contract/generated/GridState";
@@ -77,6 +78,16 @@ async function openTimeline(expectRows = true) {
 async function select(user: ReturnType<typeof userEvent.setup>, id: number) {
   await user.click(within(rowOfEntry(id)).getAllByRole("gridcell")[3]);
   return within(rightPane()).findByRole("region", { name: `Entry E-${id}` });
+}
+
+/** Opens the Host filter, waits for `listed` (when given) to be its options, and picks `name`. */
+async function pickHost(user: ReturnType<typeof userEvent.setup>, name: string, listed?: string[]) {
+  await user.click(screen.getByRole("button", { name: /^Host: / }));
+  const dialog = await screen.findByRole("dialog", { name: "Filter by host" });
+  const options = () => within(dialog).getAllByRole("option").map((o) => o.textContent);
+  if (listed) await waitFor(() => expect(options()).toEqual(listed));
+  await user.click(await within(dialog).findByRole("option", { name }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Filter by host" })).toBeNull());
 }
 
 /** A promise a test settles by hand: holds a backend answer back. */
@@ -157,9 +168,8 @@ describe("the Timeline sheet", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Status" }), "reviewed");
     await waitFor(() => expect(lastQuery().status).toEqual(["reviewed"]));
     // The hosts and tactics offered are the engine's: the live host records, and its fourteen tactics.
-    const host = screen.getByRole("combobox", { name: "Host" });
-    await waitFor(() => expect(within(host).getAllByRole("option").map((o) => o.textContent)).toEqual(["Host: all", "SRV01", "WS01"]));
-    await user.selectOptions(host, "WS01");
+    await pickHost(user, "WS01", ["All hosts", "SRV01", "WS01"]);
+    expect(screen.getByRole("button", { name: "Host: WS01" })).toHaveFocus();
     const tactic = screen.getByRole("combobox", { name: "Tactic" });
     await waitFor(() => expect(within(tactic).getAllByRole("option")).toHaveLength(15));
     // What the engine answers for the last filter: an entry with two hosts, one with none.
@@ -184,6 +194,45 @@ describe("the Timeline sheet", () => {
     expect(groups.map((g) => g.getAttribute("data-group"))).toEqual(["WS01", "SRV01", "no host"]);
     expect(idsDrawn()).toEqual([1, 2, 2, 3]);
     expect(sheetQueries()).toHaveLength(before);
+  });
+
+  it("the_host_filter_reaches_a_host_past_the_first_thousand", async () => {
+    // 1,500 host records: the filter asks the engine for them by the typed text, 200 at a time, so the last is reachable.
+    // Each made from the mock's first host record, read once the case is open.
+    let real: CaseRecord | null = null;
+    const names = Array.from({ length: 1500 }, (_, i) => `HOST-${String(i).padStart(4, "0")}`);
+    overrideCommand("records_list", async (a) => {
+      const { query, limit, offset } = a as { query: { kind: string; text?: string | null }; limit: number; offset: number };
+      if (query.kind !== "host") return mockCall("records_list", a as Record<string, unknown>);
+      real ??= ((await mockCall("records_list", { ...(a as Record<string, unknown>), limit: 1, offset: 0, query: { kind: "host" } })) as { items: CaseRecord[] }).items[0];
+      const template = real;
+      const matching = names.filter((n) => !query.text || n.toLowerCase().includes(query.text.toLowerCase()));
+      return {
+        items: matching.slice(offset, offset + limit).map((name, i) => ({ ...template, id: 10_000 + offset + i, name })),
+        truncated: offset + limit < matching.length,
+      };
+    });
+    const user = await openTimeline();
+    await user.click(screen.getByRole("button", { name: "Host: all" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter by host" });
+    // Untyped: the first 200, saying more follow; Show more reads the next 200 from the engine.
+    await waitFor(() => expect(within(dialog).getAllByRole("option")).toHaveLength(201));
+    expect(dialog.textContent).toContain("200 listed · more in the case");
+    await user.click(within(dialog).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(dialog).getAllByRole("option")).toHaveLength(401));
+    const hostReads = () => callsOf("records_list").map((c) => c.args as { query: { kind: string; text: string | null }; limit: number; offset: number; slot: string }).filter((c) => c.slot === "sheet:timeline:hosts");
+    expect(hostReads().at(-1)).toMatchObject({ limit: 200, offset: 200 });
+    // Typed: the engine narrows them, and host 1,400 is one click away.
+    await user.type(within(dialog).getByRole("searchbox", { name: "Filter hosts" }), "host-1400");
+    await waitFor(() => expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["All hosts", "HOST-1400"]));
+    expect(hostReads().at(-1)?.query).toEqual({ kind: "host", text: "host-1400" });
+    await user.click(within(dialog).getByRole("option", { name: "HOST-1400" }));
+    await waitFor(() => expect(lastQuery().host).toBe("HOST-1400"));
+    expect(screen.getByRole("button", { name: "Host: HOST-1400" })).toBeInTheDocument();
+    // All hosts clears it.
+    await pickHost(user, "All hosts");
+    await waitFor(() => expect(lastQuery().host).toBeNull());
+    expect(screen.getByRole("button", { name: "Host: all" })).toBeInTheDocument();
   });
 
   it("agent_entries_say_agent_review", async () => {

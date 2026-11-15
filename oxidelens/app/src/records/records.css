@@ -21,7 +21,7 @@
 /* The Timeline sheet (screen 08). The glyphs are the grid's `.mark-*` classes. */
 .timeline-sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; font: var(--ui-font); }
 .sheet-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-.sheet-bar select, .sheet-search { background: var(--card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 6px; font: inherit; }
+.sheet-bar select, .sheet-bar .sheet-filter, .sheet-search { background: var(--card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 6px; font: inherit; }
 .sheet-search { width: 220px; }
 .sheet-bar-gap { flex: 1; }
 .view-toggle { display: flex; gap: 2px; }

@@ -6,11 +6,15 @@
 // the case's display zone (`time_shown`), the glyph is the mark the entry gives its rows (`mark`), the Account column is
 // the first account it links (`links`). Grouping only splits the engine's answer, in its order, by a field it gives.
 //
+// The Host filter is a picker, as the link picker is: typing asks the engine for the host records whose name holds the
+// text (the closest first), 200 at a time with *Show more*, so every host in the case can be picked.
+//
 // Keys on the table (inactive while a text field has focus): ↑/↓ move the selection, N new entry, Enter edit (the
 // editor's first field), R mark reviewed (a refusal is shown in the editor, never in a dialog), Del remove (the engine
 // keeps the evidence rows in their datasets).
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { entriesList, entryDelete, recordsList, tactics as readTactics } from "../api";
+import type { CaseRecord } from "../contract/generated/CaseRecord";
 import type { Entry } from "../contract/generated/Entry";
 import type { EntryQuery } from "../contract/generated/EntryQuery";
 import type { EntryStatus } from "../contract/generated/EntryStatus";
@@ -22,8 +26,10 @@ import { displaySafe } from "../text";
 import EntryEditor, { NewEntryForm, useReview } from "./EntryEditor";
 import HostLanes, { NO_HOST } from "./HostLanes";
 import MarkGlyph from "./MarkGlyph";
-import { reportFailure } from "./outcomes";
+import { messageOf, reportFailure } from "./outcomes";
+import RecordDialog from "./RecordDialog";
 import { useCaseRead } from "./useCaseRead";
+import { usePagedRead } from "./usePagedRead";
 import "./records.css";
 
 /** The most entries one read lists (the engine's `MAX_LIMIT`). */
@@ -66,6 +72,7 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
   const [selected, setSelected] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [focusSeq, setFocusSeq] = useState(0);
+  const [pickingHost, setPickingHost] = useState(false);
   const review = useReview();
 
   const query: EntryQuery = useMemo(
@@ -91,12 +98,6 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
       }
       return { items, truncated: true };
     },
-    reportError,
-  );
-  const hosts = useCaseRead(
-    active ? JSON.stringify([summary.case_id, "hosts"]) : null,
-    change.generation,
-    (next) => recordsList({ kind: "host" }, LIMIT, 0, `${SLOT}:hosts`, next()),
     reportError,
   );
   const [tactics, setTactics] = useState<string[]>([]);
@@ -208,7 +209,6 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
     e.preventDefault();
   };
 
-  const hostNames = (hosts?.value?.items ?? []).flatMap((r) => (r.kind === "host" ? [r.name] : []));
   const zone = summary.display_zone;
   return (
     <div className="timeline-sheet">
@@ -222,14 +222,18 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
             </option>
           ))}
         </select>
-        <select aria-label="Host" value={host} onChange={(e) => setHost(e.target.value)}>
-          <option value="">Host: all</option>
-          {hostNames.map((h) => (
-            <option key={h} value={h}>
-              {displaySafe(h)}
-            </option>
-          ))}
-        </select>
+        <button type="button" className="sheet-filter" aria-haspopup="dialog" aria-expanded={pickingHost} onClick={() => setPickingHost(true)}>
+          {`Host: ${host === "" ? "all" : displaySafe(host)}`}
+        </button>
+        {pickingHost && (
+          <HostPicker
+            onPick={(h) => {
+              setHost(h);
+              setPickingHost(false);
+            }}
+            onClose={() => setPickingHost(false)}
+          />
+        )}
         <select aria-label="Tactic" value={tactic} onChange={(e) => setTactic(e.target.value)}>
           <option value="">Tactic: all</option>
           {tactics.map((t) => (
@@ -326,5 +330,77 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
         </div>
       )}
     </div>
+  );
+}
+
+// ---- the Host filter ----------------------------------------------------------------------------------------------------
+/** How many host records the Host filter asks for at once. */
+const HOSTS_LISTED = 200;
+
+/** The Host filter's picker: *All hosts*, then the case's host records 200 at a time, narrowed and ranked by the engine
+ *  as the analyst types (`records_list` with the text), *Show more* reading the next 200, so every host is reachable. A
+ *  read is for one text: an answer for an older one is dropped and the read in flight cancelled (`usePagedRead`). A
+ *  click picks one; Escape closes it with the filter as it was; focus goes back to the Host button. */
+function HostPicker({ onPick, onClose }: { onPick(host: string): void; onClose(): void }): ReactNode {
+  const { change, reportError } = useShell();
+  const [text, setText] = useState("");
+  const { read, showMore } = usePagedRead<CaseRecord>(
+    JSON.stringify(["hosts", text]),
+    change.generation,
+    HOSTS_LISTED,
+    (limit, offset, q) => recordsList({ kind: "host", text: text === "" ? null : text }, limit, offset, `${SLOT}:hosts`, q),
+    reportError,
+  );
+  const shown = read?.value;
+  const names = (shown?.items ?? []).flatMap((r) => (r.kind === "host" ? [{ id: r.id, name: r.name }] : []));
+  const list = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  // *Show more* goes once the last hosts are listed: the focus it had goes to the first host it added, else the search.
+  const adding = useRef<number | null>(null);
+  useEffect(() => {
+    const from = adding.current;
+    adding.current = null;
+    if (from === null || read === null) return;
+    const dialog = list.current?.closest('[role="dialog"]');
+    if (!dialog || dialog.contains(document.activeElement)) return;
+    (list.current?.querySelectorAll<HTMLElement>('[role="option"]')[from + 1] ?? search.current)?.focus();
+  }, [read]);
+  const more = () => {
+    if (shown === undefined) return;
+    adding.current = shown.items.length;
+    showMore();
+  };
+  return (
+    <RecordDialog label="Filter by host" onClose={onClose} error={read?.error !== undefined ? messageOf(read.error) : null}>
+      <input ref={search} type="search" aria-label="Filter hosts" placeholder="Type to find a host" value={text} onChange={(e) => setText(e.target.value)} />
+      <div ref={list} className="record-list" role="listbox" aria-label="Hosts">
+        <button type="button" role="option" aria-selected={false} className="record-option" onClick={() => onPick("")}>
+          <span className="record-title">All hosts</span>
+        </button>
+        {names.map((h) => (
+          <button key={h.id} type="button" role="option" aria-selected={false} className="record-option" onClick={() => onPick(h.name)}>
+            <span className="record-title">{displaySafe(h.name)}</span>
+          </button>
+        ))}
+      </div>
+      {read === null && <p className="form-hint">Loading…</p>}
+      {shown?.items.length === 0 && <p className="form-hint">{text === "" ? "The case has no host records yet." : "None match."}</p>}
+      {shown !== undefined && shown.items.length > 0 && (
+        <p className="form-hint">
+          <span>{`${fmt(shown.items.length)} listed${!shown.truncated ? "" : text === "" ? " · more in the case" : " · more match"}`}</span>
+          {shown.truncated && (
+            <>
+              {" "}
+              <button type="button" className="link-button" onClick={more}>
+                Show more
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      <div className="form-buttons">
+        <button type="button" onClick={onClose}>Cancel</button>
+      </div>
+    </RecordDialog>
   );
 }
