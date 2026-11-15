@@ -85,6 +85,19 @@ const cellOf = (row: HTMLElement, name: string) => {
 };
 const lastState = (): GridState => (callsOf("grid_page").at(-1)!.args as { state: GridState }).state;
 
+/**
+ * Waits for the status line to hold `text`. Polled, not `waitFor`: `statusText` renders, and a render inside a failing
+ * `waitFor` wakes it again for ever (and prints a DOM too large after a long scroll).
+ */
+async function untilStatus(status: ReturnType<typeof vi.fn>, text: string) {
+  let shown = "";
+  for (let i = 0; i < 60 && !shown.includes(text); i++) {
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    shown = statusText(status);
+  }
+  expect(shown).toContain(text);
+}
+
 async function scrollToRow(row: number) {
   scrollTops.set(scroller(), row * 22);
   await act(async () => {
@@ -509,6 +522,70 @@ describe("grid", () => {
     await waitFor(() => expect(selectedIndexes()).toContain("1500"));
     expect(statusText(status)).toContain(" · 1,491 selected · ");
   }, 30_000);
+
+  it("an_evicted_anchor_keeps_its_row_across_case_changed", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    // The anchor is row 3005 (block 15). Walking back up to the top reads 15 other blocks, so block 15 is dropped.
+    const offsets = () => callsOf("grid_page").map((c) => (c.args as { offset: number }).offset);
+    for (let b = 1; b <= 15; b++) {
+      await scrollToRow(b * 200 + 5);
+      await waitFor(() => expect(offsets()).toContain(b * 200));
+    }
+    await waitFor(() => expect(cellOf(rowOf(3005), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    await user.click(cellOf(rowOf(3005), "Channel"));
+    const read = offsets().length;
+
+    for (let b = 14; b >= 0; b--) {
+
+      await scrollToRow(b * 200 + 5);
+      await waitFor(() => expect(cellOf(rowOf(b * 200 + 5), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    }
+    // Blocks 3 to 0 were read again, so the cap dropped the least recently drawn: block 15, the anchor's.
+
+    expect(offsets().slice(read)).toEqual([600, 400, 200, 0]);
+    await waitFor(() => expect(cellOf(rowOf(5), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(5), "Channel"));
+    await user.keyboard("{/Shift}");
+    await untilStatus(status, " · 3,001 selected · ");
+    // The range over unread blocks is named by the engine (its anchor's row, 3005, is not in memory any more).
+    await waitFor(() => expect(callsOf("grid_row_ids")).toHaveLength(1));
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    reread(rerender, ctx);
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    await untilStatus(status, " · 3,001 selected · ");
+    // Shift-click extends from row 3005, the anchor's own row, not from the first selected row (5).
+    await waitFor(() => expect(cellOf(rowOf(7), "Channel").textContent).not.toBe(""), { timeout: 5000 });
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(7), "Channel"));
+    await user.keyboard("{/Shift}");
+    await untilStatus(status, " · 2,999 selected · ");
+  }, 60_000);
+
+  it("an_anchor_whose_row_left_is_cleared_not_replaced", async () => {
+    const { user, status, ctx, rerender } = await mount();
+    await user.click(cellOf(rowOf(5), "Channel"));
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(3), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(statusText(status)).toContain(" · 3 selected · "));
+    const before = (await mockCall("grid_page", { ...callsOf("grid_page").at(-1)!.args, queryId: "t", slot: "t" })) as GridPage;
+    const anchorRow = before.row_ids[5];
+    // The write takes the anchor's row out of the answer; the other two stay where they are.
+    overrideCommand("grid_row_positions", async (args) => {
+      const answer = (await mockCall("grid_row_positions", args)) as Array<[number, number | null]>;
+      return answer.map(([id, pos]) => [id, id === anchorRow ? null : pos]);
+    });
+    reread(rerender, ctx);
+    await waitFor(() => expect(callsOf("grid_row_positions")).toHaveLength(1));
+    await waitFor(() => expect(selectedIndexes()).toEqual(["3", "4"]));
+    // No anchor: a shift-click selects the clicked row alone, not a range from row 3.
+    await user.keyboard("{Shift>}");
+    await user.click(cellOf(rowOf(8), "Channel"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => expect(selectedIndexes()).toEqual(["8"]));
+    expect(statusText(status)).toContain(" · 1 selected · ");
+  });
 
   it("a_late_row_ids_answer_is_not_stored", async () => {
     const { user, ctx, rerender } = await mount();

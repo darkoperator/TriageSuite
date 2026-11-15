@@ -61,7 +61,7 @@ import { measureText } from "./measure";
 import { BLOCK_ROWS, MAX_BLOCKS, blockOf } from "./blocks";
 import { filterFromChips, newRule, rulesStatus } from "./ruleClasses";
 import {
-  MAX_ACTION_ROWS, MAX_COPY_ROWS, contains, emptySelection, fromPositions, indices, selectOnly, selectRange, size, toggle, type Selection,
+  MAX_ACTION_ROWS, MAX_COPY_ROWS, anchorIdOf, contains, emptySelection, fromPositions, indices, selectOnly, selectRange, size, toggle, type Selection,
 } from "./selection";
 import SearchBox from "./SearchBox";
 import { stableKey, useGridData } from "./useGridData";
@@ -367,7 +367,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   // A write to the case (a mark, a load, a zone) re-reads the rows; filters and scroll stay. The selection, its anchor
   // and the focused cell are row offsets, and a load or a supersede can put other rows at the same offsets, so the
-  // selection is kept by row id instead (ruling S10). Its ids are resolved as soon as it is made, while the indexes
+  // selection is kept by row id instead (ruling S10), its anchor too. Its ids are resolved as soon as it is made, while the indexes
   // still mean the rows the analyst picked: from the rows in memory, else through `grid_row_ids`. On a re-read those
   // ids go to `grid_row_positions` and the selection is rebuilt from where the rows are now; a row the new answer
   // leaves out drops out. Until the answer comes nothing is selected. A selection past `MAX_ACTION_ROWS` is never
@@ -402,6 +402,17 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     },
     [rowAt],
   );
+  /**
+   * The anchor's row id for a selection whose ids are `ids`: its place among them, or (a ctrl-click that unselected its
+   * row) the row in memory, which is the row just clicked. Read while the indexes still mean the rows the analyst saw.
+   */
+  const anchorIdFor = useCallback(
+    (sel: Selection, ids: readonly number[]): number | null => {
+      if (sel.anchor === null) return null;
+      return contains(sel, sel.anchor) ? anchorIdOf(sel, ids) : (rowAt(sel.anchor)?.id ?? null);
+    },
+    [rowAt],
+  );
 
   // ---- resolving the selection's ids --------------------------------------------------------------------------------
   /** The `grid_row_ids` in flight: its query id, the selection it resolves and the state key it was asked under. */
@@ -418,7 +429,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     const sel = selection;
     const inMemory = known(sel);
     if (inMemory !== null) {
-      setSelection((s) => (s === sel ? { ...sel, ids: inMemory } : s));
+      setSelection((s) => (s === sel ? { ...sel, ids: inMemory, anchorId: anchorIdFor(sel, inMemory) } : s));
       return;
     }
     const key = shownKey;
@@ -430,7 +441,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         if (resolving.current?.queryId !== queryId) return;
         resolving.current = null;
         if (shownKeyRef.current !== key) return;
-        setSelection((s) => (s === sel ? { ...sel, ids } : s));
+        setSelection((s) => (s === sel ? { ...sel, ids, anchorId: anchorIdFor(sel, ids) } : s));
       },
       (e: unknown) => {
         if (resolving.current?.queryId !== queryId) return;
@@ -439,28 +450,32 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         if (!isStale(e)) reportError(e);
       },
     );
-  }, [selection, shownKey, shownState, known, cancelResolve, tab.id, reportError]);
+  }, [selection, shownKey, shownState, known, anchorIdFor, cancelResolve, tab.id, reportError]);
   useEffect(() => cancelResolve, [cancelResolve]);
 
   // ---- rebuilding it after a re-read --------------------------------------------------------------------------------
   /** The rebuild in flight: its query id, the one selection its answer may replace, the state key it was asked under. */
-  const rebuild = useRef<{ queryId: string; waiting: Selection; key: string; anchorId: number | null } | null>(null);
+  const rebuild = useRef<{ queryId: string; waiting: Selection; key: string } | null>(null);
   const cancelRebuild = useCallback(() => {
     const r = rebuild.current;
     rebuild.current = null;
     if (r) queryCancel([r.queryId]).catch(() => {});
   }, []);
   const startRebuild = useCallback(
-    (waiting: Selection, anchorId: number | null) => {
+    (waiting: Selection) => {
       const key = shownKeyRef.current;
       const queryId = newQueryId();
-      rebuild.current = { queryId, waiting, key, anchorId };
-      gridRowPositions(shownStateRef.current, waiting.ids ?? [], `tab:${tab.id}:selection`, queryId).then(
+      rebuild.current = { queryId, waiting, key };
+      const ids = waiting.ids ?? [];
+      const { anchorId } = waiting;
+      // The anchor's row is asked for too when it is not one of the selected rows, so it is placed, never guessed.
+      const asked = anchorId === null || ids.includes(anchorId) ? ids : [...ids, anchorId];
+      gridRowPositions(shownStateRef.current, asked, `tab:${tab.id}:selection`, queryId).then(
         (positions) => {
           if (rebuild.current?.queryId !== queryId) return;
           rebuild.current = null;
           if (shownKeyRef.current !== key) return;
-          setSelection((s) => (s === waiting ? fromPositions(positions, anchorId) : s));
+          setSelection((s) => (s === waiting ? fromPositions(positions, ids, anchorId) : s));
         },
         (e: unknown) => {
           if (rebuild.current?.queryId !== queryId) return;
@@ -480,7 +495,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     if (r.waiting !== selection) cancelRebuild();
     else if (r.key !== shownKey) {
       cancelRebuild();
-      startRebuild(r.waiting, r.anchorId);
+      startRebuild(r.waiting);
     }
   }, [selection, shownKey, cancelRebuild, startRebuild]);
   useEffect(() => cancelRebuild, [cancelRebuild]);
@@ -492,13 +507,14 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       // A resolve still out may be answered under the new rows, so it is dropped; the rows in memory still belong to
       // the state before the write, so they are read instead, before `refresh` drops them.
       cancelResolve();
+      // The anchor's id was resolved with the ids: its row may have left memory since, and then no row stands in for it.
       const ids = sel.ids ?? known(sel);
-      const anchorId = sel.anchor === null ? null : (rowAt(sel.anchor)?.id ?? null);
+      const anchorId = sel.ids !== null ? sel.anchorId : ids === null ? null : anchorIdFor(sel, ids);
       cancelRebuild();
       if (ids !== null && ids.length > 0) {
-        const waiting: Selection = { ranges: [], anchor: null, ids };
+        const waiting: Selection = { ranges: [], anchor: null, ids, anchorId };
         setSelection(waiting);
-        startRebuild(waiting, anchorId);
+        startRebuild(waiting);
       } else {
         setSelection(emptySelection);
       }
@@ -508,7 +524,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       refresh();
       treeRefresh();
     }
-  }, [change, refresh, treeRefresh, rowAt, known, cancelResolve, cancelRebuild, startRebuild]);
+  }, [change, refresh, treeRefresh, known, anchorIdFor, cancelResolve, cancelRebuild, startRebuild]);
 
   // ---- virtual rows -----------------------------------------------------------------------------------------------
   const rowHeight = rowHeightFor(settings.font_size);
