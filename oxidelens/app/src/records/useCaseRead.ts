@@ -10,14 +10,15 @@ import { isStale } from "./outcomes";
 export type ReadState<T> = { base: string; value: T; error?: undefined } | { base: string; value?: undefined; error: unknown };
 
 /**
- * Reads `read(nextId)` for `base` (null reads nothing) at `generation`: `read` takes a query id from `nextId()` for each
+ * Reads `read(nextId)` for `base` (null reads nothing) at `generation` (the case's write generation, or any version
+ * that asks for a re-read of the same `base` while its last answer stays up): `read` takes a query id from `nextId()` for each
  * backend call it makes, one after another, and the one in flight is cancelled when the key moves on. Returns the
  * answer, or the read's error, for `base` only; null while there is none. A failed cancel is passed to `report` unless
  * it is stale.
  */
 export function useCaseRead<T>(
   base: string | null,
-  generation: number,
+  generation: number | string,
   read: (nextId: () => string) => Promise<T>,
   report: (e: unknown) => void,
 ): ReadState<T> | null {

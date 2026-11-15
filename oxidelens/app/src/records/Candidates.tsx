@@ -12,9 +12,6 @@ import { displaySafe } from "../text";
 import { isStale, messageOf } from "./outcomes";
 import { useCaseRead } from "./useCaseRead";
 
-/** At most this many evidence rows are read for candidates. */
-const MAX_ROWS = 20;
-
 /** The candidate as one line: an account's `domain\name`, an IOC's type and value. Text from evidence. */
 export const candidateText = (c: Candidate): string =>
   c.kind === "account" ? (c.domain !== null ? `${c.domain}\\${c.value}` : c.value) : `${c.ioc_type ?? "other"} ${c.value}`;
@@ -39,15 +36,15 @@ export default function Candidates({
   slot: string;
 }): ReactNode {
   const { change, reportError } = useShell();
-  const asked = rows.slice(0, MAX_ROWS);
-  const base = JSON.stringify([entryId, asked]);
+  // Every evidence row is read, one after another; a new key cancels the one in flight and starts no more.
+  const base = JSON.stringify([entryId, rows]);
   const read = useCaseRead(
     base,
     change.generation,
     async (nextId) => {
       // One row at a time on one slot, each read under its own query id. A row the case no longer has offers nothing.
       const found: Candidate[] = [];
-      for (const row of asked) {
+      for (const row of rows) {
         try {
           found.push(...(await readCandidates(row, slot, nextId())));
         } catch (e) {

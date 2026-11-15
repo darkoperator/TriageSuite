@@ -111,6 +111,10 @@ pub struct Entry {
     /// and the fraction as stored), what the Timeline's Time column shows;
     /// `None` with no time.
     pub time_shown: Option<String>,
+    /// `time` as microseconds since the Unix epoch (UTC), as the engine
+    /// reads it: what places the entry on the Host lanes' time axis, so the
+    /// front end parses no date. `None` with no time.
+    pub time_us: Option<i64>,
     /// Every live record it links: hosts, then accounts, then IOCs, each
     /// kind in the order it was linked (the first account is the Timeline's
     /// Account column).
@@ -320,7 +324,7 @@ pub(super) fn next_ids(conn: &Connection, count: usize) -> Result<Vec<i64>> {
 /// What every read of an entry selects, in `read_entry_row`'s order: the
 /// stored columns, then its evidence count, its live hosts' names as a
 /// JSON list, and its live links as a JSON list of `{kind, id, label}`
-/// (`EntryLink`).
+/// (`EntryLink`), then its time in epoch microseconds.
 const ENTRY_SELECT: &str = "SELECT e.id, e.\"time\", e.time_source, e.title, e.description, \
      e.tactic, e.technique_ids, e.status, e.created_by, e.created_at, e.modified_by, \
      e.modified_at, e.reviewed_by, e.reviewed_at, e.deleted, \
@@ -340,7 +344,8 @@ const ENTRY_SELECT: &str = "SELECT e.id, e.\"time\", e.time_source, e.title, e.d
         WHERE l.entry_id = e.id AND NOT a.deleted \
        UNION ALL SELECT 'ioc', i.id, i.type || ' ' || i.value, 2, l.linked_at \
         FROM ox.entry_ioc l JOIN ox.ioc i ON i.id = l.record_id \
-        WHERE l.entry_id = e.id AND NOT i.deleted) k) \
+        WHERE l.entry_id = e.id AND NOT i.deleted) k), \
+     epoch_us(CAST(e.\"time\" AS TIMESTAMP)) \
      FROM ox.entry e";
 
 /// An entry as `ENTRY_SELECT` reads it, before decoding.
@@ -366,6 +371,7 @@ type RawEntry = (
         i64,
         Option<String>,
         Option<String>,
+        Option<i64>,
     ),
 );
 
@@ -392,6 +398,7 @@ fn raw_entry(r: &duckdb::Row<'_>) -> duckdb::Result<RawEntry> {
             r.get(15)?,
             r.get(16)?,
             r.get(17)?,
+            r.get(18)?,
         ),
     ))
 }
@@ -401,6 +408,7 @@ struct Derived {
     evidence_rows: u64,
     hosts: Vec<String>,
     links: Vec<EntryLink>,
+    time_us: Option<i64>,
 }
 
 /// The stored entry and what is derived for it.
@@ -408,7 +416,7 @@ fn decode(raw: RawEntry) -> Result<(Stored, Derived)> {
     let ((id, time, time_source, title, description, tactic, techniques, status), rest) = raw;
     let (created_by, created_at, modified_by, modified_at, reviewed_by, reviewed_at, deleted) =
         (rest.0, rest.1, rest.2, rest.3, rest.4, rest.5, rest.6);
-    let (evidence_rows, hosts, links) = (rest.7, rest.8, rest.9);
+    let (evidence_rows, hosts, links, time_us) = (rest.7, rest.8, rest.9, rest.10);
     // The engine writes both lists itself.
     let technique_ids: Vec<String> = serde_json::from_str(&techniques).map_err(|e| {
         EngineError::Internal(format!(
@@ -447,6 +455,7 @@ fn decode(raw: RawEntry) -> Result<(Stored, Derived)> {
         evidence_rows: u64::try_from(evidence_rows).unwrap_or_default(),
         hosts,
         links,
+        time_us,
     };
     Ok((stored, derived))
 }
@@ -486,6 +495,7 @@ fn shown(stored: Stored, derived: Derived, zone: &str) -> Entry {
         hosts: derived.hosts,
         time_shown,
         links: derived.links,
+        time_us: derived.time_us,
         mark,
     }
 }

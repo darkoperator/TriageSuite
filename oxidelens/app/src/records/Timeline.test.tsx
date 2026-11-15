@@ -9,7 +9,10 @@ import type { Candidate } from "../contract/generated/Candidate";
 import type { Entry } from "../contract/generated/Entry";
 import type { EntryQuery } from "../contract/generated/EntryQuery";
 import type { GridState } from "../contract/generated/GridState";
+import type { Evidence } from "../contract/generated/Evidence";
+import { mockCall } from "../mock/backend";
 import { HOSTILE_RECORD } from "../mock/generated";
+import { epochMicros } from "../mock/records";
 import Shell from "../shell/Shell";
 import { callsOf, overrideCommand } from "../test/backend";
 
@@ -30,11 +33,13 @@ function entryOf(over: Partial<Entry> & { id: number }): Entry {
     time: null, time_source: null, needs_time: true, title: `Entry ${over.id}`, description: "", tactic: null, technique_ids: [],
     status: "draft", created_by: "analyst:analyst01", created_at: "2026-01-10T12:00:00.000000Z", modified_by: "analyst:analyst01",
     modified_at: "2026-01-10T12:00:00.000000Z", reviewed_by: null, agent_added: false, evidence_rows: 0, hosts: [], time_shown: null,
-    links: [], mark: null, ...over,
+    links: [], mark: null, time_us: null, ...over,
   };
 }
 const dated = (id: number, utc: string, over: Partial<Entry> = {}): Entry =>
-  entryOf({ id, time: utc, time_source: "row", needs_time: false, time_shown: utc.replace("T", " ").replace("Z", ""), ...over });
+  entryOf({
+    id, time: utc, time_source: "row", needs_time: false, time_shown: utc.replace("T", " ").replace("Z", ""), time_us: epochMicros(utc), ...over,
+  });
 
 const rightPane = () => screen.getByRole("complementary", { name: "Row detail" });
 const sheet = () => screen.getByRole("grid", { name: "Timeline entries" });
@@ -104,6 +109,43 @@ describe("the Timeline sheet", () => {
     // A dated entry shows the engine's text for the time in the case's zone, and the header names the zone.
     expect(cellOf(rowOfEntry(9), "Time").textContent).toBe("2026-01-05 02:20:00.000000");
     expect(within(sheet()).getAllByRole("columnheader")[1].textContent).toBe("Time (UTC)");
+  });
+
+  it("entries_made_out_of_time_order_list_by_time_with_undated_last", async () => {
+    // The mock lists as the engine does (by time, the undated last, then by id; the engine's own order is pinned in
+    // `record_entry.rs`). Entries typed out of time order show in time order: a list by id or by creation is caught.
+    await openTimeline();
+    expect(idsDrawn()).toEqual([1, 2, 3, 4]);
+    const typed = (title: string, time: string) =>
+      mockCall("entry_new", { edit: { title, description: null, time: { set: time }, tactic: null, technique_ids: null } });
+    await act(async () => {
+      await typed("Late", "2026-01-05T09:00:00.000000Z");
+      await typed("Early", "2026-01-04T00:00:00.000000Z");
+    });
+    // E-6 (early) before the seeded E-1 and E-2 (from rows of 2026-01-05 02:1x), E-5 (late) after them, the undated
+    // E-3 and E-4 last.
+    await waitFor(() => expect(idsDrawn()).toEqual([6, 1, 2, 5, 3, 4]));
+    const times = [6, 1, 2, 5].map((id) => cellOf(rowOfEntry(id), "Time").textContent!);
+    expect([...times].sort()).toEqual(times);
+  });
+
+  it("the_timeline_pages_past_a_thousand", async () => {
+    const all = Array.from({ length: 1001 }, (_, i) => dated(i + 1, `2026-01-05T02:${String(Math.floor(i / 60) % 60).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000000Z`));
+    overrideCommand("entries_list", async (a) => {
+      const { limit, offset } = a as { limit: number; offset: number };
+      return { items: all.slice(offset, offset + limit), truncated: offset + limit < all.length };
+    });
+    const user = await openTimeline();
+    await waitFor(() => expect(entryRows()).toHaveLength(1000));
+    const more = screen.getByRole("button", { name: "Show more" });
+    expect(screen.getByText("1,000 entries shown · more in the case")).toBeInTheDocument();
+    await user.click(more);
+    await waitFor(() => expect(entryRows()).toHaveLength(1001));
+    expect(sheetQueries().length).toBeGreaterThan(1);
+    expect(callsOf("entries_list").some((c) => (c.args as { offset: number }).offset === 1000)).toBe(true);
+    expect(screen.getByText("1,001 entries shown")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(idsDrawn().at(-1)).toBe(1001);
   });
 
   it("filters_and_grouping_reach_entries_list", async () => {
@@ -329,9 +371,10 @@ describe("the Timeline's keys", () => {
 describe("Host lanes", () => {
   it("host_lanes_place_entries_by_host", async () => {
     const items = [
-      dated(1, "2026-01-05T02:14:07.000000Z", { hosts: ["WS01"], mark: "malicious" }),
+      // Uneven gaps: one minute, then three. Positions follow the time, not the rank.
+      dated(1, "2026-01-05T02:14:00.000000Z", { hosts: ["WS01"], mark: "malicious" }),
       dated(2, "2026-01-05T02:15:00.000000Z", { hosts: ["SRV01"], mark: "agent_malicious" }),
-      dated(3, "2026-01-05T02:16:00.000000Z", { hosts: ["SRV01", "WS01"], mark: "malicious" }),
+      dated(3, "2026-01-05T02:18:00.000000Z", { hosts: ["SRV01", "WS01"], mark: "malicious" }),
       entryOf({ id: 4, hosts: ["WS01"] }),
     ];
     overrideCommand("entries_list", async () => ({ items, truncated: false }));
@@ -345,21 +388,86 @@ describe("Host lanes", () => {
     const ids = (host: string) => within(lane(host)).getAllByRole("button").map((b) => b.getAttribute("data-entry"));
     expect(ids("WS01")).toEqual(["1", "3"]);
     expect(ids("SRV01")).toEqual(["2", "3"]);
-    // On the shared axis, the engine's order: the first at the start, the last at the end, the same entry level in
-    // every lane. The undated one is not drawn, and is counted under the axis.
+    // On the shared time axis (the engine's `time_us`): the first at the start, the last at the end, one minute of
+    // four at a quarter, the same entry level in every lane. The undated one is not drawn, and is counted under it.
     const left = (host: string, id: string) =>
       within(lane(host)).getAllByRole("button").find((b) => b.getAttribute("data-entry") === id)!.style.left;
-    expect([left("WS01", "1"), left("SRV01", "2"), left("WS01", "3"), left("SRV01", "3")]).toEqual(["0%", "50%", "100%", "100%"]);
+    expect([left("WS01", "1"), left("SRV01", "2"), left("WS01", "3"), left("SRV01", "3")]).toEqual(["0%", "25%", "100%", "100%"]);
     expect(within(lanes).queryAllByRole("button").some((b) => b.getAttribute("data-entry") === "4")).toBe(false);
     expect(lanes.textContent).toContain("1 undated entry, not drawn");
     // A glyph opens its entry in the editor.
     await user.click(within(lane("SRV01")).getAllByRole("button")[0]);
     await within(rightPane()).findByRole("region", { name: "Entry E-2" });
   });
+
+  it("the_sheet_keys_work_in_host_lanes", async () => {
+    const items = [
+      dated(1, "2026-01-05T02:14:00.000000Z", { hosts: ["WS01"] }),
+      dated(2, "2026-01-05T02:15:00.000000Z", { hosts: ["SRV01"] }),
+    ];
+    overrideCommand("entries_list", async () => ({ items, truncated: false }));
+    const user = await openTimeline();
+    await user.click(screen.getByRole("button", { name: "Host lanes" }));
+    const lanes = await screen.findByRole("region", { name: "Host lanes" });
+    const glyph = (id: number) => within(lanes).getAllByRole("button").find((b) => b.getAttribute("data-entry") === String(id))!;
+    await user.click(glyph(2));
+    await within(rightPane()).findByRole("region", { name: "Entry E-2" });
+    // R reviews the entry the lanes have selected; its refusal or success is the engine's.
+    glyph(2).focus();
+    await user.keyboard("r");
+    await waitFor(() => expect(callsOf("entry_status").map((c) => c.args)).toEqual([{ id: 2, status: "reviewed" }]));
+    // N opens the new-entry form.
+    glyph(2).focus();
+    await user.keyboard("n");
+    const form = await within(rightPane()).findByRole("form", { name: "New entry" });
+    await user.click(within(form).getByRole("button", { name: "Cancel" }));
+    // Enter on a glyph takes it, and Del removes the focused entry.
+    glyph(1).focus();
+    await user.keyboard("{Enter}");
+    await within(rightPane()).findByRole("region", { name: "Entry E-1" });
+    glyph(1).focus();
+    await user.keyboard("{Delete}");
+    await waitFor(() => expect(callsOf("entry_delete").map((c) => c.args)).toEqual([{ id: 1 }]));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });
 
 // ---- the candidates after M ---------------------------------------------------------------------------------------------
+/** The shell on mock_events, M pressed on its row at index 3: the editor of the new entry E-5. */
+async function promoteRow3() {
+  const user = userEvent.setup();
+  render(<Shell />);
+  await user.click(await screen.findByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ }));
+  await screen.findByRole("tab", { name: "Overview" });
+  await user.click(within(screen.getByRole("complementary", { name: "Case" })).getByRole("button", { name: /^mock_events/ }));
+  await screen.findByRole("tab", { name: /mock_events/, selected: true });
+  const grid = await screen.findByRole("grid", { name: "Rows" });
+  await waitFor(() => expect(within(grid).getAllByRole("row").length).toBeGreaterThan(10));
+  const row = within(grid).getAllByRole("row").find((r) => r.getAttribute("data-row-index") === "3")!;
+  await user.click(within(row).getAllByRole("gridcell")[2]);
+  await user.keyboard("m");
+  return { user, editor: await within(rightPane()).findByRole("region", { name: "Entry E-5" }) };
+}
+
 describe("the candidates after M", () => {
+  it("candidates_scan_every_evidence_row", async () => {
+    // 25 evidence rows; only the last names an account. Every row is read, one at a time, and its offer is shown.
+    const rows: Evidence[] = Array.from({ length: 25 }, (_, i) => ({
+      row_id: 100 + i, relation: "mock_events", host: "WS01", standing: "unchanged", summary: `row ${100 + i}`,
+      attached_by: "analyst:analyst01", attached_at: "2026-01-10T12:00:00.000000Z",
+    }));
+    overrideCommand("evidence_list", async () => rows);
+    overrideCommand("candidates", async (a) =>
+      (a as { rowId: number }).rowId === 124
+        ? [{ kind: "account", ioc_type: null, value: "late_user", domain: null, sid: null, column: "UserName", existing_id: null }]
+        : [],
+    );
+    const { editor } = await promoteRow3();
+    const panel = await within(editor).findByRole("region", { name: "Candidates" });
+    expect(await within(panel).findByRole("button", { name: "Create and link account late_user" })).toBeInTheDocument();
+    expect(callsOf("candidates").map((c) => (c.args as { rowId: number }).rowId)).toEqual(rows.map((r) => r.row_id));
+  });
+
   it("candidates_link_on_one_click", async () => {
     const offers: Candidate[] = [
       { kind: "account", ioc_type: null, value: "jdoe", domain: "ACME", sid: null, column: "UserName", existing_id: 1 },

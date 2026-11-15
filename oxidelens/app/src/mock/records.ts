@@ -74,7 +74,7 @@ interface Link {
 }
 
 /** Entries are kept without their derived `hosts`, `evidence_rows`, `time_shown`, `links` and `mark`, which `shown` fills in. */
-type StoredEntry = Omit<Entry, "hosts" | "evidence_rows" | "time_shown" | "links" | "mark">;
+type StoredEntry = Omit<Entry, "hosts" | "evidence_rows" | "time_shown" | "time_us" | "links" | "mark">;
 type StoredRecord = Omit<HostRecord, "entries" | "first_seen" | "last_seen"> &
   Partial<Omit<AccountRecord, keyof HostRecord>> &
   Partial<Omit<IocRecord, keyof HostRecord>>;
@@ -242,7 +242,7 @@ export function shownEntry(r: MockRecords, e: StoredEntry): Entry {
   const evidence_rows = (r.evidence.get(e.id) ?? []).length;
   // The mark the entry gives its rows (S2): an agent's unreviewed entry Agent: malicious, any other Malicious.
   const mark: MarkState | null = evidence_rows === 0 ? null : e.agent_added && e.status !== "reviewed" ? "agent_malicious" : "malicious";
-  return { ...e, hosts, evidence_rows, time_shown, links, mark };
+  return { ...e, hosts, evidence_rows, time_shown, time_us: e.time === null ? null : epochMicros(e.time), links, mark };
 }
 
 function shownRecord(r: MockRecords, kind: RecordKind, x: StoredRecord): CaseRecord {
@@ -253,6 +253,24 @@ function shownRecord(r: MockRecords, kind: RecordKind, x: StoredRecord): CaseRec
   if (kind === "host") return { kind, ...(x as HostRecord), ...counted };
   if (kind === "account") return { kind, ...(x as unknown as AccountRecord), ...counted, hosts_seen: hostsSeen };
   return { kind, ...(x as unknown as IocRecord), ...counted, hosts_seen: hostsSeen };
+}
+
+/**
+ * The engine's `epoch_us` of UTC text `YYYY-MM-DDTHH:MM:SS[.f]Z`, for the mock's entries only (the app never reads a
+ * date): days from the civil date (Howard Hinnant's algorithm), then the clock and the fraction.
+ */
+export function epochMicros(utc: string): number {
+  const n = (from: number, to: number) => Number(utc.slice(from, to));
+  const [y0, m, d] = [n(0, 4), n(5, 7), n(8, 10)];
+  const y = m <= 2 ? y0 - 1 : y0;
+  const era = Math.floor(y / 400);
+  const yoe = y - era * 400;
+  const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  const days = era * 146097 + doe - 719468;
+  const seconds = days * 86400 + n(11, 13) * 3600 + n(14, 16) * 60 + n(17, 19);
+  const fraction = utc.slice(19, -1).replace(".", "");
+  return seconds * 1_000_000 + (fraction === "" ? 0 : Number(fraction.padEnd(6, "0").slice(0, 6)));
 }
 
 /** The Timeline's order: by time, the undated last, then by id. */

@@ -56,7 +56,7 @@ function StatusText({ entry }: { entry: Entry }): ReactNode {
 }
 
 export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode {
-  const { summary, change, reportError, setRightPane, setGridStatus } = useShell();
+  const { summary, change, reportError, setRightPane } = useShell();
   const [text, setText] = useState("");
   const [status, setStatus] = useState<EntryStatus | "">("");
   const [host, setHost] = useState("");
@@ -72,11 +72,25 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
     () => ({ status: status === "" ? [] : [status], host: host === "" ? null : host, tactic: tactic === "" ? null : tactic, text: text === "" ? null : text, row: null, order: "timeline" }),
     [status, host, tactic, text],
   );
-  // A hidden sheet reads nothing; shown again, it reads for the case as it is then.
+  // A hidden sheet reads nothing; shown again, it reads for the case as it is then. The list is read a page of 1,000
+  // at a time: *Show more* asks for one page more, and every page shown is read again, one after another, on a write
+  // (the last answer stays up meanwhile). Other filters start again from one page.
+  const base = active ? JSON.stringify([summary.case_id, query]) : null;
+  const [pages, setPages] = useState<{ base: string | null; n: number }>({ base, n: 1 });
+  const shownPages = pages.base === base ? pages.n : 1;
+  if (pages.base !== base) setPages({ base, n: 1 });
   const listed = useCaseRead(
-    active ? JSON.stringify([summary.case_id, query]) : null,
-    change.generation,
-    (next) => entriesList(query, LIMIT, 0, SLOT, next()),
+    base,
+    `${change.generation}:${shownPages}`,
+    async (next) => {
+      const items: Entry[] = [];
+      for (let page = 0; page < shownPages; page++) {
+        const got = await entriesList(query, LIMIT, page * LIMIT, SLOT, next());
+        items.push(...got.items);
+        if (!got.truncated) return { items, truncated: false };
+      }
+      return { items, truncated: true };
+    },
     reportError,
   );
   const hosts = useCaseRead(
@@ -122,16 +136,9 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
     setRightPane(paneNode);
     return () => setRightPane(null);
   }, [active, paneNode, setRightPane]);
-  const statusNode = useMemo(() => {
-    if (!listed?.value) return null;
-    const n = listed.value.items.length;
-    return listed.value.truncated ? `the first ${fmt(n)} entries` : `${fmt(n)} ${n === 1 ? "entry" : "entries"}`;
-  }, [listed]);
-  useEffect(() => {
-    if (!active) return;
-    setGridStatus(statusNode);
-    return () => setGridStatus(null);
-  }, [active, statusNode, setGridStatus]);
+  const shown = listed?.value ? listed.value.items.length : null;
+  const statusText =
+    shown === null ? null : `${fmt(shown)} ${shown === 1 ? "entry" : "entries"} shown${listed?.value?.truncated ? " · more in the case" : ""}`;
 
   // The selected row has the focus while the table does, so the keys act on what is shown as selected.
   useEffect(() => {
@@ -150,25 +157,28 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
     }
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTableElement>) => {
+  // The sheet's keys, one path for the table and the Host lanes: they act on the entry whose row or glyph has the focus
+  // (`data-entry`), else on the selection. ↑ and ↓ step through the table's rows.
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.ctrlKey || e.altKey || e.metaKey || isTypingTarget(e.target)) return;
-    // ↑ and ↓ step from the row that has the focus, else from the selection.
-    const focused = e.target instanceof HTMLElement ? e.target.closest("tr")?.getAttribute("data-entry") : null;
-    const from = focused ? Number(focused) : selected;
-    const at = from === null ? -1 : order.indexOf(from);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const focused = e.target instanceof HTMLElement ? e.target.closest("[data-entry]")?.getAttribute("data-entry") : null;
+    const target = focused ? Number(focused) : selected;
+    const at = target === null ? -1 : order.indexOf(target);
+    if (view === "table" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       const next = e.key === "ArrowDown" ? Math.min(order.length - 1, at + 1) : Math.max(0, at - 1);
       if (order[next] !== undefined) select(order[next]);
     } else if (e.key === "n" || e.key === "N") {
       setCreating(true);
     } else if (e.key === "Enter") {
-      if (selected === null) return;
-      setCreating(false);
+      if (target === null) return;
+      select(target);
       setFocusSeq((s) => s + 1);
     } else if (e.key === "r" || e.key === "R") {
-      if (selected !== null) review.run(selected);
+      if (target === null) return;
+      select(target);
+      review.run(target);
     } else if (e.key === "Delete") {
-      if (selected !== null) void remove(selected);
+      if (target !== null) void remove(target);
     } else {
       return;
     }
@@ -223,7 +233,7 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
         </div>
       </div>
       {view === "lanes" ? (
-        <HostLanes entries={items} selected={selected} onSelect={select} />
+        <HostLanes entries={items} selected={selected} onSelect={select} onKeyDown={onKeyDown} />
       ) : (
         <div className="sheet-scroll">
           <table ref={table} className="sheet-table" role="grid" aria-label="Timeline entries" tabIndex={0} onKeyDown={onKeyDown}>
@@ -277,6 +287,16 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
           </table>
           {listed === null && <p className="pane-empty">Reading the entries…</p>}
           {listed?.value?.items.length === 0 && <p className="pane-empty">No entries. Press M on a row, or N here, to make one.</p>}
+        </div>
+      )}
+      {statusText !== null && (
+        <div className="sheet-foot">
+          <span>{statusText}</span>
+          {listed?.value?.truncated && (
+            <button type="button" className="link-button" onClick={() => setPages({ base, n: shownPages + 1 })}>
+              Show more
+            </button>
+          )}
         </div>
       )}
     </div>

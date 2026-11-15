@@ -46,6 +46,12 @@ hosts: Array<string>,
  */
 time_shown: string | null, 
 /**
+ * `time` as microseconds since the Unix epoch (UTC), as the engine
+ * reads it: what places the entry on the Host lanes' time axis, so the
+ * front end parses no date. `None` with no time.
+ */
+time_us: number | null, 
+/**
  * Every live record it links: hosts, then accounts, then IOCs, each
  * kind in the order it was linked (the first account is the Timeline's
  * Account column).

@@ -103,6 +103,7 @@ fn entry_commands_shape() {
             "time",
             "time_shown",
             "time_source",
+            "time_us",
             "untrusted"
         ]
     );
@@ -1218,6 +1219,7 @@ const ENTRY_OUT: &[&str] = &[
     "time",
     "time_shown",
     "time_source",
+    "time_us",
     "untrusted",
 ];
 const ENTRY_SHOW_OUT: &[&str] = &[
@@ -1239,6 +1241,7 @@ const ENTRY_SHOW_OUT: &[&str] = &[
     "time",
     "time_shown",
     "time_source",
+    "time_us",
     "untrusted",
 ];
 const HOST_OUT: &[&str] = &[
@@ -1557,6 +1560,7 @@ fn reply_shapes_of_every_command() {
             "time",
             "time_shown",
             "time_source",
+            "time_us",
             "untrusted"
         ]
     );
@@ -1600,6 +1604,7 @@ fn reply_shapes_of_every_command() {
         "time",
         "time_shown",
         "time_source",
+        "time_us",
         "untrusted",
     ];
     let v = ok(

@@ -1215,3 +1215,45 @@ fn an_entry_carries_the_mark_it_gives_its_rows() {
     drop(case);
     drop(d);
 }
+
+#[test]
+fn entries_carry_their_time_as_epoch_microseconds_in_time_order() {
+    let (d, mut case) = loaded();
+    let a = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let b = promote_at(&mut case, SHARE_SRV01, &analyst());
+    let typed = |t: &str| EntryEdit {
+        title: Some(format!("At {t}")),
+        time: Some(Some(t.into())),
+        ..Default::default()
+    };
+    // Typed out of time order, with uneven gaps: one second, then one hour.
+    let late = new_entry(&mut case, &typed("2026-01-05T03:14:08.5Z"), &analyst())
+        .unwrap()
+        .id;
+    let early = new_entry(&mut case, &typed("2026-01-05T02:14:07Z"), &analyst())
+        .unwrap()
+        .id;
+    let mid = new_entry(&mut case, &typed("2026-01-05T02:14:08Z"), &analyst())
+        .unwrap()
+        .id;
+    let undated = new_entry(&mut case, &titled("Undated"), &analyst())
+        .unwrap()
+        .id;
+    // 2026-01-05T02:14:07Z is 1,767,579,247 s after the epoch.
+    const EARLY_US: i64 = 1_767_579_247_000_000;
+    assert_eq!(one(&case, early).time_us, Some(EARLY_US));
+    assert_eq!(one(&case, mid).time_us, Some(EARLY_US + 1_000_000));
+    assert_eq!(one(&case, late).time_us, Some(EARLY_US + 3_601_500_000));
+    assert_eq!(one(&case, undated).time_us, None);
+    // The Timeline's order is by time, every dated entry before the undated one, whatever order they were made in.
+    let listed = all(&case);
+    let us: Vec<i64> = listed.iter().filter_map(|e| e.time_us).collect();
+    assert!(us.windows(2).all(|w| w[0] <= w[1]), "{us:?}");
+    assert_eq!(us.len(), 5);
+    assert_eq!(listed.last().unwrap().id, undated);
+    let pos = |id: i64| listed.iter().position(|e| e.id == id).unwrap();
+    assert!(pos(early) < pos(mid) && pos(mid) < pos(late));
+    assert!(pos(a) < pos(undated) && pos(b) < pos(undated));
+    drop(case);
+    drop(d);
+}
