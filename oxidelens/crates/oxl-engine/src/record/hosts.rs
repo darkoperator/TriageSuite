@@ -75,6 +75,38 @@ pub(crate) fn find_host(conn: &Connection, name: &str) -> Result<Option<i64>> {
     )
 }
 
+/// The first live entry linked to host record `host_id` that holds evidence
+/// from a host named `name` (ASCII case ignored); `None` when none does.
+/// While one does, the record keeps that name (ruling S7): renaming it, or
+/// merging it into a host of another name, is refused.
+pub(crate) fn evidence_holder(conn: &Connection, host_id: i64, name: &str) -> Result<Option<i64>> {
+    let rows: Vec<(i64, String)> = conn
+        .prepare(
+            "SELECT DISTINCT l.entry_id, v.host FROM ox.entry_host l              JOIN ox.entry e ON e.id = l.entry_id              JOIN ox.evidence v ON v.entry_id = e.id              WHERE l.record_id = ? AND NOT e.deleted AND v.host IS NOT NULL              ORDER BY l.entry_id",
+        )?
+        .query_map(params![host_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, host)| host.eq_ignore_ascii_case(name))
+        .map(|(entry, _)| entry))
+}
+
+/// `Refused`: host record `host_id`, named `name`, keeps that name while
+/// entry `entry_id` holds evidence from it; `doing` says what was refused.
+pub(crate) fn refuse_evidence_name(
+    entry_id: i64,
+    host_id: i64,
+    name: &str,
+    doing: &str,
+) -> EngineError {
+    EngineError::Refused(format!(
+        "E-{entry_id} holds evidence from {}; {} keeps that name while it does, so it cannot          be {doing}; detach the evidence first",
+        super::clip(name, 64),
+        RecordKind::Host.shown(host_id)
+    ))
+}
+
 /// The id of the live host record named `name` (`find_host`), creating it
 /// when the case has none: `reviewed` for an analyst, `unreviewed` for an
 /// agent, with its history row. Runs in the caller's transaction, stamped
@@ -152,6 +184,11 @@ pub fn upsert_host(case: &mut Case, spec: &HostSpec, actor: &Actor) -> Result<Ho
             if (&current.name, &current.role, &current.note) == (&spec.name, &spec.role, &spec.note)
             {
                 return Ok(current);
+            }
+            if !current.name.eq_ignore_ascii_case(&spec.name) {
+                if let Some(entry) = evidence_holder(&tx, id, &current.name)? {
+                    return Err(refuse_evidence_name(entry, id, &current.name, "renamed"));
+                }
             }
             let before = row_json(&tx, kind, id)?;
             tx.execute(

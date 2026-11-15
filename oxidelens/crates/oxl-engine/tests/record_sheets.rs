@@ -1262,3 +1262,79 @@ fn every_change_writes_history() {
     );
     assert_eq!(n(&case, "select count(*) from ox.history"), before);
 }
+
+#[test]
+fn renaming_a_host_with_evidence_from_it_is_refused() {
+    let (_d, mut case) = loaded();
+    let e = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let ws01 = hosts(&case, 10, 0).unwrap().items.remove(0);
+    let mut rename = host_spec("SRV01");
+    rename.id = Some(ws01.id);
+    let before = n(&case, "select count(*) from ox.history");
+    let (c, why) = code(upsert_host(&mut case, &rename, &analyst()));
+    assert_eq!(c, "refused", "{why}");
+    assert!(
+        why.contains(&format!("E-{e}")) && why.contains("WS01"),
+        "{why}"
+    );
+    assert_eq!(n(&case, "select count(*) from ox.history"), before);
+    assert_eq!(host_record(&case, ws01.id).unwrap().name, "WS01");
+    // A change of ASCII case keeps the name the evidence gives.
+    rename.name = "ws01".into();
+    assert_eq!(
+        upsert_host(&mut case, &rename, &analyst()).unwrap().name,
+        "ws01"
+    );
+    // Other fields change freely.
+    rename.role = "workstation".into();
+    upsert_host(&mut case, &rename, &analyst()).unwrap();
+    // Evidence on a deleted entry holds nothing; nor does a detached row.
+    let failed = n(&case, FAILED_LOGON_WS01);
+    detach_row(&mut case, e, failed, &analyst()).unwrap();
+    rename.name = "WS01-renamed".into();
+    upsert_host(&mut case, &rename, &analyst()).unwrap();
+    let again = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let fresh = hosts(&case, 10, 0)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|h| h.name == "WS01")
+        .unwrap();
+    delete_entry(&mut case, again, &analyst()).unwrap();
+    let mut rename = host_spec("SRV02");
+    rename.id = Some(fresh.id);
+    upsert_host(&mut case, &rename, &analyst()).unwrap();
+}
+
+#[test]
+fn merging_a_host_with_evidence_into_another_name_is_refused() {
+    let (_d, mut case) = loaded();
+    let e = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let ws01 = hosts(&case, 10, 0).unwrap().items.remove(0);
+    let srv = upsert_host(&mut case, &host_spec("SRV01"), &analyst()).unwrap();
+    let before = n(&case, "select count(*) from ox.history");
+    let (c, why) = code(merge_records(
+        &mut case,
+        RecordKind::Host,
+        ws01.id,
+        srv.id,
+        &analyst(),
+    ));
+    assert_eq!(c, "refused", "{why}");
+    assert!(
+        why.contains(&format!("E-{e}")) && why.contains("WS01"),
+        "{why}"
+    );
+    assert_eq!(n(&case, "select count(*) from ox.history"), before);
+    assert!(!host_record(&case, ws01.id).unwrap().deleted);
+    // The other way round moves no evidence-backed link: SRV01 has none.
+    let lead = entry(&mut case, "lead", None, &analyst());
+    link(&mut case, lead, RecordKind::Host, srv.id, &analyst()).unwrap();
+    merge_records(&mut case, RecordKind::Host, srv.id, ws01.id, &analyst()).unwrap();
+    assert_eq!(host_record(&case, ws01.id).unwrap().entries, 2);
+    // Once the evidence is detached, WS01 merges into another name.
+    let failed = n(&case, FAILED_LOGON_WS01);
+    detach_row(&mut case, e, failed, &analyst()).unwrap();
+    let other = upsert_host(&mut case, &host_spec("SRV03"), &analyst()).unwrap();
+    merge_records(&mut case, RecordKind::Host, ws01.id, other.id, &analyst()).unwrap();
+}

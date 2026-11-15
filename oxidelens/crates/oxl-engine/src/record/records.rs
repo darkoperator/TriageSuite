@@ -7,7 +7,7 @@
 //! and after; a link's carry the link, as `entry.rs` writes them.
 
 use super::entry::{changeable, list_entries};
-use super::hosts::link_hosts;
+use super::hosts::{evidence_holder, link_hosts, refuse_evidence_name};
 use super::{clip, has_records, require_records, Entry};
 use crate::actor::Actor;
 use crate::annot::{record, record_all, Change};
@@ -395,6 +395,31 @@ pub fn merge_records(
     let tx = case.conn_mut().transaction()?;
     changeable_record(&tx, kind, from, actor)?;
     changeable_record(&tx, kind, into, actor)?;
+    if kind == RecordKind::Host {
+        // S7: evidence keeps a host's links on a record of its name.
+        let name = |id: i64| -> Result<String> {
+            Ok(
+                tx.query_row("SELECT name FROM ox.host WHERE id = ?", params![id], |r| {
+                    r.get(0)
+                })?,
+            )
+        };
+        let (from_name, into_name) = (name(from)?, name(into)?);
+        if !from_name.eq_ignore_ascii_case(&into_name) {
+            if let Some(entry) = evidence_holder(&tx, from, &from_name)? {
+                return Err(refuse_evidence_name(
+                    entry,
+                    from,
+                    &from_name,
+                    &format!(
+                        "merged into {} ({})",
+                        kind.shown(into),
+                        clip(&into_name, 64)
+                    ),
+                ));
+            }
+        }
+    }
     let kept: std::collections::HashSet<i64> = links_of(&tx, kind, into)?
         .into_iter()
         .map(|(entry, _, _)| entry)
