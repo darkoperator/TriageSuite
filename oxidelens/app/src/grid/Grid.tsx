@@ -850,6 +850,11 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   // I's read of a clipped cell's whole value, for one data row and column (by name: a reorder or a pin moves columns
   // under the focused position), under one state key. A focus move, another column at the focused position, a change
   // of state or the tab closing cancels it, and an answer for a cell no longer focused opens nothing.
+  //
+  // `focusedCell` is the grouped list's focused cell as committed: its row, its column's name and the state key, one
+  // record swapped in a layout effect (as `useMatches` does), and the same effect cancels a read for any other cell.
+  // An answer is judged against that record. A ref written in a passive effect still holds the previous commit's
+  // values when an answer comes between a commit and its passive effects, and would let the old column's value through.
   const cellRead = useRef<{ queryId: string; rowId: number; column: string; key: string } | null>(null);
   const cancelCellRead = useCallback(() => {
     const r = cellRead.current;
@@ -857,13 +862,15 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     if (r) void queryCancel([r.queryId]).catch(() => {});
   }, []);
   const focusedColumn = groupFocus ? (names[groupFocus.col] ?? null) : null;
-  const namesRef = useRef(names);
-  useEffect(() => {
-    namesRef.current = names;
-  });
-  useEffect(() => {
+  const focusedCell = useRef<{ rowId: number; column: string; key: string } | null>(null);
+  useLayoutEffect(() => {
+    const cell = groupFocus && focusedColumn !== null ? { rowId: groupFocus.rowId, column: focusedColumn, key: shownKey } : null;
+    focusedCell.current = cell;
     const r = cellRead.current;
-    if (r && (groupFocus?.rowId !== r.rowId || focusedColumn !== r.column || shownKey !== r.key)) cancelCellRead();
+    if (r && (cell?.rowId !== r.rowId || cell.column !== r.column || cell.key !== r.key)) cancelCellRead();
+    return () => {
+      focusedCell.current = null; // a closed tab has no focused cell
+    };
   }, [groupFocus, focusedColumn, shownKey, cancelCellRead]);
   useEffect(() => cancelCellRead, [cancelCellRead]);
   const groupFocusRef = useRef(groupFocus);
@@ -932,9 +939,8 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         cellRead.current = { queryId, rowId: g.rowId, column, key };
         try {
           const whole = await readCell(g.rowId, column, `tab:${tab.id}:ioc`, queryId);
-          const now = groupFocusRef.current;
-          const still =
-            cellRead.current?.queryId === queryId && now?.rowId === g.rowId && namesRef.current[now.col] === column && shownKeyRef.current === key;
+          const now = focusedCell.current;
+          const still = cellRead.current?.queryId === queryId && now?.rowId === g.rowId && now.column === column && now.key === key;
           return still ? (whole.text ?? "") : null;
         } catch (e) {
           if (cellRead.current?.queryId !== queryId) return null; // cancelled by a focus move: nothing to say

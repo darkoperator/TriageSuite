@@ -5,14 +5,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
+import { createRef, useEffect, useImperativeHandle, useLayoutEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { caseOpen, caseSummary, settingsGet } from "../api";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
+import type { ColumnLayout } from "../contract/generated/ColumnLayout";
+import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import type { GridPage } from "../contract/generated/GridPage";
 import type { GridState } from "../contract/generated/GridState";
 import type { MergedSource } from "../contract/generated/MergedSource";
 import Grid from "../grid/Grid";
 import { initialGridState } from "../grid/gridState";
+import { materialise, togglePin } from "../grid/layout";
 import type { Entry } from "../contract/generated/Entry";
 import { HAYABUSA_FIRST_ID, hayabusaRows } from "../mock/generated";
 import { mockCall, setMockMarks } from "../mock/backend";
@@ -953,6 +957,99 @@ describe("fix round 3", () => {
       release();
       await new Promise((r) => setTimeout(r, 50));
     });
+    expect(screen.queryByRole("dialog", { name: "Add IOC" })).toBeNull();
+  });
+});
+
+describe("fix round 4", () => {
+  it("a_grouped_i_answer_between_a_commit_and_its_passive_effects_opens_nothing", async () => {
+    // Every cell is clipped, so I reads the whole value; the read is held.
+    overrideCommand("grid_page", async (args) => {
+      const page = (await mockCall("grid_page", args)) as GridPage;
+      return { ...page, cells: page.cells.map((row) => row.map((c) => (c === null ? c : { ...c, clipped: true }))) };
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("cell_value", async (args) => {
+      await gate;
+      return { text: `whole ${(args as { column: string }).column}`, parts: [] };
+    });
+    await caseOpen("/cases/x.duckdb");
+    const summary: CaseSummary = await caseSummary("t");
+    const first = (await settingsGet()).settings;
+    const ctx: ShellContext = {
+      summary, settings: first, change: { generation: 0, kinds: [] }, openDataset: () => {}, openScoped: vi.fn(), setGridStatus: () => {},
+      setRightPane: () => {}, rightPane: null, scroll: { get: () => 0, set: () => {} }, reportError: vi.fn(), saveLayout: vi.fn(),
+      setHistogram: vi.fn(), saveColourRules: vi.fn(),
+    };
+    const grouped: Tab = {
+      id: "scoped:grouped", kind: "dataset", relation: "mock_events", title: "grouped",
+      seed: { state: initialGridState("mock_events"), by: ["Channel"] },
+    };
+    // The shell's settings, held here. `adopt` is a pin saved from another tab of the relation arriving: it is not an
+    // input event, so React renders it at default priority and leaves the passive effects of its commits to a later
+    // scheduler task. (After a click React runs them inside the commit, which leaves no gap for an answer.)
+    const host = createRef<{ adopt(layout: ColumnLayout): void }>();
+    // Host's commits, and how many of them have had their passive effects run.
+    const ran = { commits: 0, effects: 0 };
+    function Host() {
+      const [settings, setSettings] = useState(first);
+      const [, setSeen] = useState(first);
+      useImperativeHandle(host, () => ({
+        adopt: (layout) => setSettings((s) => ({ ...s, layouts: { ...s.layouts, mock_events: layout } })),
+      }));
+      // The grid adopts the new layout in a passive effect. This one sets state in the same flush, so Host renders
+      // again in the commit that moves the columns, and the two counters below then speak for that commit.
+      useEffect(() => setSeen(settings), [settings]);
+      useLayoutEffect(() => {
+        ran.commits += 1;
+      });
+      useEffect(() => {
+        ran.effects += 1;
+      });
+      return (
+        <ShellCtx.Provider value={{ ...ctx, settings }}>
+          <Grid tab={grouped} active scrollOffset={0} onScroll={() => {}} />
+        </ShellCtx.Provider>
+      );
+    }
+    render(<Host />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: /^Expand Channel/ }))[0]);
+    await waitFor(() => expect(document.querySelectorAll("[data-kind='row']").length).toBeGreaterThan(2));
+    const names = () => [...document.querySelectorAll("[role='columnheader'] .col-name")].map((n) => n.textContent);
+    const at = names().indexOf("Channel");
+    await user.click(within(document.querySelector<HTMLElement>("[data-kind='row']")!).getAllByRole("gridcell")[at + 1]);
+    await user.keyboard("i");
+    await waitFor(() => expect(callsOf("cell_value")).toHaveLength(1));
+    expect((callsOf("cell_value")[0].args as { column: string }).column).toBe("Channel");
+    const metas = await mockCall<ColumnMeta[]>("columns", { queryId: "t", slot: "t", relation: "mock_events" });
+    // Pinning a later column puts it first: the focused position then holds the column before Channel's old place.
+    const pinned = togglePin(materialise(null, metas), "Provider");
+
+    // The answer is released as soon as the pin is in the document. A mutation observer's callback runs when the task
+    // that committed ends, and every step of the answer is a promise step, so the answer is handled right there:
+    // after the commit and its layout effects, before the scheduler's next task.
+    let behind: number | null = null;
+    const committed = new MutationObserver(() => {
+      if (behind !== null || names()[at] === "Channel") return;
+      behind = ran.commits - ran.effects;
+      release();
+    });
+    committed.observe(document.body, { childList: true, subtree: true, attributes: true });
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      host.current!.adopt(pinned);
+      await waitFor(() => expect(behind).not.toBeNull(), { timeout: 5000 });
+    } finally {
+      committed.disconnect();
+      env.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    await settle();
+    // The ordering this test is for: the commit that moved the columns had not run its passive effects.
+    expect(behind).toBe(1);
+    expect(names()[at]).not.toBe("Channel");
     expect(screen.queryByRole("dialog", { name: "Add IOC" })).toBeNull();
   });
 });
