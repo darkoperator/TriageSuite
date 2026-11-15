@@ -405,6 +405,29 @@ pub struct Sightings {
 /// the search and after each relation; `Invalid` for a value longer than
 /// Find takes (`MAX_VALUE`).
 pub fn ioc_sightings(case: &Case, ioc_id: i64, cancel: &AtomicBool) -> Result<Sightings> {
+    sightings(case, ioc_id, cancel, &mut |_| {})
+}
+
+/// `ioc_sightings`, calling `pause` with each relation's name as its search
+/// is done, before the cancel flag is read for the next: a test holds the
+/// sweep there, mid-search, and counts the relations it reached. Built only
+/// with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn ioc_sightings_paused(
+    case: &Case,
+    ioc_id: i64,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(&str),
+) -> Result<Sightings> {
+    sightings(case, ioc_id, cancel, pause)
+}
+
+fn sightings(
+    case: &Case,
+    ioc_id: i64,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(&str),
+) -> Result<Sightings> {
     let ioc = ioc_record(case, ioc_id)?;
     if ioc.deleted {
         return Err(EngineError::NotFound(format!(
@@ -425,7 +448,10 @@ pub fn ioc_sightings(case: &Case, ioc_id: i64, cancel: &AtomicBool) -> Result<Si
             from: None,
             to: None,
         },
-        &mut |_, _| !cancel.load(Ordering::Relaxed),
+        &mut |relation, _| {
+            pause(relation);
+            !cancel.load(Ordering::Relaxed)
+        },
     )?;
     if found.cancelled {
         return Err(cancelled());

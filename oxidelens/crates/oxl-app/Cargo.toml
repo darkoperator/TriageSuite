@@ -34,6 +34,10 @@ tempfile.workspace = true
 # The mock runtime, so a test can call every command through Tauri's own IPC
 # with the argument names the TypeScript contract gives.
 tauri = { workspace = true, features = ["test"] }
+# The engine's test-only variants (`test-support`), which the unit tests in
+# `cmd::record` hold mid-way: a record export before its rename, a sightings
+# sweep between relations. Only `cfg(test)` code calls them.
+oxl-engine = { workspace = true, features = ["ts", "test-support"] }
 
 [lints]
 workspace = true

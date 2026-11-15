@@ -671,7 +671,8 @@ fn the_record_commands_need_a_case() {
     fn ok<T>(r: Result<T, oxl_app::CmdError>) -> Result<(), oxl_app::CmdError> {
         r.map(|_| ())
     }
-    let out = std::env::temp_dir().join("oxl-no-case.out");
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("record.out");
     let (o1, o2, o3) = (out.clone(), out.clone(), out.clone());
     let host = || host_spec(None, "WS01", "");
     let calls: Vec<(&str, Call)> = vec![

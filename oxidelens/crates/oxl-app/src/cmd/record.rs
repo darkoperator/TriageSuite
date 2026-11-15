@@ -442,9 +442,65 @@ pub fn candidates(state: &AppState, at: At<'_>, row_id: i64) -> Result<Vec<Candi
 pub fn ioc_sightings(state: &AppState, at: At<'_>, id: i64) -> Result<Sightings, CmdError> {
     let cancel = Arc::new(AtomicBool::new(false));
     state.read_with_flag(at.slot, at.query_id, cancel.clone(), |c| {
-        state.hook(Point::SightingsRunning);
-        oxl_engine::ioc_sightings(c, id, &cancel)
+        engine::sightings(c, id, &cancel, &mut |_| {
+            state.hook(Point::SightingsRelation)
+        })
     })
+}
+
+/// The engine calls the app's commands make. Under test they are the
+/// engine's `test-support` variants, which call a hook where a test holds
+/// the work mid-way (`Point::SightingsRelation`, `Point::RecordBeforeRename`);
+/// otherwise the plain calls, the hook unused.
+#[cfg(test)]
+mod engine {
+    pub use oxl_engine::{
+        export_report_before_rename as report, export_timeline_csv_before_rename as timeline,
+        export_workbook_before_rename as workbook, ioc_sightings_paused as sightings,
+    };
+}
+
+#[cfg(not(test))]
+mod engine {
+    use oxl_engine::{Case, ExportReport, Result, Sightings};
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+
+    pub fn sightings(
+        case: &Case,
+        id: i64,
+        cancel: &AtomicBool,
+        _pause: &mut dyn FnMut(&str),
+    ) -> Result<Sightings> {
+        oxl_engine::ioc_sightings(case, id, cancel)
+    }
+
+    pub fn timeline(
+        case: &Case,
+        path: &Path,
+        cancel: &AtomicBool,
+        _hook: &mut dyn FnMut(),
+    ) -> Result<ExportReport> {
+        oxl_engine::export_timeline_csv(case, path, cancel)
+    }
+
+    pub fn workbook(
+        case: &Case,
+        path: &Path,
+        cancel: &AtomicBool,
+        _hook: &mut dyn FnMut(),
+    ) -> Result<ExportReport> {
+        oxl_engine::export_workbook(case, path, cancel)
+    }
+
+    pub fn report(
+        case: &Case,
+        path: &Path,
+        cancel: &AtomicBool,
+        _hook: &mut dyn FnMut(),
+    ) -> Result<ExportReport> {
+        oxl_engine::export_report(case, path, cancel)
+    }
 }
 
 /// Account `id`'s logons, as ruling S6 reads the event log
@@ -470,8 +526,10 @@ pub fn history_list(
 
 // ---- exports ----
 
-/// An engine export of the case record.
-type RecordExport = fn(&Case, &Path, &AtomicBool) -> oxl_engine::Result<ExportReport>;
+/// An engine export of the case record, given the hook it calls once its
+/// partial file is written, before its rename (`engine`).
+type RecordExport =
+    fn(&Case, &Path, &AtomicBool, &mut dyn FnMut()) -> oxl_engine::Result<ExportReport>;
 
 /// The timeline as CSV, byte for byte as the case holds it
 /// (`export_timeline_csv`).
@@ -480,7 +538,7 @@ pub fn export_timeline(
     at: At<'_>,
     path: &Path,
 ) -> Result<ExportReport, CmdError> {
-    export(state, at, path, oxl_engine::export_timeline_csv)
+    export(state, at, path, engine::timeline)
 }
 
 /// The record as an XLSX workbook, every cell a string (`export_workbook`).
@@ -489,12 +547,12 @@ pub fn export_workbook(
     at: At<'_>,
     path: &Path,
 ) -> Result<ExportReport, CmdError> {
-    export(state, at, path, oxl_engine::export_workbook)
+    export(state, at, path, engine::workbook)
 }
 
 /// The record as a Markdown report, every value escaped (`export_report`).
 pub fn export_report(state: &AppState, at: At<'_>, path: &Path) -> Result<ExportReport, CmdError> {
-    export(state, at, path, oxl_engine::export_report)
+    export(state, at, path, engine::report)
 }
 
 /// Run `write` to `path` as a job (kind `export`, the file's name as its
@@ -521,8 +579,9 @@ fn export(
         state.read_to_completion(at.slot, at.query_id, cancel.clone(), |c| {
             state.hook(Point::BeforeGate);
             let gate = state.wait_for_gate(&cancel)?;
-            state.hook(Point::GateHeld);
-            let report = write(c, path, &cancel);
+            let report = write(c, path, &cancel, &mut || {
+                state.hook(Point::RecordBeforeRename)
+            });
             drop(gate);
             report
         })
@@ -881,6 +940,7 @@ mod tests {
     use crate::events::NoSink;
     use crate::settings::SettingsStore;
     use oxl_engine::IocType;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -920,9 +980,33 @@ mod tests {
         rx
     }
 
-    /// Held after it took the write gate, each export makes every write
-    /// answer `busy` and has not written its file; released, it lands its
-    /// file and writes run again.
+    /// Register `n` passes through `point` that only count themselves, after
+    /// whatever is registered there already; the count.
+    fn count(state: &AppState, point: Point, n: usize) -> Arc<AtomicUsize> {
+        let seen = Arc::new(AtomicUsize::new(0));
+        for _ in 0..n {
+            let seen = seen.clone();
+            state.on(point, move || {
+                seen.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        seen
+    }
+
+    /// The relations the case holds, each of which a sweep searches.
+    fn relation_count(state: &AppState) -> usize {
+        let summary = case::case_summary(state, At::new("sum", "summary")).unwrap();
+        assert!(
+            summary.relations.len() >= 2,
+            "a sweep needs relations to stop between"
+        );
+        summary.relations.len()
+    }
+
+    /// Held once its partial file is written and before its rename, each
+    /// export still holds the write gate: a write answers `busy`, the partial
+    /// file is there and the target is not. Released, the file lands, the
+    /// partial is gone, and writes run again.
     #[test]
     fn a_record_export_holds_the_write_gate_until_its_file_lands() {
         type Export = fn(&AppState, At<'_>, &Path) -> Result<ExportReport, CmdError>;
@@ -941,62 +1025,81 @@ mod tests {
                 },
             )
             .unwrap();
-            let (reached, go) = hold(&state, Point::GateHeld);
+            let (reached, go) = hold(&state, Point::RecordBeforeRename);
             let out = d.path().join(name);
+            let partial = d.path().join(format!("{name}.partial"));
             let done = {
                 let out = out.clone();
                 spawn(&state, move |s| export(s, At::new("x1", "export"), &out))
             };
             reached
                 .recv_timeout(LIMIT)
-                .expect("the export took the gate");
+                .expect("the export wrote its partial file");
+            assert!(partial.is_file(), "{name}: no partial file at the pause");
+            assert!(!out.exists(), "{name} landed before its rename");
             assert_eq!(mark_set(&state, &[1]).unwrap_err().code, "busy", "{name}");
             let note = note_add(&state, 1, "meanwhile");
             assert_eq!(note.unwrap_err().code, "busy", "{name}");
-            assert!(!out.exists(), "{name} landed before the gate was let go");
             go.send(()).unwrap();
             let report = done.recv_timeout(LIMIT).expect("the export answered");
             assert_eq!(report.unwrap().path, out, "{name}");
-            assert!(out.is_file(), "{name}");
+            assert!(out.is_file() && !partial.exists(), "{name}");
             mark_set(&state, &[1]).expect("a write runs once the export is done");
         }
     }
 
-    /// A sightings read held while it runs, then superseded by a newer one on
-    /// its slot, answers `superseded`; the newer one answers the sightings.
+    /// A sweep held after its first relation, then superseded by a newer one
+    /// on its slot, stops there: no other relation is searched, and it
+    /// answers `superseded`, while the newer one answers the sightings.
     #[test]
     fn a_newer_sightings_query_supersedes_one_in_flight() {
         let (_d, state) = setup();
         let ioc = ioc_id(&state);
-        let (reached, go) = hold(&state, Point::SightingsRunning);
+        let relations = relation_count(&state);
+        let (reached, go) = hold(&state, Point::SightingsRelation);
         let first = spawn(&state, move |s| {
             ioc_sightings(s, At::new("s1", "sightings"), ioc)
         });
         reached
             .recv_timeout(LIMIT)
-            .expect("the first sweep is running");
+            .expect("the first sweep searched a relation");
         let second = ioc_sightings(&state, At::new("s2", "sightings"), ioc).unwrap();
         assert!(second.hits >= 2, "{second:?}");
+        let after = count(&state, Point::SightingsRelation, relations);
         go.send(()).unwrap();
         let first = first.recv_timeout(LIMIT).expect("the first sweep answered");
         assert_eq!(first.unwrap_err().code, "superseded");
+        assert_eq!(
+            after.load(Ordering::SeqCst),
+            0,
+            "the superseded sweep searched on, past 1 of {relations} relations"
+        );
     }
 
-    /// A sightings read held while it runs, then cancelled by its id, answers
-    /// `interrupted`.
+    /// A sweep held after its first relation, then cancelled by its id,
+    /// stops there and answers `interrupted`.
     #[test]
     fn a_sightings_query_cancelled_in_flight_is_interrupted() {
         let (_d, state) = setup();
         let ioc = ioc_id(&state);
-        let (reached, go) = hold(&state, Point::SightingsRunning);
+        let relations = relation_count(&state);
+        let (reached, go) = hold(&state, Point::SightingsRelation);
         let first = spawn(&state, move |s| {
             ioc_sightings(s, At::new("s1", "sightings"), ioc)
         });
-        reached.recv_timeout(LIMIT).expect("the sweep is running");
+        reached
+            .recv_timeout(LIMIT)
+            .expect("the sweep searched a relation");
+        let after = count(&state, Point::SightingsRelation, relations);
         query_cancel(&state, &["s1".to_string()]).unwrap();
         go.send(()).unwrap();
         let first = first.recv_timeout(LIMIT).expect("the sweep answered");
         assert_eq!(first.unwrap_err().code, "interrupted");
+        assert_eq!(
+            after.load(Ordering::SeqCst),
+            0,
+            "the cancelled sweep searched on, past 1 of {relations} relations"
+        );
     }
 
     /// An IOC for the address both hosts' events name.

@@ -146,7 +146,7 @@ struct Table {
 /// file, its log, or a path inside a loaded source. On any failure the
 /// partial file is removed and what was at `path` is left as it was.
 pub fn export_timeline_csv(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
-    timeline_csv(case, path, cancel, &mut || {})
+    timeline_csv(case, path, cancel, &mut || {}, &mut || {})
 }
 
 /// `export_timeline_csv`, calling `pause` between two of its reads (once
@@ -159,7 +159,20 @@ pub fn export_timeline_csv_paused(
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    timeline_csv(case, path, cancel, pause)
+    timeline_csv(case, path, cancel, pause, &mut || {})
+}
+
+/// `export_timeline_csv`, calling `hook` once its partial file is written
+/// and closed, before its last checks and the rename, for a test to look at
+/// what holds then. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_timeline_csv_before_rename(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    hook: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    timeline_csv(case, path, cancel, &mut || {}, hook)
 }
 
 fn timeline_csv(
@@ -167,10 +180,11 @@ fn timeline_csv(
     path: &Path,
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
+    before_rename: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
     check_export_target(case, path)?;
     let timeline = snapshot(case, |case| timeline(case, cancel, pause))?;
-    write_whole(case, path, cancel, |file| {
+    write_whole(case, path, cancel, before_rename, |file| {
         let mut out = csv::Writer::from_writer(file);
         out.write_record(timeline.header).map_err(csv_error)?;
         for row in &timeline.rows {
@@ -188,7 +202,7 @@ fn timeline_csv(
 /// `export_timeline_csv` does, and `Invalid` for a sheet past a
 /// workbook's 1,048,575 data rows.
 pub fn export_workbook(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
-    workbook(case, path, cancel, &mut || {})
+    workbook(case, path, cancel, &mut || {}, &mut || {})
 }
 
 /// `export_workbook`, calling `pause` where `export_timeline_csv_paused`
@@ -200,7 +214,19 @@ pub fn export_workbook_paused(
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    workbook(case, path, cancel, pause)
+    workbook(case, path, cancel, pause, &mut || {})
+}
+
+/// `export_workbook`, calling `hook` where
+/// `export_timeline_csv_before_rename` does. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_workbook_before_rename(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    hook: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    workbook(case, path, cancel, &mut || {}, hook)
 }
 
 fn workbook(
@@ -208,6 +234,7 @@ fn workbook(
     path: &Path,
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
+    before_rename: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
     check_export_target(case, path)?;
     let tables = snapshot(case, |case| record_tables(case, cancel, pause))?;
@@ -237,7 +264,7 @@ fn workbook(
             }
         }
     }
-    write_whole(case, path, cancel, |file| {
+    write_whole(case, path, cancel, before_rename, |file| {
         book.save_to_writer(&mut *file).map_err(xlsx_error)?;
         Ok(tables.iter().map(|t| count(&t.rows)).sum())
     })
@@ -250,7 +277,7 @@ fn workbook(
 /// Every value from the case is escaped (`md`). `rows` counts the data
 /// rows of every table. Fails as `export_timeline_csv` does.
 pub fn export_report(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
-    report(case, path, cancel, &mut || {})
+    report(case, path, cancel, &mut || {}, &mut || {})
 }
 
 /// `export_report`, calling `pause` where `export_timeline_csv_paused`
@@ -262,7 +289,19 @@ pub fn export_report_paused(
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    report(case, path, cancel, pause)
+    report(case, path, cancel, pause, &mut || {})
+}
+
+/// `export_report`, calling `hook` where
+/// `export_timeline_csv_before_rename` does. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_report_before_rename(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    hook: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    report(case, path, cancel, &mut || {}, hook)
 }
 
 fn report(
@@ -270,6 +309,7 @@ fn report(
     path: &Path,
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
+    before_rename: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
     check_export_target(case, path)?;
     let (name, tables) = snapshot(case, |case| {
@@ -295,7 +335,7 @@ fn report(
             markdown_row(&mut text, row.iter().map(|c| md(c)));
         }
     }
-    write_whole(case, path, cancel, |file| {
+    write_whole(case, path, cancel, before_rename, |file| {
         file.write_all(text.as_bytes())?;
         Ok(tables.iter().map(|t| count(&t.rows)).sum())
     })
@@ -423,12 +463,15 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 /// Write `path` whole or not at all: `write` fills `<path>.partial`,
 /// created new beside it, which is synced, the target checked again (a
 /// source loaded meanwhile may now hold it) and the cancel flag read, then
-/// renamed over `path`. On any failure the partial file, this export's
-/// own, is removed and what was at `path` is left as it was.
+/// renamed over `path`. `before_rename` is called once the partial file is
+/// closed (a test's pause; a no-op otherwise). On any failure the partial
+/// file, this export's own, is removed and what was at `path` is left as
+/// it was.
 fn write_whole(
     case: &Case,
     path: &Path,
     cancel: &AtomicBool,
+    before_rename: &mut dyn FnMut(),
     write: impl FnOnce(&mut File) -> Result<u64>,
 ) -> Result<ExportReport> {
     check_cancel(cancel)?;
@@ -436,6 +479,7 @@ fn write_whole(
     let written = write(&mut file).and_then(|rows| {
         file.sync_all()?;
         drop(file);
+        before_rename();
         check_cancel(cancel)?;
         check_export_target(case, path)?;
         std::fs::rename(&partial, path)?;
