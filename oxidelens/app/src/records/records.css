@@ -1,5 +1,6 @@
 /* The record dialogs (T, N, A, I) and the entry card, on the theme tokens only. The mark colours are the grid's
-   `.mark-*` classes; nothing here uses the reserved mark colours. */
+   `.mark-*` classes. The one other use of a reserved colour is the Timeline's `agent · review` status (`.status-agent`),
+   in the agent colour as screen 08 and the plan draw it: it names the same thing the purple glyph does. */
 .record-dialog { display: flex; flex-direction: column; width: min(460px, 94vw); max-height: 80vh; background: var(--card); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow-pop); font: var(--ui-font); outline: none; }
 .record-dialog-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding: 8px 12px; }
 .record-dialog > .form-error { padding: 4px 12px 8px; }
@@ -16,3 +17,56 @@
 .entry-facts dt { color: var(--muted); }
 .entry-facts dd { margin: 0; overflow-wrap: anywhere; }
 .entry-description { white-space: pre-wrap; }
+
+/* The Timeline sheet (screen 08). The glyphs are the grid's `.mark-*` classes. */
+.timeline-sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; font: var(--ui-font); }
+.sheet-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.sheet-bar select, .sheet-search { background: var(--card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 6px; font: inherit; }
+.sheet-search { width: 220px; }
+.sheet-bar-gap { flex: 1; }
+.view-toggle { display: flex; gap: 2px; }
+.view-toggle button { background: none; border: 1px solid transparent; border-radius: 4px; padding: 2px 8px; color: var(--text-2); font: inherit; cursor: pointer; }
+.view-toggle button[aria-pressed="true"] { background: var(--raised-2); color: var(--text); border-color: var(--line-strong); }
+.sheet-scroll { flex: 1; min-height: 0; overflow: auto; }
+.sheet-table { width: 100%; border-collapse: collapse; font: var(--cell-font); outline: none; }
+.sheet-table th { position: sticky; top: 0; z-index: 1; padding: 4px 8px; text-align: left; font: var(--ui-font); font-size: 11px; color: var(--accent-text); background: var(--surface); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.sheet-table td { padding: 3px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
+.sheet-table .col-mark { width: 16px; padding-right: 0; }
+.sheet-table .col-num { text-align: right; }
+.sheet-row { cursor: pointer; }
+.sheet-row:hover { background: var(--row-hover); }
+.sheet-row-selected, .sheet-row-selected:hover { background: var(--row-selected); }
+.sheet-row:focus { outline: 1px solid var(--cell-focus); outline-offset: -1px; }
+.sheet-group td { padding-top: 8px; color: var(--muted); font: var(--ui-font); font-size: 11px; }
+.status-agent { color: var(--agent); }
+.status-reviewed { color: var(--ok); }
+.status-other { color: var(--muted); }
+
+/* Host lanes: the axis is the engine's order; each glyph is placed by its rank, never by a computed time. */
+.host-lanes { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.lane { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; }
+.lane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font: var(--cell-font); }
+.lane-track { position: relative; height: 22px; margin: 0 8px; border-bottom: 1px solid var(--line-strong); }
+.lane-glyph { position: absolute; top: 2px; transform: translateX(-50%); padding: 0 2px; background: none; border: 1px solid transparent; border-radius: 3px; font: var(--cell-font); line-height: 16px; cursor: pointer; color: var(--muted); }
+.lane-glyph:focus, .lane-glyph-selected { border-color: var(--accent); outline: none; }
+.lane-axis { display: flex; justify-content: space-between; margin-left: 128px; padding: 0 8px; color: var(--muted); font: var(--cell-font); }
+
+/* The entry editor in the right pane. */
+.entry-editor { gap: 8px; }
+.editor-form { display: flex; flex-direction: column; gap: 6px; }
+.editor-field { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; }
+.editor-field input, .editor-field textarea, .editor-field select { background: var(--card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 4px; padding: 3px 6px; font: var(--cell-font); }
+.editor-field textarea { resize: vertical; }
+.editor-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.editor-section { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.editor-heading { margin: 0; color: var(--muted); font: var(--ui-font); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.editor-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.editor-item { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.editor-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-evidence { display: flex; flex-direction: column; gap: 2px; padding: 4px 6px; background: var(--raised); border-radius: 4px; }
+.editor-summary { color: var(--text-2); font: var(--cell-font); overflow-wrap: anywhere; }
+.standing-ok { color: var(--ok); font-size: 11px; }
+.standing-warn { color: var(--muted); font-size: 11px; }
+.link-button { align-self: flex-start; padding: 0; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; text-align: left; }
+.link-button:hover, .link-button:focus { text-decoration: underline; outline: none; }
+.link-button:disabled { color: var(--muted); cursor: default; }

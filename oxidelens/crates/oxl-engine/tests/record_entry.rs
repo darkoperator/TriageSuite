@@ -1097,3 +1097,121 @@ fn entries_list_newest_first_on_request() {
     drop(case);
     drop(d);
 }
+
+#[test]
+fn entries_carry_their_links_and_the_time_in_the_case_zone() {
+    use oxl_engine::{
+        entry, link, record_entries, set_display_zone, upsert_account, upsert_ioc, AccountSpec,
+        IocSpec, IocType, Privilege, RecordKind,
+    };
+    let (d, mut case) = loaded();
+    let failed = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let undated = new_entry(&mut case, &titled("Undated"), &analyst())
+        .unwrap()
+        .id;
+    let account = |name: &str, domain: Option<&str>| AccountSpec {
+        id: None,
+        name: name.into(),
+        domain: domain.map(Into::into),
+        sid: None,
+        description: String::new(),
+        privilege: Privilege::Unknown,
+        note: String::new(),
+    };
+    let jdoe = upsert_account(&mut case, &account("jdoe", Some("ACME")), &analyst())
+        .unwrap()
+        .id;
+    let svc = upsert_account(&mut case, &account("svc_backup", None), &analyst())
+        .unwrap()
+        .id;
+    let ip = upsert_ioc(
+        &mut case,
+        &IocSpec {
+            id: None,
+            ioc_type: IocType::Ip,
+            value: "203.0.113.7".into(),
+            tool: None,
+            attack_ids: Vec::new(),
+            note: String::new(),
+        },
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    // Linked out of id order: svc_backup first, so it is the first linked account.
+    link(&mut case, failed, RecordKind::Ioc, ip, &analyst()).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    link(&mut case, failed, RecordKind::Account, svc, &analyst()).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    link(&mut case, failed, RecordKind::Account, jdoe, &analyst()).unwrap();
+
+    let shown = one(&case, failed);
+    let links: Vec<(RecordKind, &str)> = shown
+        .links
+        .iter()
+        .map(|l| (l.kind, l.label.as_str()))
+        .collect();
+    // Hosts, then accounts, then IOCs, each in the order they were linked.
+    assert_eq!(
+        links,
+        [
+            (RecordKind::Host, "WS01"),
+            (RecordKind::Account, "svc_backup"),
+            (RecordKind::Account, r"ACME\jdoe"),
+            (RecordKind::Ioc, "ip 203.0.113.7"),
+        ]
+    );
+    assert_eq!(shown.links[1].id, svc);
+    assert_eq!(shown.links[2].id, jdoe);
+    assert_eq!(shown.links[3].id, ip);
+    assert!(one(&case, undated).links.is_empty());
+
+    // The time as the case's display zone shows it: UTC until the zone is set.
+    let utc = shown.time.clone().unwrap();
+    let in_utc = utc.replace('T', " ").trim_end_matches('Z').to_string();
+    assert_eq!(shown.time_shown.as_deref(), Some(in_utc.as_str()));
+    assert_eq!(one(&case, undated).time_shown, None);
+    set_display_zone(&mut case, "America/New_York", &analyst()).unwrap();
+    let ny = triage_core::timestamp::zone::render_utc_text(&utc, "America/New_York")
+        .unwrap()
+        .local;
+    assert_ne!(ny, in_utc);
+    assert_eq!(one(&case, failed).time_shown.as_deref(), Some(ny.as_str()));
+    assert_eq!(
+        entry(&case, failed).unwrap().time_shown.as_deref(),
+        Some(ny.as_str())
+    );
+    let by_record = record_entries(&case, RecordKind::Account, svc, 10, 0).unwrap();
+    assert_eq!(by_record.items[0].time_shown.as_deref(), Some(ny.as_str()));
+    assert_eq!(by_record.items[0].links.len(), 4);
+    // A write answers with the same shape.
+    let edited = edit_entry(&mut case, failed, &titled("Renamed"), &analyst()).unwrap();
+    assert_eq!(edited.time_shown.as_deref(), Some(ny.as_str()));
+    assert_eq!(edited.links.len(), 4);
+    drop(case);
+    drop(d);
+}
+
+#[test]
+fn an_entry_carries_the_mark_it_gives_its_rows() {
+    use oxl_engine::MarkState;
+    let (d, mut case) = loaded();
+    let own = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let agents = promote_at(&mut case, SHARE_SRV01, &agent());
+    let bare = new_entry(&mut case, &titled("No evidence"), &analyst())
+        .unwrap()
+        .id;
+    // An analyst's entry makes its rows Malicious, an agent's unreviewed one Agent: malicious (S2); an entry with no
+    // evidence marks nothing.
+    assert_eq!(one(&case, own).mark, Some(MarkState::Malicious));
+    assert_eq!(one(&case, agents).mark, Some(MarkState::AgentMalicious));
+    assert_eq!(one(&case, bare).mark, None);
+    let agents_row = n(&case, SHARE_SRV01);
+    assert_eq!(state(&case, agents_row), "agent_malicious");
+    // Reviewed by an analyst, the agent's entry gives Malicious, as the row's mark does.
+    set_entry_status(&mut case, agents, EntryStatus::Reviewed, &analyst()).unwrap();
+    assert_eq!(one(&case, agents).mark, Some(MarkState::Malicious));
+    assert_eq!(state(&case, agents_row), "malicious");
+    drop(case);
+    drop(d);
+}

@@ -59,6 +59,7 @@ pub const COMMANDS: &[&str] = &[
     "host_zones",
     "zone_names",
     "ioc_guess",
+    "tactics",
     "display_zone_set",
     "grid_page",
     "grid_counts",
@@ -246,6 +247,7 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         read!(c, host_zones() -> Vec<HostZone>),
         cmd!(c, zone_names() -> Vec<String>),
         cmd!(c, ioc_guess(value: String) -> Option<IocType>),
+        cmd!(c, tactics() -> Vec<String>),
         cmd!(c, display_zone_set(zone: String) -> ()),
         read!(
             c,

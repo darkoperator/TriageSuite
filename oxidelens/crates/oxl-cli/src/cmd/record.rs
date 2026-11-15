@@ -31,7 +31,7 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-const ENTRY_TEXT: &[&str] = &["title", "description", "hosts"];
+const ENTRY_TEXT: &[&str] = &["title", "description", "hosts", "links"];
 const HOST_TEXT: &[&str] = &["name", "role", "note"];
 const ACCOUNT_TEXT: &[&str] = &["name", "domain", "sid", "description", "note", "hosts_seen"];
 const IOC_TEXT: &[&str] = &["value", "tool", "note", "hosts_seen"];

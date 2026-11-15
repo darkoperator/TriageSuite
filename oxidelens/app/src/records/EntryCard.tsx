@@ -9,17 +9,10 @@ import { entryGet, isCmdError, newQueryId, queryCancel } from "../api";
 import type { Entry } from "../contract/generated/Entry";
 import { useShell } from "../shell/context";
 import { displaySafe, displaySafeMultiline } from "../text";
+import { addedBy } from "./EntryEditor";
 import { isStale } from "./outcomes";
 import "./records.css";
 
-const AGENT = "agent:";
-/** Who added it: "added by agent: <name>" for an agent's entry, reviewed or not (`agent_added` says so), else the
- *  author as stored. */
-function addedBy(entry: Entry): string {
-  if (!entry.agent_added) return displaySafe(entry.created_by);
-  const name = entry.created_by.startsWith(AGENT) ? entry.created_by.slice(AGENT.length) : entry.created_by;
-  return `added by agent: ${displaySafe(name)}`;
-}
 
 export default function EntryCard({ entryId, onBack }: { entryId: number; onBack?: (() => void) | null }): ReactNode {
   const { change, reportError } = useShell();

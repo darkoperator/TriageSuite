@@ -13,6 +13,7 @@
 
 mod settings;
 
+pub(crate) use settings::stored_zone;
 pub use settings::{display_zone, set_display_zone};
 
 use crate::actor::Actor;

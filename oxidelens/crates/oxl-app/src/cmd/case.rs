@@ -120,6 +120,13 @@ pub fn ioc_guess(value: &str) -> Option<oxl_engine::IocType> {
     oxl_engine::guess_ioc_type(value)
 }
 
+/// The fourteen ATT&CK Enterprise tactics an entry may name, in the
+/// engine's order: the Timeline's tactic filter and the entry editor offer
+/// these. A list compiled into the engine: no case and no query.
+pub fn tactics() -> Vec<String> {
+    oxl_engine::TACTICS.map(String::from).to_vec()
+}
+
 /// Set the case's display zone; `case-changed` with `display_zone`.
 pub fn display_zone_set(state: &AppState, zone: &str) -> Result<(), CmdError> {
     let actor = state.actor();
@@ -182,6 +189,11 @@ pub mod commands {
     #[tauri::command(async)]
     pub fn ioc_guess(value: String) -> Option<oxl_engine::IocType> {
         super::ioc_guess(&value)
+    }
+
+    #[tauri::command(async)]
+    pub fn tactics() -> Vec<String> {
+        super::tactics()
     }
 
     #[tauri::command(async)]

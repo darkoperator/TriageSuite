@@ -256,6 +256,7 @@ const SAMPLES: { [C in Command]: CommandArgs[C] } = {
   host_zones: q("z"),
   zone_names: {},
   ioc_guess: { value: "203.0.113.7" },
+  tactics: {},
   display_zone_set: { zone: "UTC" },
   grid_page: { ...q("g"), state: state(), limit: 5, offset: 0, options: opts },
   grid_counts: { ...q("g"), state: state() },

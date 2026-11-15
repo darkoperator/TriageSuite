@@ -50,6 +50,7 @@ handlers![
     [cmd::case::commands] host_zones,
     [cmd::case::commands] zone_names,
     [cmd::case::commands] ioc_guess,
+    [cmd::case::commands] tactics,
     [cmd::case::commands] display_zone_set,
     [cmd::grid::commands] grid_page,
     [cmd::grid::commands] grid_counts,

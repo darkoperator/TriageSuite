@@ -7,7 +7,7 @@ use crate::actor::Actor;
 use crate::annot::{record, Change};
 use crate::error::{EngineError, Result};
 use crate::time::now_iso;
-use duckdb::params;
+use duckdb::{params, Connection};
 use triage_core::timestamp::zone;
 
 /// The display zone of a case that never set one.
@@ -26,8 +26,14 @@ pub fn display_zone(case: &Case) -> Result<String> {
     if case.format() < FORMAT_2 {
         return Ok(DEFAULT_ZONE.to_string());
     }
-    let stored: Option<String> = case
-        .conn()
+    stored_zone(case.conn())
+}
+
+/// The display zone `ox.setting` holds on `conn`, `UTC` when it holds none:
+/// [`display_zone`] for a connection or transaction of a case at format 2 or
+/// later (one with records always is). `Internal` as `display_zone` is.
+pub(crate) fn stored_zone(conn: &Connection) -> Result<String> {
+    let stored: Option<String> = conn
         .query_row(
             "SELECT value FROM ox.setting WHERE key = ?",
             params![DISPLAY_ZONE],

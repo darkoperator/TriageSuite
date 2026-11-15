@@ -3,7 +3,7 @@ import { Fragment } from "react";
 import { keyStrip } from "./keys";
 import type { Tab } from "./tabs";
 
-export default function KeyStrip({ kind }: { kind: Tab["kind"] | "grouped" | null }) {
+export default function KeyStrip({ kind }: { kind: Tab["kind"] | "grouped" | "timeline" | null }) {
   return (
     <div className="key-strip" aria-label="Keys">
       {keyStrip(kind).map(([key, what], ix) => (

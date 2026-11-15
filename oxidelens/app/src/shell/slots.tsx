@@ -12,6 +12,7 @@
 import type { ReactNode } from "react";
 import Grid from "../grid/Grid";
 import { MergedTab } from "../grid/MergedTab";
+import TimelineSheet from "../records/TimelineSheet";
 import ViewList from "../views/ViewList";
 import Overview from "./Overview";
 import { useShell } from "./context";
@@ -28,6 +29,7 @@ export interface TabBodyProps {
 
 export function TabBody(props: TabBodyProps): ReactNode {
   if (props.tab.kind === "overview") return <Overview />;
+  if (props.tab.kind === "sheet" && props.tab.sheet === "timeline") return <TimelineSheet {...props} />;
   if (props.tab.kind === "sheet") return <p className="tab-placeholder">The {props.tab.sheet} sheet arrives in the next step.</p>;
   if (props.tab.kind === "merged") return <MergedTab tab={props.tab} active={props.active} />;
   return <Grid {...props} />;

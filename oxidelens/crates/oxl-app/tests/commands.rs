@@ -221,6 +221,15 @@ fn ioc_guess_answers_the_engines_guess() {
     assert_eq!(case::ioc_guess("not an indicator at all"), None);
 }
 
+/// The Timeline's tactic filter and the entry editor offer the engine's
+/// fourteen tactics, in its order, asked with no case open.
+#[test]
+fn tactics_answers_the_engines_list() {
+    let tactics = case::tactics();
+    assert_eq!(tactics, oxl_engine::TACTICS.map(String::from).to_vec());
+    assert_eq!(tactics.len(), 14);
+}
+
 #[test]
 fn display_zone_set_is_a_write() {
     let l = loaded();

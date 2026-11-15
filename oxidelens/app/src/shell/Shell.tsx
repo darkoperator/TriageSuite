@@ -25,19 +25,23 @@ import LeftPane from "./LeftPane";
 import { useShellKeys } from "./keys";
 import Rail from "./Rail";
 import type { MarkState } from "../contract/generated/MarkState";
+import type { RecordKind } from "../contract/generated/RecordKind";
 import { MARK_NAME } from "../records/MarkGlyph";
 import RightPane from "./RightPane";
 import TabPanel from "./TabPanel";
 import StatusBar from "./StatusBar";
 import TabStrip from "./TabStrip";
 import {
-  activate, closeTab, datasetTabId, initialTabs, loadTabs, SHEETS, openDataset, openScoped, saveTabs, OVERVIEW_ID, ScrollStore, type Tab, type TabsState,
+  activate, closeTab, datasetTabId, initialTabs, loadTabs, SHEETS, openDataset, openScoped, saveTabs, sheetTabId, OVERVIEW_ID, ScrollStore, type SheetKind, type Tab, type TabsState,
 } from "./tabs";
 import TopBar from "./TopBar";
 import { useCaseChanged } from "./useCaseChanged";
 import { useSheetCounts } from "./useSheetCounts";
 import { useZoneOffset } from "./useZoneOffset";
 import "./shell.css";
+
+/** The pinned sheet each record kind lives on. */
+const SHEET_OF: Record<RecordKind, SheetKind> = { host: "hosts", account: "accounts", ioc: "iocs" };
 
 const describe = (e: unknown): string =>
   isCmdError(e) ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
@@ -356,6 +360,7 @@ export default function Shell() {
     setPendingRow({ tabId: datasetTabId(relation), rowId });
   }, []);
   const clearPendingRow = useCallback(() => setPendingRow(null), []);
+  const openSheet = useCallback((kind: RecordKind) => setTabs((t) => activate(t, sheetTabId(SHEET_OF[kind]))), []);
   // A saved view applied from the left pane: opens the relation's tab when asked, then the tab takes the answer.
   const deliverApplied = useCallback((d: AppliedDelivery) => {
     if (d.openRelation) setTabs((t) => openDataset(t, d.relation));
@@ -395,11 +400,11 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, pendingRow, clearPendingRow, setGridStatus, setRightPane, setGrouped, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, openSheet, pendingRow, clearPendingRow, setGridStatus, setRightPane, setGrouped, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
             activeTab: tabs.tabs.find((t) => t.id === tabs.active) ?? null, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport,
           }
         : null,
-    [summary, settings, change, openTab, openScopedTab, openRow, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram, tabs, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport],
+    [summary, settings, change, openTab, openScopedTab, openRow, openSheet, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram, tabs, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport],
   );
 
   const dismissNote = damaged && (
@@ -431,7 +436,8 @@ export default function Shell() {
     );
   }
 
-  const activeKind = tabs.tabs.find((t) => t.id === tabs.active)?.kind ?? null;
+  const activeTab = tabs.tabs.find((t) => t.id === tabs.active);
+  const activeKind = activeTab?.kind ?? null;
   const titleOf = (id: string) => {
     const t = tabs.tabs.find((x) => x.id === id);
     if (id === OVERVIEW_ID) return "Overview";
@@ -496,7 +502,7 @@ export default function Shell() {
           )}
         </div>
         <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
-        <KeyStrip kind={activeKind === "dataset" && grouped ? "grouped" : activeKind} />
+        <KeyStrip kind={activeKind === "dataset" && grouped ? "grouped" : activeTab?.sheet === "timeline" ? "timeline" : activeKind} />
       </div>
     </ShellCtx.Provider>
   );

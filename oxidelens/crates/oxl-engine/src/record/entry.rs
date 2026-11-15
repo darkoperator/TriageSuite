@@ -7,13 +7,14 @@
 //! `unreviewed` from the start and stay so until an analyst reviews them.
 
 use super::hosts::host_link_id;
+use super::RecordKind;
 use super::{check_tactic, clip, has_records, is_technique_id, require_records};
 use crate::actor::Actor;
 use crate::annot::{record, record_all, Change};
-use crate::case::Case;
+use crate::case::{stored_zone, Case};
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
-use crate::query::check_offset;
+use crate::query::{check_offset, MarkState};
 use crate::time::{now_iso, parse_utc_text};
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
@@ -106,6 +107,30 @@ pub struct Entry {
     pub evidence_rows: u64,
     /// The names of the live host records it links, sorted.
     pub hosts: Vec<String>,
+    /// `time` as the case's display zone shows it (`YYYY-MM-DD HH:MM:SS`
+    /// and the fraction as stored), what the Timeline's Time column shows;
+    /// `None` with no time.
+    pub time_shown: Option<String>,
+    /// Every live record it links: hosts, then accounts, then IOCs, each
+    /// kind in the order it was linked (the first account is the Timeline's
+    /// Account column).
+    pub links: Vec<EntryLink>,
+    /// The mark it gives its evidence rows (ruling S2): `agent_malicious`
+    /// while it is an agent's and unreviewed, else `malicious`; `None` with
+    /// no evidence. The glyph the Timeline draws beside it.
+    pub mark: Option<MarkState>,
+}
+
+/// One live record an entry links, as the entry's editor lists it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct EntryLink {
+    pub kind: RecordKind,
+    pub id: i64,
+    /// The record as one line: a host's name, an account's `domain\name`
+    /// (its name alone without a domain), an IOC's type and value. Text
+    /// from the case.
+    pub label: String,
 }
 
 /// The fields a new entry or an edit sets; `None` leaves a field as it is
@@ -293,15 +318,29 @@ pub(super) fn next_ids(conn: &Connection, count: usize) -> Result<Vec<i64>> {
 }
 
 /// What every read of an entry selects, in `read_entry_row`'s order: the
-/// stored columns, then its evidence count and its live hosts' names as a
-/// JSON list.
+/// stored columns, then its evidence count, its live hosts' names as a
+/// JSON list, and its live links as a JSON list of `{kind, id, label}`
+/// (`EntryLink`).
 const ENTRY_SELECT: &str = "SELECT e.id, e.\"time\", e.time_source, e.title, e.description, \
      e.tactic, e.technique_ids, e.status, e.created_by, e.created_at, e.modified_by, \
      e.modified_at, e.reviewed_by, e.reviewed_at, e.deleted, \
      (SELECT count(*) FROM ox.evidence v WHERE v.entry_id = e.id), \
      (SELECT CAST(to_json(list(DISTINCT h.name ORDER BY h.name)) AS VARCHAR) \
       FROM ox.entry_host l JOIN ox.host h ON h.id = l.record_id \
-      WHERE l.entry_id = e.id AND NOT h.deleted) \
+      WHERE l.entry_id = e.id AND NOT h.deleted), \
+     (SELECT CAST(to_json(list({'kind': k.kind, 'id': k.id, 'label': k.label} \
+       ORDER BY k.ord, k.linked_at, k.id)) AS VARCHAR) FROM ( \
+       SELECT 'host' AS kind, h.id, h.name AS label, 0 AS ord, l.linked_at \
+        FROM ox.entry_host l JOIN ox.host h ON h.id = l.record_id \
+        WHERE l.entry_id = e.id AND NOT h.deleted \
+       UNION ALL SELECT 'account', a.id, \
+        CASE WHEN a.domain IS NULL THEN a.name ELSE a.domain || '\\' || a.name END, \
+        1, l.linked_at \
+        FROM ox.entry_account l JOIN ox.account a ON a.id = l.record_id \
+        WHERE l.entry_id = e.id AND NOT a.deleted \
+       UNION ALL SELECT 'ioc', i.id, i.type || ' ' || i.value, 2, l.linked_at \
+        FROM ox.entry_ioc l JOIN ox.ioc i ON i.id = l.record_id \
+        WHERE l.entry_id = e.id AND NOT i.deleted) k) \
      FROM ox.entry e";
 
 /// An entry as `ENTRY_SELECT` reads it, before decoding.
@@ -325,6 +364,7 @@ type RawEntry = (
         Option<String>,
         bool,
         i64,
+        Option<String>,
         Option<String>,
     ),
 );
@@ -351,16 +391,24 @@ fn raw_entry(r: &duckdb::Row<'_>) -> duckdb::Result<RawEntry> {
             r.get(14)?,
             r.get(15)?,
             r.get(16)?,
+            r.get(17)?,
         ),
     ))
 }
 
-/// The stored entry, its evidence count and its host names.
-fn decode(raw: RawEntry) -> Result<(Stored, u64, Vec<String>)> {
+/// What an entry's read gives besides the stored columns.
+struct Derived {
+    evidence_rows: u64,
+    hosts: Vec<String>,
+    links: Vec<EntryLink>,
+}
+
+/// The stored entry and what is derived for it.
+fn decode(raw: RawEntry) -> Result<(Stored, Derived)> {
     let ((id, time, time_source, title, description, tactic, techniques, status), rest) = raw;
     let (created_by, created_at, modified_by, modified_at, reviewed_by, reviewed_at, deleted) =
         (rest.0, rest.1, rest.2, rest.3, rest.4, rest.5, rest.6);
-    let (evidence_rows, hosts) = (rest.7, rest.8);
+    let (evidence_rows, hosts, links) = (rest.7, rest.8, rest.9);
     // The engine writes both lists itself.
     let technique_ids: Vec<String> = serde_json::from_str(&techniques).map_err(|e| {
         EngineError::Internal(format!(
@@ -371,6 +419,11 @@ fn decode(raw: RawEntry) -> Result<(Stored, u64, Vec<String>)> {
         Some(json) => serde_json::from_str(&json).map_err(|e| {
             EngineError::Internal(format!("entry {id}'s host names do not parse: {e}"))
         })?,
+        None => Vec::new(),
+    };
+    let links: Vec<EntryLink> = match links {
+        Some(json) => serde_json::from_str(&json)
+            .map_err(|e| EngineError::Internal(format!("entry {id}'s links do not parse: {e}")))?,
         None => Vec::new(),
     };
     let stored = Stored {
@@ -390,14 +443,29 @@ fn decode(raw: RawEntry) -> Result<(Stored, u64, Vec<String>)> {
         reviewed_at,
         deleted,
     };
-    Ok((
-        stored,
-        u64::try_from(evidence_rows).unwrap_or_default(),
+    let derived = Derived {
+        evidence_rows: u64::try_from(evidence_rows).unwrap_or_default(),
         hosts,
-    ))
+        links,
+    };
+    Ok((stored, derived))
 }
 
-fn shown(stored: Stored, evidence_rows: u64, hosts: Vec<String>) -> Entry {
+/// The entry as the Timeline shows it, its time rendered in `zone`.
+fn shown(stored: Stored, derived: Derived, zone: &str) -> Entry {
+    let time_shown = stored
+        .time
+        .as_deref()
+        .and_then(|t| triage_core::timestamp::zone::render_utc_text(t, zone))
+        .map(|r| r.local);
+    let mark = (derived.evidence_rows > 0).then(|| {
+        let agents = Actor::parse(&stored.created_by).is_ok_and(|a| a.is_agent());
+        if agents && stored.status != EntryStatus::Reviewed {
+            MarkState::AgentMalicious
+        } else {
+            MarkState::Malicious
+        }
+    });
     Entry {
         id: stored.id,
         needs_time: stored.time.is_none(),
@@ -414,8 +482,11 @@ fn shown(stored: Stored, evidence_rows: u64, hosts: Vec<String>) -> Entry {
         modified_by: stored.modified_by,
         modified_at: stored.modified_at,
         reviewed_by: stored.reviewed_by,
-        evidence_rows,
-        hosts,
+        evidence_rows: derived.evidence_rows,
+        hosts: derived.hosts,
+        time_shown,
+        links: derived.links,
+        mark,
     }
 }
 
@@ -424,7 +495,7 @@ pub(super) fn read_stored(conn: &Connection, id: i64) -> Result<Stored> {
     Ok(read_full(conn, id)?.0)
 }
 
-fn read_full(conn: &Connection, id: i64) -> Result<(Stored, u64, Vec<String>)> {
+fn read_full(conn: &Connection, id: i64) -> Result<(Stored, Derived)> {
     let raw = conn
         .prepare(&format!("{ENTRY_SELECT} WHERE e.id = ?"))?
         .query_map(params![id], raw_entry)?
@@ -436,8 +507,8 @@ fn read_full(conn: &Connection, id: i64) -> Result<(Stored, u64, Vec<String>)> {
 
 /// Entry `id` as the Timeline shows it.
 fn read_entry(conn: &Connection, id: i64) -> Result<Entry> {
-    let (stored, evidence_rows, hosts) = read_full(conn, id)?;
-    Ok(shown(stored, evidence_rows, hosts))
+    let (stored, derived) = read_full(conn, id)?;
+    Ok(shown(stored, derived, &stored_zone(conn)?))
 }
 
 /// Entry `id`, which `actor` means to change: `Refused` once it is deleted,
@@ -746,11 +817,11 @@ pub fn entry(case: &Case, id: i64) -> Result<Entry> {
     if !has_records(case) {
         return Err(missing());
     }
-    let (stored, evidence_rows, hosts) = read_full(case.conn(), id)?;
+    let (stored, derived) = read_full(case.conn(), id)?;
     if stored.deleted {
         return Err(missing());
     }
-    Ok(shown(stored, evidence_rows, hosts))
+    Ok(shown(stored, derived, &stored_zone(case.conn())?))
 }
 
 /// Up to `limit` live entries from `offset` that `q` selects, in the
@@ -839,9 +910,10 @@ pub(super) fn list_entries(
         ))?
         .query_map(params_from_iter(params), raw_entry)?
         .collect::<std::result::Result<_, _>>()?;
+    let zone = stored_zone(case.conn())?;
     let items = raw
         .into_iter()
-        .map(|raw| decode(raw).map(|(s, n, h)| shown(s, n, h)))
+        .map(|raw| decode(raw).map(|(s, d)| shown(s, d, &zone)))
         .collect::<Result<Vec<_>>>()?;
     Ok(Listing::from_fetched(items, limit))
 }

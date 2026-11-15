@@ -70,6 +70,7 @@ export const COMMANDS = [
   "host_zones",
   "zone_names",
   "ioc_guess",
+  "tactics",
   "display_zone_set",
   "grid_page",
   "grid_counts",
@@ -157,6 +158,7 @@ export type CommandArgs = {
   host_zones: { queryId: string; slot: string };
   zone_names: Record<string, never>;
   ioc_guess: { value: string };
+  tactics: Record<string, never>;
   display_zone_set: { zone: string };
   grid_page: { queryId: string; slot: string; state: GridState; limit: number; offset: number; options: PageOptions };
   grid_counts: { queryId: string; slot: string; state: GridState };
@@ -241,6 +243,7 @@ export type CommandResult = {
   host_zones: Array<HostZone>;
   zone_names: Array<string>;
   ioc_guess: IocType | null;
+  tactics: Array<string>;
   display_zone_set: null;
   grid_page: GridPage;
   grid_counts: GridCounts;

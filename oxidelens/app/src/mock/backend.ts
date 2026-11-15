@@ -545,6 +545,7 @@ const handlers: Handlers = {
   host_zones: (a) => read(a.slot, a.queryId, () => fx.hostZones()),
   zone_names: () => ["America/New_York", "Asia/Tokyo", "Etc/UTC", "Europe/London", "UTC"],
   ioc_guess: (a) => rec.guessIocType(a.value),
+  tactics: () => [...rec.TACTICS],
   display_zone_set: (a) =>
     write(["display_zone"], () => {
       theCase().displayZone = a.zone;

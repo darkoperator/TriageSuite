@@ -5,6 +5,7 @@ import type { AppliedView } from "../contract/generated/AppliedView";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
+import type { RecordKind } from "../contract/generated/RecordKind";
 import type { Settings } from "../contract/generated/Settings";
 import type { Tab } from "./tabs";
 
@@ -50,6 +51,8 @@ export interface ShellContext {
   openScoped(tab: Tab): void;
   /** Opens (or switches to) a relation's dataset tab and shows one row of it in the right pane (the merged tab's *open* link). */
   openRow?(relation: string, rowId: number): void;
+  /** Switches to the pinned sheet of a record kind (a linked record's *open →* in the entry editor). */
+  openSheet?(kind: RecordKind): void;
   /** A row a tab was asked to show (`openRow`); the dataset tab it names takes it and calls `clearPendingRow`. */
   pendingRow?: { tabId: string; rowId: number } | null;
   clearPendingRow?(): void;

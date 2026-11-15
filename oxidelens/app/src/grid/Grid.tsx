@@ -27,6 +27,7 @@ import type { GridState } from "../contract/generated/GridState";
 import type { SearchState } from "../contract/generated/SearchState";
 import RowDetail from "../detail/RowDetail";
 import EntryCard from "../records/EntryCard";
+import EntryEditor from "../records/EntryEditor";
 import { tooManyRows } from "../records/outcomes";
 import { useRowActions, type RowSource } from "../records/useRowActions";
 import { useShell } from "../shell/context";
@@ -573,9 +574,12 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
 
   // ---- the row detail: what the right pane shows while this tab is the active one ----------------------------------------
   // A single selection (a plain click) or Enter on the focused row shows that row; grouped lists have no rows to select.
-  // An entry (what M made, or one the row's detail links to) is shown in its place until another row is shown.
+  // An entry is shown in its place until another row is shown: one the row's detail links to as a card, and what M made
+  // (or A attached to) in the entry editor, with the candidates found in its evidence.
   const [detailRow, setDetailRow] = useState<number | null>(null);
-  const [detailEntry, setDetailEntry] = useState<number | null>(null);
+  const [detailEntry, setDetailEntry] = useState<{ id: number; edit: boolean } | null>(null);
+  const showEntry = useCallback((id: number) => setDetailEntry({ id, edit: false }), []);
+  const editEntry = useCallback((id: number) => setDetailEntry({ id, edit: true }), []);
   const showRow = useCallback((rowId: number) => {
     setDetailRow(rowId);
     setDetailEntry(null);
@@ -586,12 +590,14 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
   };
   const detailNode = useMemo(
     () =>
-      detailEntry !== null ? (
-        <EntryCard entryId={detailEntry} onBack={detailRow === null ? null : () => setDetailEntry(null)} />
+      detailEntry?.edit ? (
+        <EntryEditor key={detailEntry.id} entryId={detailEntry.id} slot={`tab:${tab.id}:entry`} candidates onBack={detailRow === null ? null : () => setDetailEntry(null)} />
+      ) : detailEntry !== null ? (
+        <EntryCard entryId={detailEntry.id} onBack={detailRow === null ? null : () => setDetailEntry(null)} />
       ) : detailRow === null ? null : (
-        <RowDetail rowId={detailRow} onFilter={(chip) => applyChips((chips) => [...chips, chip])} onShowRow={showRow} onShowEntry={setDetailEntry} />
+        <RowDetail rowId={detailRow} onFilter={(chip) => applyChips((chips) => [...chips, chip])} onShowRow={showRow} onShowEntry={showEntry} />
       ),
-    [detailRow, detailEntry, applyChips, showRow],
+    [detailRow, detailEntry, applyChips, showRow, showEntry, tab.id],
   );
   useEffect(() => {
     if (!active) return;
@@ -961,7 +967,7 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
       return session.alive() ? (text ?? "") : null;
     },
   };
-  const rowActions = useRowActions(rowSource, { report: reportError, onEntry: setDetailEntry, enabled: active });
+  const rowActions = useRowActions(rowSource, { report: reportError, onEntry: editEntry, enabled: active });
 
   /** Moves the grouped list's focus to the next or previous data row (`dr`) or column (`dc`). */
   const moveGroupFocus = (dr: number, dc: number) => {

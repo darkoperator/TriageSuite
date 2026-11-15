@@ -91,6 +91,7 @@ fn entry_commands_shape() {
             "created_by",
             "evidence_rows",
             "id",
+            "mark",
             "modified_at",
             "modified_by",
             "needs_time",
@@ -100,6 +101,7 @@ fn entry_commands_shape() {
             "tactic",
             "technique_ids",
             "time",
+            "time_shown",
             "time_source",
             "untrusted"
         ]
@@ -1182,7 +1184,7 @@ fn int(v: &Value) -> Option<i64> {
 }
 
 // The wrapped (inner) key sets, by kind of item. Sorted.
-const ENTRY_IN: &[&str] = &["description", "hosts", "id", "title"];
+const ENTRY_IN: &[&str] = &["description", "hosts", "id", "links", "title"];
 const EVIDENCE_IN: &[&str] = &["host", "relation", "row_id", "summary"];
 const HOST_IN: &[&str] = &["id", "name", "note", "role"];
 const ACCOUNT_IN: &[&str] = &[
@@ -1204,6 +1206,7 @@ const ENTRY_OUT: &[&str] = &[
     "created_by",
     "evidence_rows",
     "id",
+    "mark",
     "modified_at",
     "modified_by",
     "needs_time",
@@ -1213,6 +1216,7 @@ const ENTRY_OUT: &[&str] = &[
     "tactic",
     "technique_ids",
     "time",
+    "time_shown",
     "time_source",
     "untrusted",
 ];
@@ -1223,6 +1227,7 @@ const ENTRY_SHOW_OUT: &[&str] = &[
     "evidence",
     "evidence_rows",
     "id",
+    "mark",
     "modified_at",
     "modified_by",
     "needs_time",
@@ -1232,6 +1237,7 @@ const ENTRY_SHOW_OUT: &[&str] = &[
     "tactic",
     "technique_ids",
     "time",
+    "time_shown",
     "time_source",
     "untrusted",
 ];
@@ -1355,7 +1361,7 @@ fn shape_of(command: &str) -> Shape {
         "entry add" | "entry edit" | "entry status" => s(ENTRY_OUT, Some(ENTRY_IN), none),
         "entry show" => s(
             ENTRY_SHOW_OUT,
-            Some(&["description", "evidence", "hosts", "id", "title"]),
+            Some(&["description", "evidence", "hosts", "id", "links", "title"]),
             &[("evidence", EVIDENCE_IN)],
         ),
         "entry list" => s(
@@ -1539,6 +1545,7 @@ fn reply_shapes_of_every_command() {
             "evidence",
             "evidence_rows",
             "id",
+            "mark",
             "modified_at",
             "modified_by",
             "needs_time",
@@ -1548,6 +1555,7 @@ fn reply_shapes_of_every_command() {
             "tactic",
             "technique_ids",
             "time",
+            "time_shown",
             "time_source",
             "untrusted"
         ]
@@ -1580,6 +1588,7 @@ fn reply_shapes_of_every_command() {
         "created_by",
         "evidence_rows",
         "id",
+        "mark",
         "modified_at",
         "modified_by",
         "needs_time",
@@ -1589,6 +1598,7 @@ fn reply_shapes_of_every_command() {
         "tactic",
         "technique_ids",
         "time",
+        "time_shown",
         "time_source",
         "untrusted",
     ];

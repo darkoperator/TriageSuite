@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { isCmdError, mergedPage, newQueryId, queryCancel } from "../api";
 import type { MergedView } from "../contract/generated/MergedView";
-import EntryCard from "../records/EntryCard";
+import EntryEditor from "../records/EntryEditor";
 import MarkGlyph from "../records/MarkGlyph";
 import { tooManyRows } from "../records/outcomes";
 import { useRowActions, type RowSource } from "../records/useRowActions";
@@ -126,7 +126,11 @@ export function MergedTab({ tab, active }: { tab: Tab; active: boolean }): React
   };
   const [entry, setEntry] = useState<number | null>(null);
   const actions = useRowActions(rowSource, { report: reportError, onEntry: setEntry, enabled: active });
-  const entryNode = useMemo(() => (entry === null ? null : <EntryCard entryId={entry} />), [entry]);
+  // What M made (or A attached to), in the entry editor with the candidates found in its evidence.
+  const entryNode = useMemo(
+    () => (entry === null ? null : <EntryEditor key={entry} entryId={entry} slot={`tab:${tab.id}:entry`} candidates />),
+    [entry, tab.id],
+  );
   useEffect(() => {
     if (!active || entryNode === null) return;
     setRightPane(entryNode);

@@ -147,6 +147,8 @@ export const hostZones = (slot: string, queryId = newQueryId()) =>
 export const zoneNames = () => call<CommandResult["zone_names"]>("zone_names");
 /** The IOC type the engine guesses for `value` (the I key preselects it; the analyst confirms), or null. No case needed. */
 export const iocGuess = (value: string) => call<CommandResult["ioc_guess"]>("ioc_guess", { value } satisfies Args<"ioc_guess">);
+/** The fourteen ATT&CK tactics an entry may name, in the engine's order. */
+export const tactics = () => call<CommandResult["tactics"]>("tactics");
 export const displayZoneSet = (zone: string) =>
   call<CommandResult["display_zone_set"]>("display_zone_set", { zone } satisfies Args<"display_zone_set">);
 

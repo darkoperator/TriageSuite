@@ -12,6 +12,7 @@ import type { CaseRecord } from "../contract/generated/CaseRecord";
 import type { Candidate } from "../contract/generated/Candidate";
 import type { Entry } from "../contract/generated/Entry";
 import type { EntryChanges } from "../contract/generated/EntryChanges";
+import type { EntryLink } from "../contract/generated/EntryLink";
 import type { EntryQuery } from "../contract/generated/EntryQuery";
 import type { EntryStatus } from "../contract/generated/EntryStatus";
 import type { Evidence } from "../contract/generated/Evidence";
@@ -42,6 +43,13 @@ const NOW = "2026-01-10T12:00:00.000000Z";
 /** The agent the mock's agent items are recorded under. */
 export const MOCK_AGENT = "agent:triage-bot";
 
+/** The engine's `TACTICS` (`oxl-engine/src/record/mod.rs`), in its order, which the `tactics` command answers. */
+export const TACTICS = [
+  "Reconnaissance", "Resource Development", "Initial Access", "Execution", "Persistence", "Privilege Escalation",
+  "Defense Evasion", "Credential Access", "Discovery", "Lateral Movement", "Collection", "Command and Control",
+  "Exfiltration", "Impact",
+] as const;
+
 /** What the record reads about one row of the mock's data. */
 export interface RowFacts {
   relation: string;
@@ -65,8 +73,8 @@ interface Link {
   id: number;
 }
 
-/** Entries are kept without their derived `hosts` and `evidence_rows`, which `shown` fills in. */
-type StoredEntry = Omit<Entry, "hosts" | "evidence_rows">;
+/** Entries are kept without their derived `hosts`, `evidence_rows`, `time_shown`, `links` and `mark`, which `shown` fills in. */
+type StoredEntry = Omit<Entry, "hosts" | "evidence_rows" | "time_shown" | "links" | "mark">;
 type StoredRecord = Omit<HostRecord, "entries" | "first_seen" | "last_seen"> &
   Partial<Omit<AccountRecord, keyof HostRecord>> &
   Partial<Omit<IocRecord, keyof HostRecord>>;
@@ -218,7 +226,23 @@ export function shownEntry(r: MockRecords, e: StoredEntry): Entry {
     .map((l) => r.hosts.find((h) => h.id === l.id && !h.deleted)?.name)
     .filter((n): n is string => n !== undefined)
     .sort();
-  return { ...e, hosts, evidence_rows: (r.evidence.get(e.id) ?? []).length };
+  // Hosts, then accounts, then IOCs, each in link order, as the engine lists them.
+  const links: EntryLink[] = (["host", "account", "ioc"] as const).flatMap((kind) =>
+    r.links
+      .filter((l) => l.entry === e.id && l.kind === kind)
+      .flatMap((l): EntryLink[] => {
+        const x = liveRecords(r, kind).find((y) => y.id === l.id);
+        if (!x) return [];
+        const label = kind === "host" ? x.name : kind === "account" ? (x.domain ? `${x.domain}\\${x.name}` : x.name) : `${x.ioc_type} ${x.value}`;
+        return [{ kind, id: x.id, label }];
+      }),
+  );
+  // The mock shows every time in UTC (see backend.ts): the engine's display text of a UTC time, `T` and `Z` dropped.
+  const time_shown = e.time === null ? null : e.time.replace("T", " ").replace(/Z$/, "");
+  const evidence_rows = (r.evidence.get(e.id) ?? []).length;
+  // The mark the entry gives its rows (S2): an agent's unreviewed entry Agent: malicious, any other Malicious.
+  const mark: MarkState | null = evidence_rows === 0 ? null : e.agent_added && e.status !== "reviewed" ? "agent_malicious" : "malicious";
+  return { ...e, hosts, evidence_rows, time_shown, links, mark };
 }
 
 function shownRecord(r: MockRecords, kind: RecordKind, x: StoredRecord): CaseRecord {
