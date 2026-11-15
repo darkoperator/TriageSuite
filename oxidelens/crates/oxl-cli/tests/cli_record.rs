@@ -1181,11 +1181,307 @@ fn int(v: &Value) -> Option<i64> {
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
+// The wrapped (inner) key sets, by kind of item. Sorted.
+const ENTRY_IN: &[&str] = &["description", "hosts", "id", "title"];
+const EVIDENCE_IN: &[&str] = &["host", "relation", "row_id", "summary"];
+const HOST_IN: &[&str] = &["id", "name", "note", "role"];
+const ACCOUNT_IN: &[&str] = &[
+    "description",
+    "domain",
+    "hosts_seen",
+    "id",
+    "name",
+    "note",
+    "sid",
+];
+const IOC_IN: &[&str] = &["hosts_seen", "id", "note", "tool", "value"];
+const LOGON_IN: &[&str] = &["filter", "host", "index"];
+const CANDIDATE_IN: &[&str] = &["column", "domain", "index", "sid", "value"];
+
+const ENTRY_OUT: &[&str] = &[
+    "agent_added",
+    "created_at",
+    "created_by",
+    "evidence_rows",
+    "id",
+    "modified_at",
+    "modified_by",
+    "needs_time",
+    "reviewed_by",
+    "shown",
+    "status",
+    "tactic",
+    "technique_ids",
+    "time",
+    "time_source",
+    "untrusted",
+];
+const ENTRY_SHOW_OUT: &[&str] = &[
+    "agent_added",
+    "created_at",
+    "created_by",
+    "evidence",
+    "evidence_rows",
+    "id",
+    "modified_at",
+    "modified_by",
+    "needs_time",
+    "reviewed_by",
+    "shown",
+    "status",
+    "tactic",
+    "technique_ids",
+    "time",
+    "time_source",
+    "untrusted",
+];
+const HOST_OUT: &[&str] = &[
+    "agent_added",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "last_seen",
+    "modified_at",
+    "modified_by",
+    "shown",
+    "status",
+    "untrusted",
+];
+const HOST_SHOW_OUT: &[&str] = &[
+    "agent_added",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "last_seen",
+    "linked_entries",
+    "modified_at",
+    "modified_by",
+    "shown",
+    "status",
+    "untrusted",
+];
+const ACCOUNT_OUT: &[&str] = &[
+    "agent_added",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "last_seen",
+    "modified_at",
+    "modified_by",
+    "privilege",
+    "shown",
+    "status",
+    "untrusted",
+];
+const ACCOUNT_SHOW_OUT: &[&str] = &[
+    "agent_added",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "last_seen",
+    "linked_entries",
+    "modified_at",
+    "modified_by",
+    "privilege",
+    "shown",
+    "status",
+    "untrusted",
+];
+const IOC_OUT: &[&str] = &[
+    "agent_added",
+    "attack_ids",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "ioc_type",
+    "last_seen",
+    "modified_at",
+    "modified_by",
+    "shown",
+    "status",
+    "untrusted",
+];
+const IOC_SHOW_OUT: &[&str] = &[
+    "agent_added",
+    "attack_ids",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "ioc_type",
+    "last_seen",
+    "linked_entries",
+    "modified_at",
+    "modified_by",
+    "shown",
+    "status",
+    "untrusted",
+];
+
+/// What a command's reply must hold, exactly: its outer keys, the keys of the
+/// JSON inside its `untrusted` wrapper (none when it has no wrapper), and for
+/// each array in that wrapper the keys of its items.
+struct Shape {
+    outer: &'static [&'static str],
+    wrapped: Option<&'static [&'static str]>,
+    items: &'static [(&'static str, &'static [&'static str])],
+}
+
+fn shape_of(command: &str) -> Shape {
+    let s = |outer, wrapped, items| Shape {
+        outer,
+        wrapped,
+        items,
+    };
+    let none: &'static [(&'static str, &'static [&'static str])] = &[];
+    match command {
+        "entry add" | "entry edit" | "entry status" => s(ENTRY_OUT, Some(ENTRY_IN), none),
+        "entry show" => s(
+            ENTRY_SHOW_OUT,
+            Some(&["description", "evidence", "hosts", "id", "title"]),
+            &[("evidence", EVIDENCE_IN)],
+        ),
+        "entry list" => s(
+            &["count", "entries", "untrusted"],
+            Some(&["entries"]),
+            &[("entries", ENTRY_IN)],
+        ),
+        "entry delete" => s(&["id", "shown"], None, none),
+        "entry promote" => s(&["created", "done", "not_done", "outcomes"], None, none),
+        "entry attach" => s(&["done", "not_done", "outcomes"], None, none),
+        "entry detach" => s(&["entry", "row_id"], None, none),
+        "evidence list" => s(
+            &["count", "evidence", "untrusted"],
+            Some(&["evidence"]),
+            &[("evidence", EVIDENCE_IN)],
+        ),
+        "host add" | "host edit" => s(HOST_OUT, Some(HOST_IN), none),
+        "host show" => s(
+            HOST_SHOW_OUT,
+            Some(&["id", "linked_entries", "name", "note", "role"]),
+            &[("linked_entries", ENTRY_IN)],
+        ),
+        "host list" => s(
+            &["count", "hosts", "untrusted"],
+            Some(&["hosts"]),
+            &[("hosts", HOST_IN)],
+        ),
+        "host merge" | "account merge" | "ioc merge" => s(&["from", "into"], None, none),
+        "host status" | "account status" | "ioc status" => {
+            s(&["id", "shown", "status"], None, none)
+        }
+        "host delete" | "account delete" | "ioc delete" => s(&["id", "shown"], None, none),
+        "account add" | "account edit" => s(ACCOUNT_OUT, Some(ACCOUNT_IN), none),
+        "account show" => s(
+            ACCOUNT_SHOW_OUT,
+            Some(&[
+                "description",
+                "domain",
+                "hosts_seen",
+                "id",
+                "linked_entries",
+                "name",
+                "note",
+                "sid",
+            ]),
+            &[("linked_entries", ENTRY_IN)],
+        ),
+        "account list" => s(
+            &["accounts", "count", "untrusted"],
+            Some(&["accounts"]),
+            &[("accounts", ACCOUNT_IN)],
+        ),
+        "account logons" => s(
+            &["count", "id", "logons", "unparsed", "untrusted"],
+            Some(&["logons", "source"]),
+            &[("logons", LOGON_IN)],
+        ),
+        "ioc add" | "ioc edit" => s(IOC_OUT, Some(IOC_IN), none),
+        "ioc show" => s(
+            IOC_SHOW_OUT,
+            Some(&[
+                "hosts_seen",
+                "id",
+                "linked_entries",
+                "note",
+                "tool",
+                "value",
+            ]),
+            &[("linked_entries", ENTRY_IN)],
+        ),
+        "ioc list" => s(
+            &["count", "iocs", "untrusted"],
+            Some(&["iocs"]),
+            &[("iocs", IOC_IN)],
+        ),
+        "ioc sightings" => s(
+            &["first", "hits", "id", "last", "untrusted"],
+            Some(&["hosts", "relations"]),
+            none,
+        ),
+        "link add" | "link remove" => s(&["entry", "id", "kind", "linked"], None, none),
+        "candidates" => s(
+            &["candidates", "count", "untrusted"],
+            Some(&["candidates"]),
+            &[("candidates", CANDIDATE_IN)],
+        ),
+        "export timeline" | "export workbook" | "export report" => {
+            s(&["rows", "untrusted"], Some(&["path"]), none)
+        }
+        "history" => s(&["entries", "untrusted"], Some(&["entries"]), none),
+        other => panic!("no shape pinned for {other}"),
+    }
+}
+
+/// Assert `v`'s outer keys, the keys inside its wrapper and those of the
+/// wrapper's array items, exactly (sorted list equality).
+fn pin(v: &Value) {
+    let command = v["command"].as_str().unwrap();
+    let shape = shape_of(command);
+    assert_eq!(keys(&v["data"]), shape.outer, "{command}: outer keys");
+    let Some(wrapped) = shape.wrapped else {
+        assert!(v["data"].get("untrusted").is_none(), "{command}: {v}");
+        return;
+    };
+    let text = inner(&v["data"]["untrusted"]);
+    assert_eq!(keys(&text), wrapped, "{command}: wrapped keys");
+    for (array, item_keys) in shape.items {
+        for item in text[*array].as_array().unwrap() {
+            assert_eq!(keys(item), *item_keys, "{command}: wrapped {array} item");
+        }
+    }
+}
+
+/// `ok`, then the reply's shape pinned.
+fn pinned(p: &str, args: &[&str]) -> Value {
+    let v = ok(p, args);
+    pin(&v);
+    v
+}
 /// Every command's reply: its keys and the values that mean something (ids,
 /// shown ids, statuses, counts), pinned. Commands the other tests pin in
 /// more detail are repeated here for the whole set.
 #[test]
 fn reply_shapes_of_every_command() {
+    // Every reply below goes through `pinned`: outer and wrapped keys, exactly.
+    let ok = pinned;
     let (d, p) = case();
     let r = svch0st(&p);
     let r2 = row(&p, "evtxtriage_events", "rclone.exe");
