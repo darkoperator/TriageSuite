@@ -54,9 +54,14 @@ pub use query::{
     SQL_TIME_LIMIT, SQL_TIME_LIMIT_MAX,
 };
 pub use record::{
-    attach_rows, delete_entry, detach_row, edit_entry, entries, evidence, new_entry, promote_rows,
-    set_entry_status, Entry, EntryEdit, EntryQuery, EntryStatus, Evidence, EvidenceStanding,
-    PromoteOutcome, MAX_DESCRIPTION, MAX_TECHNIQUES, MAX_TITLE, TACTICS,
+    account_record, accounts, attach_rows, delete_entry, delete_record, detach_row, edit_entry,
+    entries, evidence, guess_ioc_type, host_record, hosts, ioc_record, iocs, link, merge_records,
+    new_entry, promote_rows, record_entries, set_entry_status, set_record_status, unlink,
+    upsert_account, upsert_host, upsert_ioc, validate_attack_id, validate_ioc, validate_sid,
+    AccountRecord, AccountSpec, Entry, EntryEdit, EntryQuery, EntryStatus, Evidence,
+    EvidenceStanding, HostRecord, HostSpec, IocQuery, IocRecord, IocSpec, IocType, Privilege,
+    PromoteOutcome, RecordKind, RecordStatus, MAX_DESCRIPTION, MAX_IOC_VALUE, MAX_RECORD_LABEL,
+    MAX_RECORD_NAME, MAX_RECORD_NOTE, MAX_TECHNIQUES, MAX_TITLE, TACTICS,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};

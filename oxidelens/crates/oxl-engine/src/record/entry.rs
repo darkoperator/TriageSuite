@@ -711,7 +711,7 @@ fn change(id: i64, action: &'static str, before: &Stored, after: &Stored) -> Cha
 pub fn entries(case: &Case, q: &EntryQuery, limit: u32, offset: u64) -> Result<Listing<Entry>> {
     check_limit(limit)?;
     check_offset(offset)?;
-    let mut filters = vec!["NOT e.deleted".to_string()];
+    let mut filters: Vec<String> = Vec::new();
     let mut params: Vec<SqlValue> = Vec::new();
     if !q.status.is_empty() {
         filters.push(format!(
@@ -749,6 +749,21 @@ pub fn entries(case: &Case, q: &EntryQuery, limit: u32, offset: u64) -> Result<L
             truncated: false,
         });
     }
+    list_entries(case, filters, params, limit, offset)
+}
+
+/// Up to `limit` live entries from `offset` that every one of `filters`
+/// (SQL over `ox.entry e`, its values in `params`) selects, in the
+/// Timeline's order. The caller has checked the case has the record
+/// tables, `limit` and `offset`.
+pub(super) fn list_entries(
+    case: &Case,
+    mut filters: Vec<String>,
+    mut params: Vec<SqlValue>,
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<Entry>> {
+    filters.insert(0, "NOT e.deleted".to_string());
     params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));
     let raw: Vec<RawEntry> = case

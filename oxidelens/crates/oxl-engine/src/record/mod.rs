@@ -1,5 +1,5 @@
 //! The case record: timeline entries, the rows attached to them as
-//! evidence, and the host records evidence links them to.
+//! evidence, and the host, account and IOC records linked to them.
 //!
 //! Every rule lives here, not in the CLI or the app: who may change an
 //! entry (ruling S3: an agent only its own unreviewed ones, an analyst any),
@@ -12,10 +12,14 @@
 //! empty record, and every writer refuses (a read-write open has already
 //! upgraded the case).
 
+mod accounts;
 mod entry;
 mod evidence;
 pub(crate) mod hosts;
+mod iocs;
+mod records;
 mod state;
+mod validate;
 
 pub use entry::{
     delete_entry, edit_entry, entries, new_entry, set_entry_status, Entry, EntryEdit, EntryQuery,
@@ -23,6 +27,18 @@ pub use entry::{
 };
 pub use evidence::{
     attach_rows, detach_row, evidence, promote_rows, Evidence, EvidenceStanding, PromoteOutcome,
+};
+
+pub use accounts::{account_record, accounts, upsert_account, AccountRecord, AccountSpec};
+pub use hosts::{host_record, hosts, upsert_host, HostRecord, HostSpec};
+pub use iocs::{ioc_record, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec};
+pub use records::{
+    delete_record, link, merge_records, record_entries, set_record_status, unlink, RecordKind,
+    RecordStatus,
+};
+pub use validate::{
+    guess_ioc_type, validate_attack_id, validate_ioc, validate_sid, IocType, Privilege,
+    MAX_IOC_VALUE, MAX_RECORD_LABEL, MAX_RECORD_NAME, MAX_RECORD_NOTE,
 };
 
 pub(crate) use state::{detach_there, holders, marks_relation, Holder, CURRENT_MARKS};
