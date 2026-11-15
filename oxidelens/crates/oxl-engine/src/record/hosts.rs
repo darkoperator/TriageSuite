@@ -17,7 +17,7 @@ use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::query::check_offset;
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
-use duckdb::{params, Connection};
+use duckdb::{params, Connection, OptionalExt};
 use std::collections::HashSet;
 
 /// A host record, as the Hosts sheet shows it.
@@ -80,16 +80,21 @@ pub(crate) fn find_host(conn: &Connection, name: &str) -> Result<Option<i64>> {
 /// While one does, the record keeps that name (ruling S7): renaming it, or
 /// merging it into a host of another name, is refused.
 pub(crate) fn evidence_holder(conn: &Connection, host_id: i64, name: &str) -> Result<Option<i64>> {
-    let rows: Vec<(i64, String)> = conn
-        .prepare(
-            "SELECT DISTINCT l.entry_id, v.host FROM ox.entry_host l              JOIN ox.entry e ON e.id = l.entry_id              JOIN ox.evidence v ON v.entry_id = e.id              WHERE l.record_id = ? AND NOT e.deleted AND v.host IS NOT NULL              ORDER BY l.entry_id",
-        )?
-        .query_map(params![host_id], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<std::result::Result<_, _>>()?;
-    Ok(rows
-        .into_iter()
-        .find(|(_, host)| host.eq_ignore_ascii_case(name))
-        .map(|(entry, _)| entry))
+    // `translate` folds ASCII letters only, as `eq_ignore_ascii_case` does;
+    // `lower()` would fold more.
+    Ok(conn
+        .query_row(
+            "SELECT l.entry_id FROM ox.entry_host l \
+             JOIN ox.entry e ON e.id = l.entry_id \
+             JOIN ox.evidence v ON v.entry_id = e.id \
+             WHERE l.record_id = ? AND NOT e.deleted \
+             AND translate(v.host, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', \
+             'abcdefghijklmnopqrstuvwxyz') = ? \
+             ORDER BY l.entry_id LIMIT 1",
+            params![host_id, name.to_ascii_lowercase()],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// `Refused`: host record `host_id`, named `name`, keeps that name while
@@ -101,7 +106,8 @@ pub(crate) fn refuse_evidence_name(
     doing: &str,
 ) -> EngineError {
     EngineError::Refused(format!(
-        "E-{entry_id} holds evidence from {}; {} keeps that name while it does, so it cannot          be {doing}; detach the evidence first",
+        "E-{entry_id} holds evidence from {}; {} keeps that name while it does, so it cannot \
+         be {doing}; detach the evidence first",
         super::clip(name, 64),
         RecordKind::Host.shown(host_id)
     ))
