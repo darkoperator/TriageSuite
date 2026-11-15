@@ -16,6 +16,7 @@ mod accounts;
 mod candidates;
 mod entry;
 mod evidence;
+mod export;
 pub(crate) mod hosts;
 mod iocs;
 mod logons;
@@ -30,6 +31,8 @@ pub use entry::{
 pub use evidence::{
     attach_rows, detach_row, evidence, promote_rows, Evidence, EvidenceStanding, PromoteOutcome,
 };
+
+pub use export::{export_report, export_timeline_csv, export_workbook};
 
 pub use accounts::{account_record, accounts, upsert_account, AccountRecord, AccountSpec};
 pub use candidates::{candidates, Candidate};

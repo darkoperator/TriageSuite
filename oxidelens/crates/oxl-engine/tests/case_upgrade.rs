@@ -170,7 +170,7 @@ fn a_step1_case_upgrades_in_place() {
         ]
     );
     // One history row per step, newest first.
-    let upgrades = history(&case, Some("case"), 50, 0).unwrap().items;
+    let upgrades = history(&case, Some("case"), None, 50, 0).unwrap().items;
     let steps: Vec<_> = upgrades
         .iter()
         .map(|u| {
@@ -201,7 +201,13 @@ fn a_step1_case_upgrades_in_place() {
     // Opened again: already format 3, nothing more is done, and the id stays.
     let case = Case::open(&path).unwrap();
     assert_eq!(case.case_id().unwrap(), id);
-    assert_eq!(history(&case, Some("case"), 50, 0).unwrap().items.len(), 2);
+    assert_eq!(
+        history(&case, Some("case"), None, 50, 0)
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
 }
 
 /// What the case at its present state answers to the step 1 reads.
@@ -788,7 +794,7 @@ fn display_zone_round_trips() {
     assert_eq!(invalid.code(), "invalid", "{invalid}");
     assert_eq!(display_zone(&case).unwrap(), "America/New_York");
 
-    let rows = history(&case, Some("case"), 50, 0).unwrap().items;
+    let rows = history(&case, Some("case"), None, 50, 0).unwrap().items;
     assert_eq!(rows.len(), 1, "{rows:?}");
     let row = &rows[0];
     assert_eq!(
@@ -807,7 +813,13 @@ fn display_zone_round_trips() {
     );
     // Setting what is already set changes nothing and records nothing.
     set_display_zone(&mut case, "America/New_York", &analyst()).unwrap();
-    assert_eq!(history(&case, Some("case"), 50, 0).unwrap().items.len(), 1);
+    assert_eq!(
+        history(&case, Some("case"), None, 50, 0)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
 
     // It is the case's: another opening of the file reads it.
     let path = case.path().to_path_buf();

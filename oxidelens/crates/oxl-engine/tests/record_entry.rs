@@ -679,7 +679,7 @@ fn tactics_and_titles_are_validated() {
 fn every_change_writes_history() {
     let (_d, mut case) = loaded();
     let actions = |case: &Case, kind: &str| -> Vec<String> {
-        let mut out: Vec<String> = history(case, Some(kind), 100, 0)
+        let mut out: Vec<String> = history(case, Some(kind), None, 100, 0)
             .unwrap()
             .items
             .into_iter()
@@ -718,7 +718,7 @@ fn every_change_writes_history() {
     );
 
     // Before and after are the entry as it was and became.
-    let edit = history(&case, Some("entry"), 100, 0)
+    let edit = history(&case, Some("entry"), None, 100, 0)
         .unwrap()
         .items
         .into_iter()
@@ -731,7 +731,7 @@ fn every_change_writes_history() {
         "Security · 4625 · Failed logon · Administrator"
     );
     assert_eq!(edit.after.unwrap()["title"], "Brute force");
-    let detach = history(&case, Some("evidence"), 1, 0)
+    let detach = history(&case, Some("evidence"), None, 1, 0)
         .unwrap()
         .items
         .remove(0);

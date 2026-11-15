@@ -368,7 +368,7 @@ fn marks_follow_identical_rows_and_report_the_rest() {
 
 /// The `after_json` of the case's one `supersede` history row.
 fn supersede_after(case: &Case) -> serde_json::Value {
-    let entries = oxl_engine::history(case, Some("source"), 1000, 0)
+    let entries = oxl_engine::history(case, Some("source"), None, 1000, 0)
         .unwrap()
         .items;
     let mut supersede = entries.into_iter().filter(|e| e.action == "supersede");
@@ -835,7 +835,7 @@ fn removing_a_rerun_moves_marks_back_and_orphans_the_rest() {
         ),
         1
     );
-    let removal = oxl_engine::history(&case, Some("source"), 1000, 0)
+    let removal = oxl_engine::history(&case, Some("source"), None, 1000, 0)
         .unwrap()
         .items
         .into_iter()
@@ -1784,7 +1784,7 @@ fn tags_and_notes_return_on_reinstatement() {
     let detail = oxl_engine::row_detail(&case, only_rerun).unwrap();
     assert!(!detail.active);
 
-    let removal = oxl_engine::history(&case, Some("source"), 1000, 0)
+    let removal = oxl_engine::history(&case, Some("source"), None, 1000, 0)
         .unwrap()
         .items
         .into_iter()

@@ -103,23 +103,32 @@ pub(crate) fn record_all(
     )
 }
 
-/// Up to `limit` history rows from `offset`, newest first, of one target
-/// kind or of all. `Invalid` for an unknown target kind, a `limit` of 0 or
-/// over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
+/// The most characters of a target id `history` takes: past every id the
+/// engine writes (a link's is two ids and a kind).
+const MAX_TARGET_ID: usize = 1_000;
+
+/// Up to `limit` history rows from `offset`, newest first: of one target
+/// kind or of all, and with `target_id` of that one target only (an
+/// entry's or a record's history panel: `Some("entry")`, `Some("12")`).
+/// `Invalid` for an unknown target kind, a target id with no kind (an id
+/// names a target only within its kind) or over 1,000 characters, a
+/// `limit` of 0 or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
 pub fn history(
     case: &Case,
     target_kind: Option<&str>,
+    target_id: Option<&str>,
     limit: u32,
     offset: u64,
 ) -> Result<Listing<HistoryRow>> {
     check_limit(limit)?;
     check_offset(offset)?;
     let mut params = Vec::new();
-    let filter = match target_kind {
-        None => "",
+    let mut filters = Vec::new();
+    match target_kind {
+        None => {}
         Some(kind) if TARGET_KINDS.contains(&kind) => {
             params.push(SqlValue::Text(kind.to_string()));
-            "WHERE target_kind = ?"
+            filters.push("target_kind = ?");
         }
         Some(kind) => {
             return Err(EngineError::Invalid(format!(
@@ -127,6 +136,26 @@ pub fn history(
                 TARGET_KINDS.join(", ")
             )))
         }
+    }
+    if let Some(id) = target_id {
+        if target_kind.is_none() {
+            return Err(EngineError::Invalid(
+                "a target id names a target only with its target kind".to_string(),
+            ));
+        }
+        let n = id.chars().count();
+        if n > MAX_TARGET_ID {
+            return Err(EngineError::Invalid(format!(
+                "a target id is at most {MAX_TARGET_ID} characters, not {n}"
+            )));
+        }
+        params.push(SqlValue::Text(id.to_string()));
+        filters.push("target_id = ?");
+    }
+    let filter = if filters.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", filters.join(" AND "))
     };
     params.push(SqlValue::BigInt(fetch_limit(limit)));
     params.push(SqlValue::UBigInt(offset));

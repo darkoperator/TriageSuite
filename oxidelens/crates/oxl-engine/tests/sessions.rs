@@ -21,7 +21,7 @@ fn relations(session: &Session) -> Vec<(&str, &str)> {
 
 /// The `after` of the case's one `source_load` history row for `source`.
 fn load_history(case: &Case, source: i64) -> serde_json::Value {
-    history(case, Some("source"), 50, 0)
+    history(case, Some("source"), None, 50, 0)
         .unwrap()
         .items
         .into_iter()

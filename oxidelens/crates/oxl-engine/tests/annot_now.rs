@@ -20,7 +20,7 @@ fn history_at_is_the_pinned_now() {
     add_tag(&mut case, &[r], "lateral", &analyst()).unwrap();
     let note = add_note(&mut case, r, "seen", &analyst()).unwrap();
     assert_eq!(note.written_at, pinned);
-    let Listing { items: rows, .. } = history(&case, None, 3, 0).unwrap();
+    let Listing { items: rows, .. } = history(&case, None, None, 3, 0).unwrap();
     assert_eq!(rows.len(), 3);
     assert!(rows.iter().all(|h| h.at == pinned), "{rows:?}");
     assert_eq!(

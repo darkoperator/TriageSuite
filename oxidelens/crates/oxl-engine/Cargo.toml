@@ -21,6 +21,8 @@ tempfile.workspace = true
 getrandom.workspace = true
 # The grid's CSV export.
 csv.workspace = true
+# The case record's workbook export.
+rust_xlsxwriter.workspace = true
 # TypeScript bindings of the app's contract types, only with feature `ts`.
 ts-rs = { workspace = true, optional = true }
 
@@ -45,6 +47,8 @@ test-support = []
 oxl-fixtures.workspace = true
 tempfile.workspace = true
 triage-testkit.workspace = true
+# Reads an exported workbook back, to look inside its XML (ruling R-P5).
+zip.workspace = true
 # This crate again, with the test-only constructors (`test-support`).
 oxl-engine = { workspace = true, features = ["test-support"] }
 

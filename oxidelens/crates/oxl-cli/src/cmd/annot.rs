@@ -186,7 +186,7 @@ pub fn primary_time(ctx: &Ctx, relation: &str, column: Option<&str>) -> Result<R
 
 pub fn history(ctx: &Ctx, kind: Option<&str>, page: &PageArgs) -> Result<Reply> {
     let case = ctx.read_case()?;
-    let entries = oxl_engine::history(&case, kind, page.limit, page.offset)?;
+    let entries = oxl_engine::history(&case, kind, None, page.limit, page.offset)?;
     Ok(Reply {
         data: json!({
             "entries": entries.items.len(),

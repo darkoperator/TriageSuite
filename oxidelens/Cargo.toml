@@ -63,6 +63,15 @@ getrandom = "0.3"
 # The engine writes the grid's CSV export; its tests read the CSV files the
 # loader was given, to compare.
 csv = "1"
+# The case record's workbook export (Timeline, Hosts, Accounts, IOCs). No
+# optional feature: every cell is written with `write_string`, never as a
+# number, a formula or a URL. Pinned exactly: a new release that wrote cells
+# differently would change what the analyst hands on.
+rust_xlsxwriter = { version = "=0.99.1", default-features = false }
+# Tests only (ruling R-P5): reads an exported workbook back to look for a
+# formula in its XML. Deflate only, the one method rust_xlsxwriter writes;
+# the version rust_xlsxwriter itself resolves, so the build carries one zip.
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 # O_NONBLOCK, so opening an `@file` that is a FIFO cannot block.
 libc = "0.2"
 # The desktop app (oxl-app). Versions as Sparrow resolves them (tauri 2.12).

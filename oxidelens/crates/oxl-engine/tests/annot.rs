@@ -591,7 +591,7 @@ fn history_is_append_only_and_newest_first() {
     let Listing {
         items: rows,
         truncated: more,
-    } = history(&case, None, 3, 0).unwrap();
+    } = history(&case, None, None, 3, 0).unwrap();
     assert!(more, "the source_load row is older still");
     assert_eq!(
         rows.iter().map(|h| h.action.as_str()).collect::<Vec<_>>(),
@@ -608,19 +608,24 @@ fn history_is_append_only_and_newest_first() {
     );
     let Listing {
         items: marks_only, ..
-    } = history(&case, Some("row_mark"), 50, 0).unwrap();
+    } = history(&case, Some("row_mark"), None, 50, 0).unwrap();
     assert_eq!(marks_only.len(), 1);
     let Listing {
         items: all,
         truncated: more,
-    } = history(&case, None, 50, 0).unwrap();
+    } = history(&case, None, None, 50, 0).unwrap();
     assert!(!more);
     assert_eq!(all.last().unwrap().action, "source_load");
     assert_eq!(
-        history(&case, Some("bogus"), 50, 0).unwrap_err().code(),
+        history(&case, Some("bogus"), None, 50, 0)
+            .unwrap_err()
+            .code(),
         "invalid"
     );
-    assert_eq!(history(&case, None, 1001, 0).unwrap_err().code(), "invalid");
+    assert_eq!(
+        history(&case, None, None, 1001, 0).unwrap_err().code(),
+        "invalid"
+    );
 }
 
 /// A copy of the run at `rerun` (a `rerun_ws01_prefetch` tree) under `to`,
@@ -881,7 +886,7 @@ fn analyst_deletes_an_agents_note() {
         ),
         1
     );
-    let latest = history(&case, Some("note"), 1, 0).unwrap().items;
+    let latest = history(&case, Some("note"), None, 1, 0).unwrap().items;
     assert_eq!(latest[0].action, "note_delete");
     assert_eq!(latest[0].by, "analyst:tester");
     assert_eq!(latest[0].target_id, theirs.id.to_string());

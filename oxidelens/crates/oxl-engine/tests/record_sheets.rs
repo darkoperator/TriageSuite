@@ -837,14 +837,14 @@ fn merge_moves_links_and_tombstones() {
             .collect::<Vec<_>>(),
         [into.id]
     );
-    let merge = history(&case, Some("account"), 1, 0)
+    let merge = history(&case, Some("account"), None, 1, 0)
         .unwrap()
         .items
         .remove(0);
     assert_eq!(merge.action, "account_merge");
     assert_eq!(merge.target_id, from.id.to_string());
     assert_eq!(merge.after.unwrap()["merged_into"], into.id);
-    let mut links: Vec<(String, String)> = history(&case, Some("link"), 100, 0)
+    let mut links: Vec<(String, String)> = history(&case, Some("link"), None, 100, 0)
         .unwrap()
         .items
         .into_iter()
@@ -1155,7 +1155,7 @@ fn agent_changes_to_analyst_records_are_refused() {
 fn every_change_writes_history() {
     let (_d, mut case) = loaded();
     let actions = |case: &Case, kind: &str| -> Vec<String> {
-        let mut out: Vec<String> = history(case, Some(kind), 100, 0)
+        let mut out: Vec<String> = history(case, Some(kind), None, 100, 0)
             .unwrap()
             .items
             .into_iter()
@@ -1228,7 +1228,7 @@ fn every_change_writes_history() {
     );
 
     // Before and after are the record as it was and became.
-    let edited = history(&case, Some("account"), 1, 0)
+    let edited = history(&case, Some("account"), None, 1, 0)
         .unwrap()
         .items
         .remove(0);
@@ -1236,7 +1236,7 @@ fn every_change_writes_history() {
     assert_eq!(edited.by, "analyst:tester");
     assert_eq!(edited.before.unwrap()["domain"], serde_json::Value::Null);
     assert_eq!(edited.after.unwrap()["domain"], "ACME");
-    let status = history(&case, Some("host"), 100, 0)
+    let status = history(&case, Some("host"), None, 100, 0)
         .unwrap()
         .items
         .into_iter()
@@ -1244,7 +1244,10 @@ fn every_change_writes_history() {
         .unwrap();
     assert_eq!(status.before.unwrap()["status"], "reviewed");
     assert_eq!(status.after.unwrap()["status"], "unreviewed");
-    let link_row = history(&case, Some("link"), 1, 0).unwrap().items.remove(0);
+    let link_row = history(&case, Some("link"), None, 1, 0)
+        .unwrap()
+        .items
+        .remove(0);
     assert_eq!(link_row.target_id, format!("entry_ioc:{e}:{}", i.id));
     assert!(link_row.before.is_some() && link_row.after.is_none());
 

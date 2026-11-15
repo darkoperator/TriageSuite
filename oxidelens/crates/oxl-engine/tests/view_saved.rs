@@ -139,7 +139,7 @@ fn save_list_apply_round_trip() {
     assert_eq!(count_view(&case, &applied.state).unwrap().rows, 5);
 
     // The save is in the history.
-    let h = history(&case, Some("saved_view"), 10, 0).unwrap();
+    let h = history(&case, Some("saved_view"), None, 10, 0).unwrap();
     assert_eq!(h.items.len(), 1);
     assert_eq!(h.items[0].action, "view_save");
     assert_eq!(h.items[0].target_id, saved.id.to_string());
@@ -224,7 +224,7 @@ fn same_name_replaces() {
     assert_ne!(preset.id, first.id);
     assert_eq!(views(&case, None, 50, 0).unwrap().items.len(), 2);
 
-    let h = history(&case, Some("saved_view"), 10, 0).unwrap();
+    let h = history(&case, Some("saved_view"), None, 10, 0).unwrap();
     let actions: Vec<&str> = h.items.iter().map(|r| r.action.as_str()).collect();
     assert_eq!(actions, ["view_save", "view_update", "view_save"]);
     let update = &h.items[1];
@@ -551,7 +551,7 @@ fn delete_is_a_tombstone_with_history() {
         ),
         1
     );
-    let h = history(&case, Some("saved_view"), 10, 0).unwrap();
+    let h = history(&case, Some("saved_view"), None, 10, 0).unwrap();
     assert_eq!(h.items[0].action, "view_delete");
     assert_eq!(h.items[0].target_id, v.id.to_string());
     assert_eq!(h.items[0].before.as_ref().unwrap()["deleted"], false);

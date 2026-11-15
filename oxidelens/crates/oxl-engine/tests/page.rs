@@ -58,7 +58,7 @@ fn every_paged_call_refuses_a_limit_of_0_or_over_the_maximum() {
             ("marks", code(oxl_engine::marks(&case, None, limit, 0)).0),
             (
                 "history",
-                code(oxl_engine::history(&case, None, limit, 0)).0,
+                code(oxl_engine::history(&case, None, None, limit, 0)).0,
             ),
             (
                 "merged_rows",
@@ -114,7 +114,7 @@ fn offset_past_i64_is_invalid() {
             ("marks", code(oxl_engine::marks(&case, None, 50, offset))),
             (
                 "history",
-                code(oxl_engine::history(&case, None, 50, offset)),
+                code(oxl_engine::history(&case, None, None, 50, offset)),
             ),
             (
                 "merged_rows",
