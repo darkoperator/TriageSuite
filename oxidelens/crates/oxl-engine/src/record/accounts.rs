@@ -318,10 +318,17 @@ pub fn accounts(case: &Case, limit: u32, offset: u64) -> Result<Listing<AccountR
     accounts_matching(case, None, limit, offset)
 }
 
-/// [`accounts`] narrowed to the accounts whose name or domain holds `text`
-/// (case ignored), the closest names first (`match_rank`); `None` lists
-/// every one. `Invalid` as `accounts` is, and
-/// for a text over 1,000 characters.
+/// An account as the sheets and the link picker show it, in SQL over `r`:
+/// `DOMAIN\name`, or the name alone for an account without a domain.
+const SHOWN_NAME: &str =
+    "CASE WHEN r.domain IS NULL THEN r.name ELSE r.domain || chr(92) || r.name END";
+
+/// [`accounts`] narrowed to the accounts whose `DOMAIN\name` holds `text`
+/// (case ignored), so a name, a domain, or both typed as shown all find
+/// one. The closest first: `match_rank` of the name or of `DOMAIN\name`,
+/// whichever is closer, so `ACME\jdoe` typed in full is first however many
+/// other domains have a `jdoe`. `None` lists every one. `Invalid` as
+/// `accounts` is, and for a text over 1,000 characters.
 pub fn accounts_matching(
     case: &Case,
     text: Option<&str>,
@@ -343,14 +350,18 @@ pub fn accounts_matching(
         .conn()
         .prepare(&format!(
             "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
-             OR contains(lower(r.name), lower(?)) \
-             OR contains(lower(coalesce(r.domain, '')), lower(?))) \
-             ORDER BY {}, lower(r.name), lower(r.domain) NULLS FIRST, r.id LIMIT ? OFFSET ?",
+             OR contains(lower({SHOWN_NAME}), lower(?))) \
+             ORDER BY least({}, {}), lower(r.name), lower(r.domain) NULLS FIRST, r.id \
+             LIMIT ? OFFSET ?",
             account_select(),
-            super::match_rank("r.name")
+            super::match_rank("r.name"),
+            super::match_rank(SHOWN_NAME)
         ))?
         .query_map(
+            // The text: twice for the filter, then for each `match_rank`.
             params![
+                text,
+                text,
                 text,
                 text,
                 text,

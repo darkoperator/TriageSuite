@@ -554,6 +554,151 @@ describe("linking a record by hand", () => {
       expect(callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds)).toContain((pending.args as { queryId: string }).queryId),
     );
   });
+
+  /** The picker's own reads of the records, in the order asked. */
+  const pickerReads = () =>
+    callsOf("records_list")
+      .map((c) => c.args as { slot: string; queryId: string; offset: number; query: { kind: string; text?: string | null } })
+      .filter((a) => a.slot === "dialog:link");
+  const cancelled = () => callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds);
+  /** 200 accounts named `svc_scan` in domains that hold "ZED", and one in the domain ZED itself, which sorts last. */
+  async function manyAccounts(): Promise<number> {
+    const spec = (domain: string) => ({ kind: "account", id: null, name: "svc_scan", domain, sid: null, description: "", privilege: "unknown", note: "" });
+    let last = 0;
+    await act(async () => {
+      for (let i = 0; i < 200; i++) await mockCall("record_upsert", { spec: spec(`A-ZED-${String(i).padStart(3, "0")}`) });
+      last = (await mockCall<{ id: number }>("record_upsert", { spec: spec("ZED") })).id;
+    });
+    return last;
+  }
+  /** The picker open on entry E-1, listing accounts. */
+  async function pickAccounts(user: ReturnType<typeof userEvent.setup>) {
+    const editor = await select(user, 1);
+    await user.click(await within(editor).findByRole("button", { name: "+ link a host, account or IOC" }));
+    const dialog = await screen.findByRole("dialog", { name: "Link a record" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Kind" }), "account");
+    return { dialog, list: within(dialog).getByRole("listbox", { name: "Records" }), box: within(dialog).getByRole("searchbox", { name: "Filter records" }) };
+  }
+
+  it("show_more_reaches_the_record_past_the_first_200", async () => {
+    // 201 accounts share the name typed, so they rank equally and the one in the last domain is the 201st. The picker
+    // lists 200 and says so; *Show more* asks for the next 200 from there, and only those, and adds them to the list.
+    const user = await openTimeline();
+    const wanted = await manyAccounts();
+    const { dialog, list, box } = await pickAccounts(user);
+    await user.type(box, "svc_scan");
+    await waitFor(() => expect(pickerReads().some((a) => a.query.text === "svc_scan")).toBe(true));
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(200));
+    expect(within(list).queryByRole("option", { name: "ZED\\svc_scan" })).toBeNull();
+    expect(within(dialog).getByText("200 listed · more match")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(201));
+    const options = within(list).getAllByRole("option");
+    expect(options.slice(0, 200).map((o) => o.textContent)).toEqual(Array.from({ length: 200 }, (_, i) => `A-ZED-${String(i).padStart(3, "0")}\\svc_scan`));
+    expect(options[200].textContent).toBe("ZED\\svc_scan");
+    expect(pickerReads().filter((a) => a.query.text === "svc_scan").map((a) => a.offset)).toEqual([0, 200]);
+    // Every match is listed now: the count says so, there is no more to ask for, and the focus *Show more* had is on
+    // the first record it added, not lost outside the dialog.
+    expect(within(dialog).getByText("201 listed")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(options[200]).toHaveFocus();
+    await user.click(options[200]);
+    await waitFor(() => expect(callsOf("record_link").map((c) => c.args)).toEqual([{ entryId: 1, kind: "account", recordId: wanted }]));
+  });
+
+  it("typing_a_domain_and_name_lists_that_account_first", async () => {
+    // The engine ranks an account by its `DOMAIN\\name` as well as its name: the domain typed in full is ahead of the
+    // 200 domains that only hold it, and domain and name together find the one account.
+    const user = await openTimeline();
+    await manyAccounts();
+    const { list, box } = await pickAccounts(user);
+    await user.type(box, "zed");
+    await waitFor(() => expect(within(list).getAllByRole("option")[0].textContent).toBe("ZED\\svc_scan"));
+    expect(within(list).getAllByRole("option")).toHaveLength(200);
+    await user.type(box, "\\SVC_scan");
+    await waitFor(() => expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["ZED\\svc_scan"]));
+    expect(pickerReads().at(-1)!.query.text).toBe("zed\\SVC_scan");
+  });
+
+  /** A case of more than 200 hosts whose second page the test holds back; a typed text finds one host. */
+  function heldSecondPage() {
+    const first = Array.from({ length: 200 }, (_, i) => ({ kind: "host", id: 1000 + i, name: `HOST${String(i).padStart(3, "0")}`, role: "", note: "" }));
+    const second = held<unknown>();
+    overrideCommand("records_list", (a) => {
+      const { slot, offset, query } = a as { slot: string; offset: number; query: { text?: string | null } };
+      if (slot !== "dialog:link") return import("../mock/backend").then((m) => m.mockCall("records_list", a as Record<string, unknown>));
+      if (query.text) return Promise.resolve({ items: [{ kind: "host", id: 4242, name: "WS999", role: "", note: "" }], truncated: false });
+      return offset === 0 ? Promise.resolve({ items: first, truncated: true }) : second.promise;
+    });
+    return second;
+  }
+  /** The picker open on entry E-1 with 200 hosts listed and *Show more* pressed: its read of the next 200, held. */
+  async function showMoreHeld(user: ReturnType<typeof userEvent.setup>) {
+    const editor = await select(user, 1);
+    await user.click(await within(editor).findByRole("button", { name: "+ link a host, account or IOC" }));
+    const dialog = await screen.findByRole("dialog", { name: "Link a record" });
+    const list = within(dialog).getByRole("listbox", { name: "Records" });
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(200));
+    await user.click(within(dialog).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(pickerReads().some((a) => a.offset === 200)).toBe(true));
+    return { dialog, list, pending: pickerReads().find((a) => a.offset === 200)! };
+  }
+
+  it("a_text_change_drops_a_held_show_more_answer", async () => {
+    const second = heldSecondPage();
+    const user = await openTimeline();
+    const { dialog, list, pending } = await showMoreHeld(user);
+    // The first 200 stay listed while the next are read.
+    expect(within(list).getAllByRole("option")).toHaveLength(200);
+    await user.type(within(dialog).getByRole("searchbox", { name: "Filter records" }), "W");
+    await within(list).findByRole("option", { name: "WS999" });
+    // The read of the next 200 was for the text before: it is cancelled, and its answer is not added to this list.
+    expect(cancelled()).toContain(pending.queryId);
+    await act(async () => second.release({ items: [{ kind: "host", id: 7, name: "STALE", role: "", note: "" }], truncated: false }));
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["WS999"]);
+    expect(within(dialog).getByText("1 listed")).toBeInTheDocument();
+  });
+
+  it("a_write_while_show_more_reads_starts_every_page_again", async () => {
+    // The 200 listed were read before the write, so they are not added to: both pages are read again for the case as
+    // it is now (one host more at the front, every page moved by one), and the held answer from before is dropped.
+    const host = (i: number) => ({ kind: "host", id: 1000 + i, name: `HOST${String(i).padStart(3, "0")}`, role: "", note: "" });
+    const hosts = (from: number, n: number) => Array.from({ length: n }, (_, i) => host(from + i));
+    const before = held<unknown>();
+    let written = false;
+    overrideCommand("records_list", (a) => {
+      const { slot, offset } = a as { slot: string; offset: number };
+      if (slot !== "dialog:link") return import("../mock/backend").then((m) => m.mockCall("records_list", a as Record<string, unknown>));
+      if (!written) return offset === 0 ? Promise.resolve({ items: hosts(0, 200), truncated: true }) : before.promise;
+      return Promise.resolve(
+        offset === 0 ? { items: [{ kind: "host", id: 9, name: "AAA-NEW", role: "", note: "" }, ...hosts(0, 199)], truncated: true } : { items: hosts(199, 2), truncated: false },
+      );
+    });
+    const user = await openTimeline();
+    const { list, pending } = await showMoreHeld(user);
+    written = true;
+    await act(async () => {
+      await mockCall("record_upsert", { spec: { kind: "host", id: null, name: "AAA-NEW", role: "", note: "" } });
+    });
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(202));
+    const names = () => within(list).getAllByRole("option").map((o) => o.textContent);
+    expect(names()).toEqual(["AAA-NEW", ...hosts(0, 201).map((h) => h.name)]);
+    expect(pickerReads().map((a) => a.offset)).toEqual([0, 200, 0, 200]);
+    expect(cancelled()).toContain(pending.queryId);
+    await act(async () => before.release({ items: [{ kind: "host", id: 7, name: "STALE", role: "", note: "" }], truncated: false }));
+    expect(names()).toHaveLength(202);
+    expect(names()).not.toContain("STALE");
+  });
+
+  it("closing_the_picker_cancels_a_show_more_read", async () => {
+    heldSecondPage();
+    const user = await openTimeline();
+    const { dialog, pending } = await showMoreHeld(user);
+    expect(cancelled()).not.toContain(pending.queryId);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(cancelled()).toContain(pending.queryId));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });
 
 describe("the candidates after M", () => {

@@ -136,8 +136,9 @@ pub enum RecordQuery {
     Ioc(IocQuery),
 }
 
-/// How the Hosts or Accounts list narrows: by text in a host's name, or an
-/// account's name or domain, case ignored. Absent or `null`, every record.
+/// How the Hosts or Accounts list narrows: by text in a host's name, or in
+/// an account's `DOMAIN\name` (so its name, its domain, or both as shown),
+/// case ignored. Absent or `null`, every record.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, ts_rs::TS)]
 #[serde(deny_unknown_fields)]
 pub struct NameQuery {

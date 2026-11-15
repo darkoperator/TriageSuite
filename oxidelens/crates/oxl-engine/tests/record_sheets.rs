@@ -1465,3 +1465,75 @@ fn record_text_matches_rank_exact_then_prefix_then_substring() {
     drop(case);
     drop(d);
 }
+
+/// An account is found and ranked by its `DOMAIN\name` too: 200 accounts
+/// share the name, and the one typed with its domain comes first.
+#[test]
+fn accounts_rank_by_domain_and_name() {
+    use oxl_engine::accounts_matching;
+    let (d, mut case) = loaded();
+    for i in 0..200 {
+        let domain = format!("A-ZZZ-{i:03}");
+        upsert_account(&mut case, &account_spec("jdoe", Some(&domain)), &analyst()).unwrap();
+    }
+    for (name, domain) in [
+        ("jdoe", Some("ZZZ")),
+        ("jdoe", Some("XACME")),
+        ("jdoe2", Some("ACME")),
+        ("jdoe", Some("ACME")),
+        ("jdoe", None),
+    ] {
+        upsert_account(&mut case, &account_spec(name, domain), &analyst()).unwrap();
+    }
+    let shown = |text: &str, limit: u32, offset: u64| -> (Vec<String>, bool) {
+        let page = accounts_matching(&case, Some(text), limit, offset).unwrap();
+        let names = page
+            .items
+            .into_iter()
+            .map(|a| match a.domain {
+                Some(domain) => format!(r"{domain}\{}", a.name),
+                None => a.name,
+            })
+            .collect();
+        (names, page.truncated)
+    };
+    // The whole `DOMAIN\name` first, then one that starts with the text,
+    // then one that holds it; ASCII case ignored. By name the order would
+    // be ACME\jdoe, XACME\jdoe, ACME\jdoe2.
+    assert_eq!(
+        shown(r"acme\JDOE", 200, 0),
+        (
+            vec![
+                r"ACME\jdoe".to_string(),
+                r"ACME\jdoe2".to_string(),
+                r"XACME\jdoe".to_string()
+            ],
+            false
+        )
+    );
+    // A domain typed in full puts its accounts before the 200 whose domain
+    // only holds it.
+    let (by_domain, more) = shown("zzz", 200, 0);
+    assert_eq!(by_domain[..2], [r"ZZZ\jdoe", r"A-ZZZ-000\jdoe"]);
+    assert!(more);
+    // The name alone ranks the 204 named it equally, in the list's own order
+    // (no domain first, then by domain): the 201st and on are the next page.
+    let (first, more) = shown("jdoe", 200, 0);
+    assert_eq!(first[..3], ["jdoe", r"A-ZZZ-000\jdoe", r"A-ZZZ-001\jdoe"]);
+    assert!(more && !first.contains(&r"ZZZ\jdoe".to_string()));
+    assert_eq!(
+        shown("jdoe", 200, 200),
+        (
+            vec![
+                r"A-ZZZ-199\jdoe".to_string(),
+                r"ACME\jdoe".to_string(),
+                r"XACME\jdoe".to_string(),
+                r"ZZZ\jdoe".to_string(),
+                r"ACME\jdoe2".to_string()
+            ],
+            false
+        )
+    );
+    drop(case);
+    drop(d);
+}

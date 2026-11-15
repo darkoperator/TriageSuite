@@ -831,8 +831,9 @@ fn the_record_commands_need_a_case() {
 }
 
 /// The link picker reaches any host or account by typing: `records_list`
-/// takes a text for hosts (the name) and accounts (name or domain), and a
-/// query without one, as every older caller sends it, lists them all.
+/// takes a text for hosts (the name) and accounts (`DOMAIN\name`: the name,
+/// the domain, or both as shown), and a query without one, as every older
+/// caller sends it, lists them all.
 #[test]
 fn records_list_narrows_hosts_and_accounts_by_text() {
     let s = setup();
@@ -872,6 +873,10 @@ fn records_list_narrows_hosts_and_accounts_by_text() {
     .unwrap();
     assert_eq!(
         names(&query(json!({ "kind": "account", "text": "acme" }))),
+        ["jdoe"]
+    );
+    assert_eq!(
+        names(&query(json!({ "kind": "account", "text": r"acme\JDOE" }))),
         ["jdoe"]
     );
     assert!(names(&query(json!({ "kind": "account", "text": "nobody" }))).is_empty());

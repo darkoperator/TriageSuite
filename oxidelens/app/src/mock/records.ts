@@ -310,9 +310,12 @@ export function evidenceList(r: MockRecords, entry: number): Evidence[] {
 
 export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offset: number): Listing<CaseRecord> {
   let all = liveRecords(r, q.kind);
+  const key = (x: StoredRecord) => (x.name ?? x.value ?? "").toLowerCase();
+  // An account as it is shown, `DOMAIN\name` (the name alone without a domain): the engine narrows and ranks by it.
+  const shown = (x: StoredRecord) => (q.kind === "account" && x.domain ? `${x.domain}\\${x.name}`.toLowerCase() : key(x));
   if (q.kind !== "ioc" && q.text) {
     const text = q.text.toLowerCase();
-    all = all.filter((x) => [x.name, q.kind === "account" ? x.domain : null].some((v) => v?.toLowerCase().includes(text)));
+    all = all.filter((x) => shown(x).includes(text));
   }
   if (q.kind === "ioc") {
     const text = q.text?.toLowerCase();
@@ -321,11 +324,15 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
       .filter((x) => !q.tool || x.tool?.toLowerCase() === q.tool.toLowerCase())
       .filter((x) => !text || [x.value, x.tool, x.note].some((v) => v?.toLowerCase().includes(text)));
   }
-  const key = (x: StoredRecord) => (x.name ?? x.value ?? "").toLowerCase();
-  // The engine's `match_rank`: the whole text first, then a value that starts with it, then one that holds it.
+  // The engine's `match_rank`: the whole text first, then a value that starts with it, then one that holds it; an
+  // account by its name or its `DOMAIN\name`, whichever is closer. Then the list's own order: by name, an account's
+  // domain next (none first), then id.
   const typed = q.text?.toLowerCase();
-  const rank = (x: StoredRecord) => (!typed ? 0 : key(x) === typed ? 0 : key(x).startsWith(typed) ? 1 : 2);
-  all = [...all].sort((x, y) => rank(x) - rank(y) || (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : x.id - y.id));
+  const rankOf = (v: string) => (!typed ? 0 : v === typed ? 0 : v.startsWith(typed) ? 1 : 2);
+  const rank = (x: StoredRecord) => Math.min(rankOf(key(x)), rankOf(shown(x)));
+  const domain = (x: StoredRecord) => (q.kind === "account" ? (x.domain ?? "").toLowerCase() : "");
+  const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  all = [...all].sort((x, y) => rank(x) - rank(y) || byText(key(x), key(y)) || byText(domain(x), domain(y)) || x.id - y.id);
   return page(all.map((x) => shownRecord(r, q.kind, x)), limit, offset);
 }
 

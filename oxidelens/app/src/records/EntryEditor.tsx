@@ -343,9 +343,16 @@ export default function EntryEditor({
 }
 
 // ---- linking a record by hand -------------------------------------------------------------------------------------------
-/** How many records the picker lists at once. */
+/** How many records the picker asks for at once. */
 const LISTED = 200;
-/** The engine's query for `kind` narrowed by `text` (a host's name, an account's name or domain, an IOC's value, tool
+/** What the picker lists: the records of `pages` reads of 200, as the case was at its write `generation`. */
+interface Listed {
+  items: CaseRecord[];
+  truncated: boolean;
+  pages: number;
+  generation: number;
+}
+/** The engine's query for `kind` narrowed by `text` (a host's name, an account's `DOMAIN\name`, an IOC's value, tool
  *  or note); empty text lists them all. */
 const queryOf = (kind: RecordKind, text: string): RecordQuery => {
   const t = text === "" ? null : text;
@@ -358,20 +365,57 @@ function recordText(r: CaseRecord): string {
   return `${r.ioc_type} ${r.value}`;
 }
 
-/** *+ link a host, account or IOC*: the case's records of one kind, the first 200, and typing asks the engine for the
- *  ones whose text matches, so any record is reachable. A read is for one (kind, text): an answer for an older one is
- *  dropped, and the read in flight is cancelled when they change or the picker closes. A click links one (focus goes
- *  back to the button). */
+/** *+ link a host, account or IOC*: the case's records of one kind, 200 at a time. Typing asks the engine for the ones
+ *  whose text matches, the closest first, and *Show more* asks for the next 200 of them and adds those to the list,
+ *  which says how many it holds, so every record is reachable. A read is for one (kind, text): an answer for an older
+ *  one is dropped, and the read in flight is cancelled when they change or the picker closes. A click links one (focus
+ *  goes back to the button). */
 function LinkPicker({ entryId, onClose }: { entryId: number; onClose(): void }): ReactNode {
   const { change, reportError } = useShell();
   const [kind, setKind] = useState<RecordKind>("host");
   const [text, setText] = useState("");
-  const listed = useCaseRead(
-    JSON.stringify([kind, text]),
-    change.generation,
-    (next) => recordsList(queryOf(kind, text), LISTED, 0, "dialog:link", next()),
+  // *Show more* asks for one page more of this kind and text; another kind or text starts again from one page.
+  const base = JSON.stringify([kind, text]);
+  const [pages, setPages] = useState({ base, n: 1 });
+  const shownPages = pages.base === base ? pages.n : 1;
+  if (pages.base !== base) setPages({ base, n: 1 });
+  const generation = change.generation;
+  const listed = useCaseRead<Listed>(
+    base,
+    `${generation}:${shownPages}`,
+    async (next, had) => {
+      // The pages listed stay while the case is as it was when they were read, so *Show more* reads the next 200 only;
+      // after a write every page shown is read again, one after another.
+      const kept = had !== undefined && had.generation === generation && had.truncated && had.pages < shownPages ? had : null;
+      const items = kept === null ? [] : [...kept.items];
+      for (let page = kept === null ? 0 : kept.pages; page < shownPages; page++) {
+        const got = await recordsList(queryOf(kind, text), LISTED, page * LISTED, "dialog:link", next());
+        items.push(...got.items);
+        if (!got.truncated) return { items, truncated: false, pages: page + 1, generation };
+      }
+      return { items, truncated: true, pages: shownPages, generation };
+    },
     reportError,
   );
+  const shown = listed?.value;
+  const list = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  // *Show more* goes once the last records are listed (or its read fails). The focus it had then goes to the first
+  // record it added, else to the search box: left on nothing, Tab and Escape would not reach the dialog.
+  const adding = useRef<number | null>(null);
+  useEffect(() => {
+    const from = adding.current;
+    adding.current = null;
+    if (from === null || listed === null) return;
+    const dialog = list.current?.closest('[role="dialog"]');
+    if (!dialog || dialog.contains(document.activeElement)) return;
+    (list.current?.querySelectorAll<HTMLElement>('[role="option"]')[from] ?? search.current)?.focus();
+  }, [listed]);
+  const showMore = () => {
+    if (shown === undefined) return;
+    adding.current = shown.items.length;
+    setPages({ base, n: shown.pages + 1 });
+  };
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const close = onClose;
@@ -396,17 +440,29 @@ function LinkPicker({ entryId, onClose }: { entryId: number; onClose(): void }):
           <option value="ioc">IOC</option>
         </select>
       </label>
-      <input type="search" aria-label="Filter records" placeholder="Type to find a record" value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="record-list" role="listbox" aria-label="Records">
-        {(listed?.value?.items ?? []).map((r) => (
+      <input ref={search} type="search" aria-label="Filter records" placeholder="Type to find a record" value={text} onChange={(e) => setText(e.target.value)} />
+      <div ref={list} className="record-list" role="listbox" aria-label="Records">
+        {(shown?.items ?? []).map((r) => (
           <button key={r.id} type="button" role="option" aria-selected={false} className="record-option" disabled={busy} onClick={() => void pick(r)}>
             <span className="record-title">{displaySafe(recordText(r))}</span>
           </button>
         ))}
       </div>
       {listed === null && <p className="form-hint">Loading…</p>}
-      {listed?.value?.items.length === 0 && <p className="form-hint">{text === "" ? "The case has none of these yet." : "None match."}</p>}
-      {listed?.value?.truncated && <p className="form-hint">{`The first ${LISTED}: type to find the others.`}</p>}
+      {shown?.items.length === 0 && <p className="form-hint">{text === "" ? "The case has none of these yet." : "None match."}</p>}
+      {shown !== undefined && shown.items.length > 0 && (
+        <p className="form-hint">
+          <span>{`${shown.items.length.toLocaleString("en-US")} listed${!shown.truncated ? "" : text === "" ? " · more in the case" : " · more match"}`}</span>
+          {shown.truncated && (
+            <>
+              {" "}
+              <button type="button" className="link-button" onClick={showMore}>
+                Show more
+              </button>
+            </>
+          )}
+        </p>
+      )}
       <div className="form-buttons">
         <button type="button" onClick={close}>Cancel</button>
       </div>
