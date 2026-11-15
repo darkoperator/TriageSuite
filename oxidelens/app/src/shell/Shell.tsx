@@ -278,8 +278,14 @@ export default function Shell() {
     );
   }, [reportError]);
 
+  // Rises each time a case is entered (opened or made) or closed. An answer for the case shown before (its summary
+  // after a write, its export's ending) carries the epoch it was asked under and is drawn only while that still holds,
+  // on success and on failure: a late `no_case` must not close the next case, nor a late cancel note follow into it.
+  const caseEpoch = useRef(0);
+
   const enterCase = useCallback(
     (s: CaseSummary) => {
+      caseEpoch.current++;
       const restored = loadTabs(s.case_id, s.relations.map((r) => r.name));
       store.replace(restored.scroll);
       setTabs(restored.state);
@@ -302,9 +308,12 @@ export default function Shell() {
     if (!summary) return;
     setChange({ generation: e.generation, kinds: e.kinds });
     const seq = ++summarySeq.current;
+    const epoch = caseEpoch.current;
+    const current = () => seq === summarySeq.current && epoch === caseEpoch.current;
     caseSummary("shell:summary").then(
-      (s) => seq === summarySeq.current && setSummary(s),
+      (s) => current() && setSummary(s),
       (err) => {
+        if (!current()) return;
         if (isCmdError(err) && err.code === "no_case") setSummary(null);
         else if (!isStale(err)) reportError(err);
       },
@@ -315,14 +324,16 @@ export default function Shell() {
   /** Asks for the file, then writes the case record as the export job the status bar can cancel. */
   const runRecordExport = async (kind: RecordExport) => {
     if (!summary || exportRunning()) return;
+    const epoch = caseEpoch.current;
     let path: string | null;
     try {
       path = await pickRecordExportPath(kind, summary.name);
     } catch (e) {
-      reportError(e);
+      if (epoch === caseEpoch.current) reportError(e);
       return;
     }
-    if (path === null) return;
+    // The case was closed or another entered while the save dialog was up: the export was for the case gone.
+    if (path === null || epoch !== caseEpoch.current) return;
     const queryId = newQueryId();
     setNote(null);
     if (!beginExport({ queryId, zoneTimes: false })) return setError("An export is running.");
@@ -330,6 +341,8 @@ export default function Shell() {
       const write = kind === "timeline" ? exportTimeline : kind === "workbook" ? exportWorkbook : exportReport;
       await write(path, "case:export", queryId);
     } catch (e) {
+      // An ending that comes after the case was closed or another entered is not drawn in the case shown now.
+      if (epoch !== caseEpoch.current) return;
       // Cancel is a neutral line; a superseded read or a closed case shows nothing (APP.md). A refusal (the case
       // file, a source's evidence) is shown as the engine worded it, without its code.
       if (isCmdError(e) && e.code === "interrupted") setNote("Export cancelled.");
@@ -344,6 +357,7 @@ export default function Shell() {
   const close = async () => {
     try {
       await caseClose();
+      caseEpoch.current++;
       if (summary) saveTabs(summary.case_id, tabs, store.offsets); // a pending scroll save must not be lost
       setSummary(null);
       setSessions([]);

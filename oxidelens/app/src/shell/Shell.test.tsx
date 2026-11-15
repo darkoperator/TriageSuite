@@ -390,6 +390,75 @@ describe("the open case", () => {
   });
 });
 
+describe("a late answer across a case switch", () => {
+  /** Closes the case shown and opens a second, distinct one; resolves once the second is the one shown. */
+  async function switchCase(user: ReturnType<typeof userEvent.setup>) {
+    vi.mocked(dialogs.pickCaseFile).mockResolvedValue("/cases/second.duckdb");
+    await user.click(screen.getByRole("button", { name: "Close case" }));
+    const second: CaseSummary = { ...caseSummaryFixture(), case_id: "fedcba9876543210fedcba9876543210", name: "second-case" };
+    overrideCommand("case_open", () => second);
+    await user.click(await screen.findByRole("button", { name: "Open case…" }));
+    await screen.findByRole("tab", { name: "Overview" });
+    expect(document.querySelector(".case-name")).toHaveTextContent("second-case");
+  }
+
+  it.each(["no_case", "the first case's summary"])("a_summary_answer_held_across_a_case_switch_is_not_drawn (%s)", async (answer) => {
+    const user = await openRecent();
+    // The first case changes; its summary read is held until the analyst has closed it and opened another case.
+    let settle!: () => void;
+    const first = caseSummaryFixture();
+    overrideCommand(
+      "case_summary",
+      () =>
+        new Promise((resolve, reject) => {
+          settle = () => (answer === "no_case" ? reject({ code: "no_case", message: "no case is open" }) : resolve({ ...first, name: "first-case-late" }));
+        }),
+    );
+    act(() => emitEvent("case-changed", { kinds: ["records"], generation: 80 }));
+    await waitFor(() => expect(callsOf("case_summary").some((c) => (c.args as { slot: string }).slot === "shell:summary")).toBe(true));
+    const held = settle;
+    await switchCase(user);
+    await act(async () => {
+      held();
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    // The second case stays: a late no_case does not close it, and a late summary does not replace it.
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(document.querySelector(".case-name")).toHaveTextContent("second-case");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    ["interrupted", "the query was cancelled"],
+    ["refused", "that path is inside a loaded source"],
+  ])("an_export_answer_held_across_a_case_switch_is_not_drawn (%s)", async (code, message) => {
+    vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue("/out/r.md");
+    let settle!: () => void;
+    overrideCommand(
+      "export_report",
+      () =>
+        new Promise((_, reject) => {
+          settle = () => reject({ code, message });
+        }),
+    );
+    const user = await openRecent();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "report" }));
+    await waitFor(() => expect(callsOf("export_report")).toHaveLength(1));
+    const held = settle;
+    await switchCase(user);
+    await act(async () => {
+      held();
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    // The first case's export ended: nothing about it is shown in the second.
+    expect(screen.queryByText("Export cancelled.")).toBeNull();
+    expect(screen.queryByText(message)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.querySelector(".case-name")).toHaveTextContent("second-case");
+  });
+});
+
 describe("pinned sheet tabs", () => {
   const SHEETS = ["Timeline", "Hosts", "Accounts", "IOCs"];
 
