@@ -24,14 +24,18 @@
 //! Each export goes through `check_export_target` (never the case file, its
 //! log, or inside a loaded source) and is written whole or not at all: into
 //! `<path>.partial`, created new, renamed over `path` once complete, as the
-//! grid's CSV export is. The record is read before anything is written, a
-//! page of `MAX_LIMIT` at a time with the cancel flag read between pages;
-//! it is the analyst's notes on a case, not its rows, so it is held whole.
+//! grid's CSV export is. The record is read a page of `MAX_LIMIT` at a time
+//! inside one read transaction, and each row is written as its page is
+//! read (the evidence for a page's entries only), so the CSV and the report
+//! hold one page at a time; the workbook's sheets are held by the workbook
+//! writer until it is saved. The cancel flag is read before each page,
+//! each row and each evidence row, and before the rename.
 
 use super::{
     accounts, entries, has_records, hosts, iocs, AccountRecord, Entry, EntryQuery, HostRecord,
     IocQuery, IocRecord,
 };
+use crate::annot::id_list;
 use crate::case::Case;
 use crate::error::{EngineError, Result};
 use crate::listing::Listing;
@@ -126,11 +130,16 @@ const IOCS: &[&str] = &[
     "modified_at",
 ];
 
-/// One sheet of the record: its name, its header, and its rows as text.
-struct Table {
-    name: &'static str,
-    header: &'static [&'static str],
-    rows: Vec<Vec<String>>,
+/// The pauses a test puts between an export's steps; each a no-op for a
+/// real export.
+struct Hooks<'a> {
+    /// Once the first page of entries is read, before its evidence.
+    after_entries: &'a mut dyn FnMut(),
+    /// As each evidence row is read.
+    on_evidence: &'a mut dyn FnMut(),
+    /// Once the partial file is written and closed, before its last checks
+    /// and the rename.
+    before_rename: &'a mut dyn FnMut(),
 }
 
 /// Write the case's live timeline entries to `path` as CSV, in the
@@ -141,17 +150,28 @@ struct Table {
 ///
 /// `Invalid` for a `path` that is a folder or names no file, anything
 /// already at `<path>.partial` (left as it is), and when `cancel` is set
-/// (read between pages and before the rename; the message is `cancelled`).
-/// `NotFound` for a folder that does not exist. `Refused` for the case
-/// file, its log, or a path inside a loaded source. On any failure the
-/// partial file is removed and what was at `path` is left as it was.
+/// (read before each page, each entry and each evidence row, and before
+/// the rename; the message is `cancelled`). `NotFound` for a folder that
+/// does not exist. `Refused` for the case file, its log, or a path inside
+/// a loaded source. On any failure the partial file is removed and what
+/// was at `path` is left as it was.
 pub fn export_timeline_csv(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
-    timeline_csv(case, path, cancel, &mut || {}, &mut || {})
+    timeline_csv(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: &mut || {},
+            before_rename: &mut || {},
+        },
+    )
 }
 
 /// `export_timeline_csv`, calling `pause` between two of its reads (once
-/// the entries are read, before their evidence), for a test to commit a
-/// change from another connection there. Built only with `test-support`.
+/// the first page of entries is read, before its evidence), for a test to
+/// commit a change from another connection there. Built only with
+/// `test-support`.
 #[cfg(feature = "test-support")]
 pub fn export_timeline_csv_paused(
     case: &Case,
@@ -159,7 +179,38 @@ pub fn export_timeline_csv_paused(
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    timeline_csv(case, path, cancel, pause, &mut || {})
+    timeline_csv(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: pause,
+            on_evidence: &mut || {},
+            before_rename: &mut || {},
+        },
+    )
+}
+
+/// `export_timeline_csv`, calling `hook` as it reads each evidence row,
+/// for a test to set the cancel flag there. Built only with
+/// `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_timeline_csv_on_evidence(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    hook: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    timeline_csv(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: hook,
+            before_rename: &mut || {},
+        },
+    )
 }
 
 /// `export_timeline_csv`, calling `hook` once its partial file is written
@@ -172,26 +223,34 @@ pub fn export_timeline_csv_before_rename(
     cancel: &AtomicBool,
     hook: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    timeline_csv(case, path, cancel, &mut || {}, hook)
+    timeline_csv(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: &mut || {},
+            before_rename: hook,
+        },
+    )
 }
 
 fn timeline_csv(
     case: &Case,
     path: &Path,
     cancel: &AtomicBool,
-    pause: &mut dyn FnMut(),
-    before_rename: &mut dyn FnMut(),
+    hooks: Hooks,
 ) -> Result<ExportReport> {
-    check_export_target(case, path)?;
-    let timeline = snapshot(case, |case| timeline(case, cancel, pause))?;
-    write_whole(case, path, cancel, before_rename, |file| {
-        let mut out = csv::Writer::from_writer(file);
-        out.write_record(timeline.header).map_err(csv_error)?;
-        for row in &timeline.rows {
-            out.write_record(row).map_err(csv_error)?;
-        }
-        out.flush()?;
-        Ok(count(&timeline.rows))
+    let Hooks {
+        after_entries,
+        on_evidence,
+        before_rename,
+    } = hooks;
+    write_whole(case, path, cancel, before_rename, |case, file| {
+        let mut sink = CsvSink(csv::Writer::from_writer(file));
+        let rows = stream_timeline(case, cancel, after_entries, on_evidence, &mut sink)?;
+        sink.0.flush()?;
+        Ok(rows)
     })
 }
 
@@ -202,7 +261,16 @@ fn timeline_csv(
 /// `export_timeline_csv` does, and `Invalid` for a sheet past a
 /// workbook's 1,048,575 data rows.
 pub fn export_workbook(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
-    workbook(case, path, cancel, &mut || {}, &mut || {})
+    workbook(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: &mut || {},
+            before_rename: &mut || {},
+        },
+    )
 }
 
 /// `export_workbook`, calling `pause` where `export_timeline_csv_paused`
@@ -214,7 +282,37 @@ pub fn export_workbook_paused(
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    workbook(case, path, cancel, pause, &mut || {})
+    workbook(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: pause,
+            on_evidence: &mut || {},
+            before_rename: &mut || {},
+        },
+    )
+}
+
+/// `export_workbook`, calling `hook` where
+/// `export_timeline_csv_on_evidence` does. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_workbook_on_evidence(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    hook: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    workbook(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: hook,
+            before_rename: &mut || {},
+        },
+    )
 }
 
 /// `export_workbook`, calling `hook` where
@@ -226,47 +324,33 @@ pub fn export_workbook_before_rename(
     cancel: &AtomicBool,
     hook: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    workbook(case, path, cancel, &mut || {}, hook)
+    workbook(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: &mut || {},
+            before_rename: hook,
+        },
+    )
 }
 
-fn workbook(
-    case: &Case,
-    path: &Path,
-    cancel: &AtomicBool,
-    pause: &mut dyn FnMut(),
-    before_rename: &mut dyn FnMut(),
-) -> Result<ExportReport> {
-    check_export_target(case, path)?;
-    let tables = snapshot(case, |case| record_tables(case, cancel, pause))?;
-    let mut book = rust_xlsxwriter::Workbook::new();
-    for table in &tables {
-        let sheet = book.add_worksheet();
-        sheet.set_name(table.name).map_err(xlsx_error)?;
-        for (col, name) in table.header.iter().enumerate() {
-            sheet
-                .write_string(0, col_num(col)?, *name)
-                .map_err(xlsx_error)?;
-        }
-        for (at, row) in table.rows.iter().enumerate() {
-            let row_num = u32::try_from(at + 1)
-                .ok()
-                .filter(|&r| r < 1_048_576)
-                .ok_or_else(|| too_many_rows(table.name))?;
-            for (col, cell) in row.iter().enumerate() {
-                sheet
-                    .write_string(row_num, col_num(col)?, clip_cell(cell))
-                    .map_err(|e| match e {
-                        rust_xlsxwriter::XlsxError::RowColumnLimitError => {
-                            too_many_rows(table.name)
-                        }
-                        other => xlsx_error(other),
-                    })?;
-            }
-        }
-    }
-    write_whole(case, path, cancel, before_rename, |file| {
-        book.save_to_writer(&mut *file).map_err(xlsx_error)?;
-        Ok(tables.iter().map(|t| count(&t.rows)).sum())
+fn workbook(case: &Case, path: &Path, cancel: &AtomicBool, hooks: Hooks) -> Result<ExportReport> {
+    let Hooks {
+        after_entries,
+        on_evidence,
+        before_rename,
+    } = hooks;
+    write_whole(case, path, cancel, before_rename, |case, file| {
+        let mut sink = BookSink {
+            book: rust_xlsxwriter::Workbook::new(),
+            sheet: None,
+        };
+        let rows = stream_tables(case, cancel, after_entries, on_evidence, &mut sink)?;
+        check_cancel(cancel)?;
+        sink.book.save_to_writer(&mut *file).map_err(xlsx_error)?;
+        Ok(rows)
     })
 }
 
@@ -277,7 +361,16 @@ fn workbook(
 /// Every value from the case is escaped (`md`). `rows` counts the data
 /// rows of every table. Fails as `export_timeline_csv` does.
 pub fn export_report(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
-    report(case, path, cancel, &mut || {}, &mut || {})
+    report(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: &mut || {},
+            before_rename: &mut || {},
+        },
+    )
 }
 
 /// `export_report`, calling `pause` where `export_timeline_csv_paused`
@@ -289,7 +382,37 @@ pub fn export_report_paused(
     cancel: &AtomicBool,
     pause: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    report(case, path, cancel, pause, &mut || {})
+    report(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: pause,
+            on_evidence: &mut || {},
+            before_rename: &mut || {},
+        },
+    )
+}
+
+/// `export_report`, calling `hook` where
+/// `export_timeline_csv_on_evidence` does. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_report_on_evidence(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    hook: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    report(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: hook,
+            before_rename: &mut || {},
+        },
+    )
 }
 
 /// `export_report`, calling `hook` where
@@ -301,44 +424,159 @@ pub fn export_report_before_rename(
     cancel: &AtomicBool,
     hook: &mut dyn FnMut(),
 ) -> Result<ExportReport> {
-    report(case, path, cancel, &mut || {}, hook)
+    report(
+        case,
+        path,
+        cancel,
+        Hooks {
+            after_entries: &mut || {},
+            on_evidence: &mut || {},
+            before_rename: hook,
+        },
+    )
 }
 
-fn report(
-    case: &Case,
-    path: &Path,
-    cancel: &AtomicBool,
-    pause: &mut dyn FnMut(),
-    before_rename: &mut dyn FnMut(),
-) -> Result<ExportReport> {
-    check_export_target(case, path)?;
-    let (name, tables) = snapshot(case, |case| {
+fn report(case: &Case, path: &Path, cancel: &AtomicBool, hooks: Hooks) -> Result<ExportReport> {
+    let Hooks {
+        after_entries,
+        on_evidence,
+        before_rename,
+    } = hooks;
+    write_whole(case, path, cancel, before_rename, |case, file| {
         let name = case.info()?.name;
-        Ok((name, record_tables(case, cancel, pause)?))
-    })?;
-    let mut text = String::new();
-    text.push_str("# Case record\n\n");
-    text.push_str(&format!("Case: {}\n\n", md(&name)));
-    text.push_str(&format!("Exported: {} (UTC)\n", now_iso()));
-    for table in &tables {
-        text.push_str(&format!("\n## {}\n\n", table.name));
-        if table.rows.is_empty() {
-            text.push_str(&format!("No {}.\n", none_of(table.name)));
-            continue;
-        }
-        if table.name == "Timeline" {
-            text.push_str("In time order; entries that need a time are listed last, by id.\n\n");
-        }
-        markdown_row(&mut text, table.header.iter().map(|h| md(h)));
-        markdown_row(&mut text, table.header.iter().map(|_| "---".to_string()));
-        for row in &table.rows {
-            markdown_row(&mut text, row.iter().map(|c| md(c)));
-        }
-    }
-    write_whole(case, path, cancel, before_rename, |file| {
-        file.write_all(text.as_bytes())?;
-        Ok(tables.iter().map(|t| count(&t.rows)).sum())
+        let mut out = std::io::BufWriter::new(file);
+        out.write_all(b"# Case record\n\n")?;
+        out.write_all(format!("Case: {}\n\n", md(&name)).as_bytes())?;
+        out.write_all(format!("Exported: {} (UTC)\n", now_iso()).as_bytes())?;
+        let mut sink = ReportSink {
+            out,
+            table: None,
+            rows: 0,
+        };
+        let rows = stream_tables(case, cancel, after_entries, on_evidence, &mut sink)?;
+        sink.out.flush()?;
+        Ok(rows)
     })
+}
+
+/// Where an export's rows go as they are read: a table starts, its rows
+/// follow in order, and it ends. Nothing is held back to be written later
+/// but what the format itself holds (the workbook's sheets).
+trait Sink {
+    fn start(&mut self, name: &'static str, header: &'static [&'static str]) -> Result<()>;
+    fn row(&mut self, row: &[String]) -> Result<()>;
+    fn end(&mut self) -> Result<()>;
+}
+
+/// The Timeline as CSV: the header, then each row as it is read.
+struct CsvSink<W: Write>(csv::Writer<W>);
+
+impl<W: Write> Sink for CsvSink<W> {
+    fn start(&mut self, _name: &'static str, header: &'static [&'static str]) -> Result<()> {
+        self.0.write_record(header).map_err(csv_error)
+    }
+    fn row(&mut self, row: &[String]) -> Result<()> {
+        self.0.write_record(row).map_err(csv_error)
+    }
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// The workbook: a sheet per table, each cell written as it is read.
+struct BookSink {
+    book: rust_xlsxwriter::Workbook,
+    /// The sheet being written: its index, its name and its next row.
+    sheet: Option<(usize, &'static str, u32)>,
+}
+
+impl Sink for BookSink {
+    fn start(&mut self, name: &'static str, header: &'static [&'static str]) -> Result<()> {
+        let sheet = self.book.add_worksheet();
+        sheet.set_name(name).map_err(xlsx_error)?;
+        for (col, cell) in header.iter().enumerate() {
+            sheet
+                .write_string(0, col_num(col)?, *cell)
+                .map_err(xlsx_error)?;
+        }
+        let index = self.book.worksheets().len() - 1;
+        self.sheet = Some((index, name, 1));
+        Ok(())
+    }
+    fn row(&mut self, row: &[String]) -> Result<()> {
+        let Some((index, name, row_num)) = self.sheet else {
+            return Err(EngineError::Internal(
+                "a workbook row came before its sheet".to_string(),
+            ));
+        };
+        if row_num >= 1_048_576 {
+            return Err(too_many_rows(name));
+        }
+        let sheet = self.book.worksheet_from_index(index).map_err(xlsx_error)?;
+        for (col, cell) in row.iter().enumerate() {
+            sheet
+                .write_string(row_num, col_num(col)?, clip_cell(cell))
+                .map_err(|e| match e {
+                    rust_xlsxwriter::XlsxError::RowColumnLimitError => too_many_rows(name),
+                    other => xlsx_error(other),
+                })?;
+        }
+        self.sheet = Some((index, name, row_num + 1));
+        Ok(())
+    }
+    fn end(&mut self) -> Result<()> {
+        self.sheet = None;
+        Ok(())
+    }
+}
+
+/// The report: a section per table, its header written with its first
+/// row, or a line saying there is none.
+struct ReportSink<W: Write> {
+    out: W,
+    /// The table being written: its name and its header.
+    table: Option<(&'static str, &'static [&'static str])>,
+    /// The rows of it written so far.
+    rows: u64,
+}
+
+impl<W: Write> Sink for ReportSink<W> {
+    fn start(&mut self, name: &'static str, header: &'static [&'static str]) -> Result<()> {
+        self.out.write_all(format!("\n## {name}\n\n").as_bytes())?;
+        self.table = Some((name, header));
+        self.rows = 0;
+        Ok(())
+    }
+    fn row(&mut self, row: &[String]) -> Result<()> {
+        let Some((name, header)) = self.table else {
+            return Err(EngineError::Internal(
+                "a report row came before its table".to_string(),
+            ));
+        };
+        let mut text = String::new();
+        if self.rows == 0 {
+            if name == "Timeline" {
+                text.push_str(
+                    "In time order; entries that need a time are listed last, by id.\n\n",
+                );
+            }
+            markdown_row(&mut text, header.iter().map(|h| md(h)));
+            markdown_row(&mut text, header.iter().map(|_| "---".to_string()));
+        }
+        markdown_row(&mut text, row.iter().map(|c| md(c)));
+        self.out.write_all(text.as_bytes())?;
+        self.rows += 1;
+        Ok(())
+    }
+    fn end(&mut self) -> Result<()> {
+        if let Some((name, _)) = self.table.take() {
+            if self.rows == 0 {
+                self.out
+                    .write_all(format!("No {}.\n", none_of(name)).as_bytes())?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// What a section with no rows says it has none of.
@@ -461,22 +699,25 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 }
 
 /// Write `path` whole or not at all: `write` fills `<path>.partial`,
-/// created new beside it, which is synced, the target checked again (a
-/// source loaded meanwhile may now hold it) and the cancel flag read, then
-/// renamed over `path`. `before_rename` is called once the partial file is
-/// closed (a test's pause; a no-op otherwise). On any failure the partial
-/// file, this export's own, is removed and what was at `path` is left as
-/// it was.
+/// created new beside it, inside one read transaction (`snapshot`), so it
+/// can write each row as it reads it and every read sees the case as one
+/// snapshot. The file is then synced, the target checked again outside the
+/// transaction (a source loaded meanwhile may now hold it) and the cancel
+/// flag read, then renamed over `path`. `before_rename` is called once the
+/// partial file is closed (a test's pause; a no-op otherwise). On any
+/// failure the partial file, this export's own, is removed and what was at
+/// `path` is left as it was.
 fn write_whole(
     case: &Case,
     path: &Path,
     cancel: &AtomicBool,
     before_rename: &mut dyn FnMut(),
-    write: impl FnOnce(&mut File) -> Result<u64>,
+    write: impl FnOnce(&Case, &mut File) -> Result<u64>,
 ) -> Result<ExportReport> {
+    check_export_target(case, path)?;
     check_cancel(cancel)?;
     let (partial, mut file) = create_export_partial(path)?;
-    let written = write(&mut file).and_then(|rows| {
+    let written = snapshot(case, |case| write(case, &mut file)).and_then(|rows| {
         file.sync_all()?;
         drop(file);
         before_rename();
@@ -536,84 +777,148 @@ impl Drop for ReadTransaction<'_> {
     }
 }
 
-/// Every page of a listing, `MAX_LIMIT` at a time from the start, the
-/// cancel flag read before each.
-fn all<T>(
+/// Every page of a listing, `MAX_LIMIT` at a time from the start, each item
+/// handed to `each` as soon as its page is read; the cancel flag is read
+/// before each page and each item. How many items there were.
+fn each_page<T>(
     cancel: &AtomicBool,
     mut page: impl FnMut(u32, u64) -> Result<Listing<T>>,
-) -> Result<Vec<T>> {
-    let mut out = Vec::new();
+    mut each: impl FnMut(&[T]) -> Result<()>,
+) -> Result<u64> {
+    let mut offset: u64 = 0;
     loop {
         check_cancel(cancel)?;
-        let offset = u64::try_from(out.len()).unwrap_or(u64::MAX);
         let listing = page(MAX_LIMIT, offset)?;
-        out.extend(listing.items);
+        each(&listing.items)?;
+        offset += count(&listing.items);
         if !listing.truncated {
-            return Ok(out);
+            return Ok(offset);
         }
     }
 }
 
-/// The four tables, in the order the workbook and the report write them.
-fn record_tables(case: &Case, cancel: &AtomicBool, pause: &mut dyn FnMut()) -> Result<[Table; 4]> {
-    let timeline = timeline(case, cancel, pause)?;
-    let hosts: Vec<HostRecord> = all(cancel, |limit, offset| hosts(case, limit, offset))?;
-    let accounts: Vec<AccountRecord> = all(cancel, |limit, offset| accounts(case, limit, offset))?;
-    let iocs: Vec<IocRecord> = all(cancel, |limit, offset| {
-        iocs(case, &IocQuery::default(), limit, offset)
-    })?;
-    Ok([
-        timeline,
-        Table {
-            name: "Hosts",
-            header: HOSTS,
-            rows: hosts.iter().map(host_row).collect(),
-        },
-        Table {
-            name: "Accounts",
-            header: ACCOUNTS,
-            rows: accounts.iter().map(account_row).collect(),
-        },
-        Table {
-            name: "IOCs",
-            header: IOCS,
-            rows: iocs.iter().map(ioc_row).collect(),
-        },
-    ])
+/// The four tables into `sink`, in the order the workbook and the report
+/// write them; how many rows they had.
+fn stream_tables(
+    case: &Case,
+    cancel: &AtomicBool,
+    after_entries: &mut dyn FnMut(),
+    on_evidence: &mut dyn FnMut(),
+    sink: &mut dyn Sink,
+) -> Result<u64> {
+    let mut rows = stream_timeline(case, cancel, after_entries, on_evidence, sink)?;
+    rows += stream_records(
+        cancel,
+        sink,
+        "Hosts",
+        HOSTS,
+        |limit, offset| hosts(case, limit, offset),
+        host_row,
+    )?;
+    rows += stream_records(
+        cancel,
+        sink,
+        "Accounts",
+        ACCOUNTS,
+        |limit, offset| accounts(case, limit, offset),
+        account_row,
+    )?;
+    rows += stream_records(
+        cancel,
+        sink,
+        "IOCs",
+        IOCS,
+        |limit, offset| iocs(case, &IocQuery::default(), limit, offset),
+        ioc_row,
+    )?;
+    Ok(rows)
 }
 
-/// The Timeline table: the live entries in the Timeline's order, each with
-/// the rows attached to it as evidence, in the order they were attached.
-fn timeline(case: &Case, cancel: &AtomicBool, pause: &mut dyn FnMut()) -> Result<Table> {
-    let listed: Vec<Entry> = all(cancel, |limit, offset| {
-        entries(case, &EntryQuery::default(), limit, offset)
+/// One record table into `sink`, a page at a time.
+fn stream_records<T>(
+    cancel: &AtomicBool,
+    sink: &mut dyn Sink,
+    name: &'static str,
+    header: &'static [&'static str],
+    page: impl FnMut(u32, u64) -> Result<Listing<T>>,
+    row: fn(&T) -> Vec<String>,
+) -> Result<u64> {
+    sink.start(name, header)?;
+    let rows = each_page(cancel, page, |items| {
+        for item in items {
+            check_cancel(cancel)?;
+            sink.row(&row(item))?;
+        }
+        Ok(())
     })?;
-    pause();
-    let evidence = evidence_refs(case)?;
-    let rows = listed
-        .iter()
-        .map(|e| entry_row(e, evidence.get(&e.id).map(Vec::as_slice).unwrap_or(&[])))
-        .collect();
-    Ok(Table {
-        name: "Timeline",
-        header: TIMELINE,
-        rows,
-    })
+    sink.end()?;
+    Ok(rows)
 }
 
-/// Per entry, its evidence rows as `<relation>#<row id>`, in the order they
-/// were attached. None in a case without the record tables.
-fn evidence_refs(case: &Case) -> Result<HashMap<i64, Vec<String>>> {
+/// The Timeline table into `sink`: the live entries in the Timeline's
+/// order, a page at a time, each with the rows attached to it as evidence,
+/// in the order they were attached (read for that page's entries only).
+/// `after_entries` is called once the first page is read, before its
+/// evidence.
+fn stream_timeline(
+    case: &Case,
+    cancel: &AtomicBool,
+    after_entries: &mut dyn FnMut(),
+    on_evidence: &mut dyn FnMut(),
+    sink: &mut dyn Sink,
+) -> Result<u64> {
+    sink.start("Timeline", TIMELINE)?;
+    let mut first = true;
+    let rows = each_page(
+        cancel,
+        |limit, offset| entries(case, &EntryQuery::default(), limit, offset),
+        |listed: &[Entry]| {
+            if std::mem::take(&mut first) {
+                after_entries();
+            }
+            let ids: Vec<i64> = listed.iter().map(|e| e.id).collect();
+            let evidence = evidence_refs(case, &ids, cancel, on_evidence)?;
+            for e in listed {
+                check_cancel(cancel)?;
+                sink.row(&entry_row(
+                    e,
+                    evidence.get(&e.id).map(Vec::as_slice).unwrap_or(&[]),
+                ))?;
+            }
+            Ok(())
+        },
+    )?;
+    sink.end()?;
+    Ok(rows)
+}
+
+/// For each of `entries` (one page, at most `MAX_LIMIT`), its evidence rows
+/// as `<relation>#<row id>`, in the order they were attached. The cancel
+/// flag is read before each row; `on_evidence` is called as each is read.
+/// None in a case without the record tables.
+fn evidence_refs(
+    case: &Case,
+    entries: &[i64],
+    cancel: &AtomicBool,
+    on_evidence: &mut dyn FnMut(),
+) -> Result<HashMap<i64, Vec<String>>> {
     let mut out: HashMap<i64, Vec<String>> = HashMap::new();
-    if !has_records(case) {
+    if entries.is_empty() || !has_records(case) {
         return Ok(out);
     }
-    let mut stmt = case.conn().prepare(
-        "SELECT entry_id, relation, row_id FROM ox.evidence \
+    // Entry ids are integers the engine read, so the list is safe as text.
+    let mut stmt = case.conn().prepare(&format!(
+        "SELECT entry_id, relation, row_id FROM ox.evidence WHERE entry_id IN ({}) \
          ORDER BY entry_id, attached_at, row_id",
-    )?;
+        id_list(entries)
+    ))?;
     let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
+    loop {
+        check_cancel(cancel)?;
+        let Some(row) = rows.next()? else {
+            return Ok(out);
+        };
+        on_evidence();
         let entry: i64 = row.get(0)?;
         let relation: String = row.get(1)?;
         let row_id: i64 = row.get(2)?;
@@ -621,7 +926,6 @@ fn evidence_refs(case: &Case) -> Result<HashMap<i64, Vec<String>>> {
             .or_default()
             .push(format!("{relation}#{row_id}"));
     }
-    Ok(out)
 }
 
 fn opt(value: &Option<String>) -> String {

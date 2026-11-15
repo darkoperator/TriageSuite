@@ -35,8 +35,9 @@ pub use evidence::{
 pub use export::{export_report, export_timeline_csv, export_workbook};
 #[cfg(feature = "test-support")]
 pub use export::{
-    export_report_before_rename, export_report_paused, export_timeline_csv_before_rename,
-    export_timeline_csv_paused, export_workbook_before_rename, export_workbook_paused,
+    export_report_before_rename, export_report_on_evidence, export_report_paused,
+    export_timeline_csv_before_rename, export_timeline_csv_on_evidence, export_timeline_csv_paused,
+    export_workbook_before_rename, export_workbook_on_evidence, export_workbook_paused,
 };
 #[cfg(feature = "test-support")]
 pub use iocs::ioc_sightings_paused;

@@ -68,8 +68,9 @@ pub use record::{
 };
 #[cfg(feature = "test-support")]
 pub use record::{
-    export_report_before_rename, export_report_paused, export_timeline_csv_before_rename,
-    export_timeline_csv_paused, export_workbook_before_rename, export_workbook_paused,
+    export_report_before_rename, export_report_on_evidence, export_report_paused,
+    export_timeline_csv_before_rename, export_timeline_csv_on_evidence, export_timeline_csv_paused,
+    export_workbook_before_rename, export_workbook_on_evidence, export_workbook_paused,
     ioc_sightings_paused,
 };
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};

@@ -599,3 +599,55 @@ fn an_export_is_one_snapshot() {
         }
     }
 }
+
+/// Each export reads the cancel flag while it reads an entry's evidence,
+/// not only between pages: cancelled at the first evidence row it reads,
+/// it reads no other, and writes nothing.
+#[test]
+fn an_export_is_cancelled_inside_the_evidence_loop() {
+    type Hooked = fn(
+        &Case,
+        &Path,
+        &AtomicBool,
+        &mut dyn FnMut(),
+    ) -> oxl_engine::Result<oxl_engine::ExportReport>;
+    let exports: [(&str, Hooked); 3] = [
+        ("csv", oxl_engine::export_timeline_csv_on_evidence),
+        ("workbook", oxl_engine::export_workbook_on_evidence),
+        ("report", oxl_engine::export_report_on_evidence),
+    ];
+    for (what, export) in exports {
+        let (d, mut case) = loaded();
+        let id = entry(&mut case, "target", "", Some("2026-01-05T10:00:00Z"));
+        let rows: Vec<i64> = (0..3)
+            .map(|k| {
+                n(
+                    &case,
+                    &format!(
+                        "select _ox_row from evtxtriage_events order by _ox_row limit 1 offset {k}"
+                    ),
+                )
+            })
+            .collect();
+        oxl_engine::attach_rows(&mut case, id, &rows, &analyst()).unwrap();
+        let out = d.path().join(format!("cancelled.{what}"));
+        let cancel = AtomicBool::new(false);
+        let mut read = 0;
+        let err = export(&case, &out, &cancel, &mut || {
+            read += 1;
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        })
+        .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::Invalid(m) if m.contains("cancelled")),
+            "{what}: {err}"
+        );
+        assert_eq!(read, 1, "{what}: no evidence row is read after the cancel");
+        assert!(!out.exists(), "{what}");
+        assert!(!partial(&out).exists(), "{what}");
+        // Not cancelled, the hook sees every evidence row once.
+        let mut read = 0;
+        export(&case, &out, &go(), &mut || read += 1).unwrap();
+        assert_eq!(read, 3, "{what}");
+    }
+}
