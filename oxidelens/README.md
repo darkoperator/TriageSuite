@@ -3,11 +3,12 @@
 OxideLens is a case workbench for TriageSuite output. It loads the CSV
 datasets a TriageSuite run produced (or a loose CSV or TSV file) into one
 DuckDB file, the **case**, and lets you filter, search, group, stack and
-time-window them, mark rows, tag them and write notes, with every change
-recorded in a history.
+time-window them, mark rows, tag them and write notes, build a timeline of
+entries backed by evidence rows with host, account and IOC records, and
+export that record, with every change recorded in a history.
 
-This is step 1 of the build: the engine (`crates/oxl-engine`) and a
-command-line tool, `oxidelens` (`crates/oxl-cli`). Every command prints one
+It has an engine (`crates/oxl-engine`), a desktop app (`crates/oxl-app`,
+below) and a command-line tool, `oxidelens` (`crates/oxl-cli`). Every command prints one
 JSON document, so the same tool serves an analyst at a shell and an AI agent
 driving it as a tool. Evidence is never modified: the case is a separate file
 and the run's output is only read.
@@ -130,6 +131,13 @@ enforces what each may do, and the CLI adds no rules of its own:
   removes only tags it applied and deletes only notes it wrote.
 - An agent cannot declare a column's type, choose a relation's primary time
   or remove a source.
+- In the case record (below), an agent changes and deletes only its own
+  unreviewed entries and records. Its change to an analyst's entry or record,
+  its S on an analyst's mark, its review of anything, its link from an
+  analyst's entry and its merge, detach or unlink of an analyst's items are
+  `refused`, and the message names the owner and says that proposals arrive
+  with the Review tab (a later step). An analyst's S on a row an agent marked
+  takes the mark over.
 
 ## Commands
 
@@ -201,6 +209,71 @@ linking from an analyst's entry is `refused`, and the message names the owner.
 Titles, descriptions, notes, names, IOC values, evidence summaries, sighting
 and logon hosts and export paths come back inside the `untrusted` wrapper; each
 item's text carries the `id` (or `row_id`, `index`) of its other half outside.
+
+## The case record
+
+Step 3 adds the analyst's record of the case to the case file: **timeline
+entries** with the rows they rest on attached as **evidence**, and **host**,
+**account** and **IOC** records linked to entries. Every change to a mark,
+tag, note, entry, evidence link, record or record link writes one `history`
+row in the same transaction (who, when, before, after); nothing changes or
+deletes history.
+
+**Case format 3.** A command that writes (and the app) opens a format 1 or 2
+case and upgrades it in place, `1 → 2 → 3` in one transaction, with one
+`case_upgrade` history row per step; every source, relation, mark, tag, note
+and saved view is kept, and a run whose sessions an earlier upgrade lost has
+them read again. A read-only command reads an older case as it is: it has no
+entries or records, and its marks are the Suspicious marks it holds. A case
+newer than the build is `needs_upgrade`.
+
+**Marks.** A row is **Suspicious** (`mark set`), **Malicious** when it is
+evidence on a live entry an analyst created or reviewed, or **Agent:
+malicious** when it is evidence only on an agent's unreviewed entries. The
+`_mark` pseudo-column filters on that state.
+
+**Entries.** `entry promote` (M in the app) makes one entry per row, timed by
+the row's primary time when it gives a UTC instant (`time_source` `row`), and
+with no time otherwise: "needs a time", listed and exported after every dated
+entry, refused for `reviewed` until it is given one (`time_source` `typed`).
+A zone is never guessed. Attaching a row links the entry to the host record
+of the row's host, creating it when the case has none; that link cannot be
+removed while the entry holds evidence from the host.
+
+**Rows one action takes.** `mark set` and `clear`, `tag add` and `remove`,
+`entry promote` and `entry attach` take at most 10,000 rows per call, from
+any actor, and refuse more with "select at most 10,000 rows (you have N)"; an
+agent takes at most 1,000.
+
+**Evidence through later runs.** Each evidence row keeps a snapshot of the
+row as attached. When a later run of the same host supersedes it, the
+evidence moves to the identical new row (same content hash); with none, it
+stays on the old row, listed `superseded` ("from a superseded run").
+`entry show` re-checks each row on every read: `unchanged`, `changed`,
+`superseded` or `source_removed`. Removing a source whose rows hold evidence
+needs `--confirm-orphans`, and every snapshot is kept.
+
+**Computed, never stored.** `ioc sightings` is Find (exact, case ignored) for
+the IOC's value, run when asked. `account logons` reads `evtxtriage_events`'
+Security 4624 and 4625 rows: the account is `PayloadData1` after `Target: `
+(domain and name split at the last `\`), the logon type the integer after
+`LogonType ` in `PayloadData2`; an account matches by name and domain, ASCII
+case ignored, and a row that does not read that way is counted `unparsed`,
+never guessed.
+
+**Exports.** `export timeline`, `workbook` and `report` write a new file
+(into `<path>.partial`, renamed into place when complete), never the case
+file, its log or a path inside a loaded run, and read the whole record in one
+snapshot. The timeline CSV holds every cell byte for byte as the case holds
+it. The workbook has the sheets `Timeline`, `Hosts`, `Accounts` and `IOCs`,
+each with a header row, and writes every cell as a string, never a formula, a
+number or a link. The Markdown report has a title, the case name and the
+export time, then one table per sheet, with every value from the case
+escaped (`\`, `` ` ``, `|`, `<`, `>`, `[`, `]`, `*`, `_`, a line break as a
+space), bidirectional and invisible formatting characters written as visible
+escapes (`\u{202E}`), and every `://` written `[:]//`, so nothing in it
+renders as markup or a link. Evidence is named `relation#row_id`, and a list
+in one cell is joined with `; `.
 
 `QUERY` is the set of options every command that reads a relation shares:
 
@@ -445,15 +518,11 @@ query result, they come back only inside the untrusted wrapper. One residual
 of the qualifier rule: a case file whose name spells an allowed qualifier
 can be read as a table from its own folder.
 
-## Not in step 1
+## Still to come
 
-Step 1 reads and annotates in UTC only. Still to come:
+Steps 1 to 3 built the engine and CLI, the desktop app with display zones,
+saved views and colour rules, and the case record. Still to come:
 
-- display time zones and zone-aware histogram buckets;
-- saved views, presets and colour rules;
-- XLSX export;
-- timeline entries, case sheets (hosts, accounts, IOCs, evidence snapshots)
-  and the Malicious and Agent mark states;
-- the desktop app and the bridge that lets the CLI drive an open app;
-- agent proposals and the review queue;
+- the bridge that lets the CLI drive an open app;
+- agent proposals and the review queue (the Review tab);
 - running TriageSuite from OxideLens (processing).

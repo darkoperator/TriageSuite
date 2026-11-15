@@ -5,8 +5,8 @@ TypeScript front end (`app/`). The engine (`crates/oxl-engine`) holds every
 rule; the backend drives it from a window, and the front end renders what the
 backend answers and keeps what it is showing. These notes cover how to run it,
 the contract between the two halves, how queries are superseded and
-cancelled, the conventions front-end code follows, where state is kept, and
-the debug-only bridge an agent can drive
+cancelled, the conventions front-end code follows, the case record's screens
+and keys, where state is kept, and the debug-only bridge an agent can drive
 the window through. All names in the examples are synthetic.
 
 ## Running it
@@ -84,15 +84,25 @@ root runs them all. Three ignored tests are run on purpose:
   full-width blocks of the widest relations. The test's header lists the
   variables that choose the columns.
 
-Both open the case through the app, which upgrades a format-1 case in place,
-and the walkthrough writes to it (the display zone and a saved view). **Run
-them on a copy, never on an analyst's case.**
+Both open the case through the app, which upgrades a format 1 or 2 case in
+place, and the walkthrough writes to it: the display zone, a saved view, marks,
+entries, records and IOCs, and its exports next to the case file.
+`real_case_walkthrough` also times the case record there: M on 1,000 rows, a
+re-check of 100 evidence rows, the four sheet lists, *Sweep all* over 20 IOCs
+and the three exports. **Run them on a copy, never on an analyst's case.**
 
 `tests/walkthrough.rs` is also an ordinary test on the two-host fixture: new
 case, load the run, open `evtxtriage_events`, filter row `Security`, exclude
 `4624` in the Values tab, group by `Channel` then `EventId`, brush the
 histogram, switch the zone to `America/New_York` and check a time, save a
 view, close and reopen the case, apply the view, export CSV, open a session.
+Then the case record, on a case with WS01's logons (`two_hosts_logons`):
+S on three rows, M on one, take the account and the IOC the candidates offer,
+read the account's logons and the IOC's sightings, mark the entry reviewed,
+export the timeline, workbook and report, and read the four sheets; and on
+the first case, evidence through a later run (`rerun_ws01_events`): one
+evidence row moves to its identical new row, the other stays "from a
+superseded run", and removing the first run is refused until confirmed.
 It calls the same command functions the window's `invoke` reaches, with the
 arguments the front end builds, so a change that breaks the window's main path
 fails `cargo test`. What it cannot see is rendering: layout, focus and drawing
@@ -271,11 +281,83 @@ also renders the mock's hostile rows. For each async path, a test holds the
 first answer back, changes the state, then releases the answer and asserts
 it is not drawn.
 
+## The case record in the window
+
+The case record's screens are four sheets pinned after the Overview tab,
+**Timeline**, **Hosts**, **Accounts** and **IOCs**, each tab with a count (one
+page, up to 1,000, then `1000+`), and the editors they open in the right pane.
+Every rule is the engine's: the screens send what the analyst asked for and
+show the engine's answer, or its refusal in place (the status bar for a row
+key, the editor for an edit), never in a dialog.
+
+**Marks.** Suspicious amber ● `#f5a524`, Malicious red ■ `#f0565b`, Agent:
+malicious purple ◆ `#a78bfa` (the light theme uses contrast-adjusted shades of
+the same three); nothing else uses these colours or glyphs, and a colour rule
+never hides a mark. The left pane counts each state and opens the worklist of
+its rows across every dataset; a dataset with marked rows shows its name in
+the colour of its most severe mark, with the count beside it.
+
+**The row keys** on a dataset grid (`records/useRowActions.tsx`), inactive
+while a text field has focus or with Ctrl, Alt or Meta held:
+
+| Key | What it does |
+|---|---|
+| S | Mark the selection Suspicious; no dialog, no confirmation |
+| U | Clear its Suspicious marks; no dialog |
+| M | Make a timeline entry per row, with the row as evidence, and show it in the entry editor; no dialog |
+| T | Tag or untag the selection (a small dialog) |
+| N | A note on the focused row (a small dialog) |
+| A | Attach the selection to an entry picked from the most recent, typing to narrow |
+| I | The focused cell's value as a new IOC, its type the engine's guess, confirmed before it is added |
+
+Each acts on the row ids the grid resolved the selection to before it writes,
+at most 10,000 (more is refused in the status bar with the count); after the
+re-read that follows, the selection is rebuilt from those ids. On a grouped
+grid the keys act on the focused data row, and I is the only cell key; a
+merged tab has the row keys but no I. The key strip lists only the keys live
+on the tab shown. The row detail lists the entries holding the row, each
+labelled "added by agent: <name>" when an agent made it.
+
+**Timeline** (`records/TimelineSheet.tsx`): the entries by time, the undated
+("needs a time") last, as a table or as Host lanes on one time axis;
+filtered by text, status, host and tactic, and grouped by host, tactic or
+status; past 1,000 entries it pages. Keys on the table: ↑ ↓ select, N new
+entry, Enter edit, R mark reviewed, Del remove (the evidence rows stay in
+their datasets).
+
+**The entry editor** (`records/EntryEditor.tsx`): the time in UTC with where
+it came from (the row or typed), title, description, ATT&CK tactic and
+technique ids, status with *Mark reviewed* (refused for an undated entry),
+the records it links (each opens its sheet with the record selected; more
+are linked from a picker that filters through the engine and pages), its
+evidence rows, each re-checked on every read (unchanged, changed, from a
+superseded run, source removed) and opening its dataset at the row, its
+history, and after M the **candidates**: the accounts and IOCs its rows name,
+each added and linked with one click.
+
+**Hosts, Accounts and IOCs** (`records/RecordSheet.tsx`): a grid of the
+records with the engine's computed columns (entries, first and last seen,
+hosts seen), a filter row and header sorts that go to the engine, grouping,
+and the record editor in the right pane. Keys: ↑ ↓ select, Enter edit. An
+account's editor shows its **logon summary**: successes and failures by host
+and logon type, each count opening its rows in a dataset tab with a chip that
+reads as the account (`Logons: ACME\jdoe · type 10 · WS01 · success`), and
+the rows that do not parse counted. The IOCs sheet has *Find sightings* per
+IOC and *Sweep all*, one IOC at a time on the `sightings` slot with its
+progress and *Cancel*; what they find is kept in the window until the next
+`case-changed`, and *Show hits* opens the find as a merged tab. A grid cell
+whose value is a live IOC is underlined.
+
+**Export** in the top bar writes the timeline CSV, the XLSX workbook or the
+Markdown report through a save dialog, as the status-bar export job with its
+cancel; a cancel is the neutral line "Export cancelled.", and a refusal (the
+case file, a path inside a loaded run) is shown as the engine words it.
+
 ## What is kept where
 
 | Where | What |
 |---|---|
-| **The case file** (travels with the case) | Sources, relations and rows; marks, tags and notes; the history; saved views and filter presets; the display zone (`ox.setting`, default `UTC`); the run sessions each load read |
+| **The case file** (travels with the case) | Sources, relations and rows; marks, tags and notes; timeline entries and their evidence (with each row's snapshot), host, account and IOC records and their links; the history; saved views and filter presets; the display zone (`ox.setting`, default `UTC`); the run sessions each load read |
 | **The settings file** (per machine): `settings.json` in the app's config directory | Theme (dark or light), the grid's font size (10 to 16 px), the side panes (open or folded), the histogram strip on or off, column layouts per dataset, colour rules per dataset, recent cases (the newest 10), the analyst name |
 | **The webview's localStorage** (per machine, per case) | The open tabs and each tab's scroll position, under `oxl.tabs.v1.<case_id>` |
 

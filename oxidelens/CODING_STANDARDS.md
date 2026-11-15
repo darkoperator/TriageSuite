@@ -18,7 +18,8 @@ and say what input or event sequence breaks it.
     values;
   - a rollback test that fails before the step it claims to undo;
   - a check that reads only the first element of a list;
-  - a "not drawn" test that never holds an answer back.
+  - a "not drawn" test that never holds an answer back;
+  - a race or cancel test that pauses before the work it claims to hold.
 - **The test proves what its name says.** If the name says "across cases",
   the test opens two different cases, not the same one twice.
 - **Evidence is never written.** A file the app or CLI writes is new
@@ -29,6 +30,9 @@ and say what input or event sequence breaks it.
   read, a JSON document, a directory listing, a list of windows. The bound
   holds for what a later step re-reads: a document saved under a cap must
   still import under that cap.
+- **A read is bounded by its page, not by the case.** Look for a query
+  whose rows are all collected (a `Vec`, a map, every distinct value) before
+  the limit, the match or the count is applied.
 - **SQL values are bound; identifiers come from the catalog through
   `quote_ident`.** Every `ox` table and column has a `COMMENT`. Host names in
   code, tests and docs are synthetic (`WS01`, `SRV01`, `acme.local`).
@@ -57,7 +61,8 @@ The patterns are described in [docs/APP.md](docs/APP.md#writing-front-end-code).
   catch focus that goes to `body`.)
 - **The front end holds no rules.** It does no trimming, capping or
   validating that the backend already does, no parsing of times or of stored
-  text with a regex, and no glob matching. When the screen needs a fact, the
+  text with a regex, no glob matching, and no sorting of a loaded page
+  where the list has more. When the screen needs a fact, the
   engine or the contract gains a field. Names the analyst types are checked by
   the backend, whose refusal the screen shows.
 - **Untrusted text stays text.** A string from the case is rendered through
