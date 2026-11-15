@@ -9,8 +9,9 @@ use oxl_engine::filter::{MAX_DEPTH, MAX_IN, MAX_LEAVES, MAX_REGEX};
 use oxl_engine::search::{MAX_SEARCH, MAX_TERMS};
 use oxl_engine::{RelationKind, Result};
 use oxl_engine::{
-    AGENT_ROWS_PER_CALL, CASE_FORMAT, CELL_CAP, DEFAULT_LIMIT, MAX_LIMIT, MAX_NOTE, MAX_TAG,
-    MAX_VALUE, SQL_MEMORY_LIMIT,
+    AGENT_ROWS_PER_CALL, CASE_FORMAT, CELL_CAP, DEFAULT_LIMIT, MAX_ACTION_ROWS, MAX_DESCRIPTION,
+    MAX_IOC_VALUE, MAX_LIMIT, MAX_NOTE, MAX_RECORD_LABEL, MAX_RECORD_NAME, MAX_RECORD_NOTE,
+    MAX_TAG, MAX_TECHNIQUES, MAX_TITLE, MAX_VALUE, SQL_MEMORY_LIMIT,
 };
 use serde_json::json;
 
@@ -123,7 +124,163 @@ const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "history",
-        "Every change made to the case, newest first: history [--kind source|relation|row_mark|row_tag|note|case|saved_view|entry|evidence|host|account|ioc|link] [--limit N] [--offset N]",
+        "Every change made to the case, newest first: history [--kind source|relation|row_mark|row_tag|note|case|saved_view|entry|evidence|host|account|ioc|link [--id <target id>]] [--limit N] [--offset N]. --id needs --kind and names one target: an entry, host, account or IOC by its id (12 or E-12), an evidence link as <entry>:<row>",
+    ),
+    (
+        "entry list",
+        "List the live timeline entries, by time with the undated last: entry list [--status draft|unreviewed|reviewed]... [--host <name>] [--tactic <tactic>] [--text <text>] [--limit N] [--offset N]. Ids are numbers, shown as E-12; titles, descriptions and host names are inside the untrusted wrapper",
+    ),
+    (
+        "entry show",
+        "One entry and every row attached to it: entry show <id>. Each evidence row says whether it is unchanged, changed, superseded or source_removed",
+    ),
+    (
+        "entry add",
+        "Write an entry: entry add --title <t> [--description <text | @file>] [--time <UTC>] [--tactic <tactic>] [--technique T1059,T1059.001]. An agent's entries are unreviewed and labelled as added by the agent. An entry with no time is undated and cannot be reviewed until it has one",
+    ),
+    (
+        "entry edit",
+        "Change the fields given: entry edit <id> [--title t] [--description <text | @file>] [--time <UTC>] [--tactic <t>] [--technique a,b | --clear-techniques]. An empty --time or --tactic clears it. An agent edits only its own unreviewed entries; changing an analyst's is refused",
+    ),
+    (
+        "entry status",
+        "Set an entry's status (analyst only; an agent is refused, for its own entries too): entry status <id> draft|unreviewed|reviewed. reviewed needs a time",
+    ),
+    (
+        "entry delete",
+        "Delete an entry, leaving its history: entry delete <id>. An agent deletes only its own unreviewed entries",
+    ),
+    (
+        "entry promote",
+        "Make an entry from each row, as M does in the app: entry promote --rows <1,2,3 | @file>. Reports each row's outcome; an agent promotes at most 1,000 rows per call",
+    ),
+    (
+        "entry attach",
+        "Attach rows to an entry as evidence, by row id: entry attach <id> --rows <1,2,3 | @file>. Links the entry to each row's host record. Reports each row's outcome",
+    ),
+    (
+        "entry detach",
+        "Detach a row from an entry: entry detach <id> --row <row id>",
+    ),
+    (
+        "evidence list",
+        "The rows attached to an entry, each compared with the case now: evidence list --entry <id> [--limit N] [--offset N]. The relation, host and summary text are inside the untrusted wrapper",
+    ),
+    (
+        "host list",
+        "List the live host records: host list [--limit N] [--offset N]. Ids are numbers, shown as H-3",
+    ),
+    (
+        "host show",
+        "One host record and a page of the entries linked to it: host show <id> [--limit N] [--offset N]",
+    ),
+    (
+        "host add",
+        "Write a host record: host add --name <name> [--role <role>] [--note <text | @file>]. An agent's are unreviewed",
+    ),
+    (
+        "host edit",
+        "Change the fields given: host edit <id> [--name n] [--role r] [--note <text | @file>]. An agent edits only its own unreviewed records",
+    ),
+    (
+        "host delete",
+        "Delete a host record and its links: host delete <id>. An agent deletes only its own unreviewed records",
+    ),
+    (
+        "host merge",
+        "Merge a host record into another, which keeps its fields: host merge --from <id> --into <id>. An agent merges only its own unreviewed records",
+    ),
+    (
+        "host status",
+        "Set a host record's status (analyst only): host status <id> unreviewed|reviewed",
+    ),
+    (
+        "account list",
+        "List the live account records: account list [--limit N] [--offset N]. Ids are numbers, shown as A-7",
+    ),
+    (
+        "account show",
+        "One account record and a page of the entries linked to it: account show <id> [--limit N] [--offset N]",
+    ),
+    (
+        "account add",
+        "Write an account record: account add --name <n> [--domain d] [--sid S-1-...] [--description <text | @file>] [--privilege standard|local_admin|domain_admin|service|unknown] [--note <text | @file>]",
+    ),
+    (
+        "account edit",
+        "Change the fields given: account edit <id> [--name n] [--domain d] [--sid s] [--description t] [--privilege p] [--note t]. An empty --domain or --sid clears it",
+    ),
+    (
+        "account delete",
+        "Delete an account record and its links: account delete <id>",
+    ),
+    (
+        "account merge",
+        "Merge an account record into another: account merge --from <id> --into <id>",
+    ),
+    (
+        "account status",
+        "Set an account record's status (analyst only): account status <id> unreviewed|reviewed",
+    ),
+    (
+        "account logons",
+        "Count the account's Security 4624 and 4625 logons by host and logon type: account logons --id <id>. unparsed counts events that do not read as a logon. Each count's filter, inside the wrapper, opens its rows",
+    ),
+    (
+        "ioc list",
+        "List the live IOC records: ioc list [--type <type>] [--tool <tool>] [--text <text>] [--limit N] [--offset N]. Types: ip, domain, hostname, url, email, md5, sha1, sha256, file_name, file_path, registry_key, service, scheduled_task, other. Ids are numbers, shown as I-40",
+    ),
+    (
+        "ioc show",
+        "One IOC record and a page of the entries linked to it: ioc show <id> [--limit N] [--offset N]",
+    ),
+    (
+        "ioc add",
+        "Write an IOC record: ioc add --type <type> --value <value> [--tool t] [--attack-id T1059,...] [--note <text | @file>]. The value is validated for its type and stored in canonical form",
+    ),
+    (
+        "ioc edit",
+        "Change the fields given: ioc edit <id> [--type t] [--value v] [--tool t] [--attack-id a,b | --clear-attack-ids] [--note t]. An empty --tool clears it",
+    ),
+    (
+        "ioc delete",
+        "Delete an IOC record and its links: ioc delete <id>",
+    ),
+    (
+        "ioc merge",
+        "Merge an IOC record into another: ioc merge --from <id> --into <id>",
+    ),
+    (
+        "ioc status",
+        "Set an IOC record's status (analyst only): ioc status <id> unreviewed|reviewed",
+    ),
+    (
+        "ioc sightings",
+        "Where the IOC's value occurs in the loaded data (Find, exact, case ignored): ioc sightings --id <id>. Computed each time, never stored",
+    ),
+    (
+        "link add",
+        "Link an entry to a record: link add --entry <id> --kind host|account|ioc --id <record id>. An agent links only from its own unreviewed entries",
+    ),
+    (
+        "link remove",
+        "Remove the link: link remove --entry <id> --kind host|account|ioc --id <record id>. A host stays linked while the entry holds evidence from it",
+    ),
+    (
+        "candidates",
+        "The accounts and IOCs a row names, for the analyst to record: candidates --row <id>. existing_id says which the case already has",
+    ),
+    (
+        "export timeline",
+        "Write the live entries as CSV, in the timeline's order: export timeline <path>. The file is new; the case, a folder and a loaded source's folder are refused",
+    ),
+    (
+        "export workbook",
+        "Write the timeline, hosts, accounts and IOCs as an XLSX workbook, every cell a string, never a formula: export workbook <path>",
+    ),
+    (
+        "export report",
+        "Write the timeline, hosts, accounts and IOCs as a Markdown report with every value escaped: export report <path>",
     ),
     (
         "query",
@@ -212,6 +369,14 @@ pub fn capabilities() -> Reply {
             "agent_rows_per_call": AGENT_ROWS_PER_CALL,
             "tag_chars": MAX_TAG,
             "note_chars": MAX_NOTE,
+            "entry_title_chars": MAX_TITLE,
+            "entry_description_chars": MAX_DESCRIPTION,
+            "entry_techniques": MAX_TECHNIQUES,
+            "record_name_chars": MAX_RECORD_NAME,
+            "record_label_chars": MAX_RECORD_LABEL,
+            "record_note_chars": MAX_RECORD_NOTE,
+            "ioc_value_chars": MAX_IOC_VALUE,
+            "action_rows_max": MAX_ACTION_ROWS,
             "around_window_seconds_max": MAX_WINDOW_SECONDS,
             "query_rows_max": MAX_LIMIT,
             "query_memory": SQL_MEMORY_LIMIT,

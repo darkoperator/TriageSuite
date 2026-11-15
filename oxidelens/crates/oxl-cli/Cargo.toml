@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 oxl-engine.workspace = true
 clap = { workspace = true, features = ["env"] }
+serde.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true
 

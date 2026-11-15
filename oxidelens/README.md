@@ -168,7 +168,39 @@ command and limit and needs no case.
 | `note list --row <id> [--limit N] [--offset N]` | A row's notes, with its `standing` and `current_row` as `row` gives them |
 | `column declare <relation> <column> --type TIMESTAMP\|BIGINT\|UBIGINT\|BOOLEAN [--semantics utc\|unknown]` | Type a column (analyst only) |
 | `column primary-time <relation> (<column> \| --none)` | Set or clear the time a relation's timeline runs on (analyst only) |
-| `history [--kind K] [--limit N] [--offset N]` | Every change, newest first; `K` is `source`, `relation`, `row_mark`, `row_tag` or `note` |
+| `history [--kind K [--id ID]] [--limit N] [--offset N]` | Every change, newest first; `K` is `source`, `relation`, `row_mark`, `row_tag`, `note`, `case`, `saved_view`, `entry`, `evidence`, `host`, `account`, `ioc` or `link`. `--id` (needs `--kind`) is one target: an entry, host, account or IOC by its number or `E-12` form, an evidence link as `<entry>:<row>` |
+| `entry list [--status S]... [--host H] [--tactic T] [--text T] [--limit N] [--offset N]` | The timeline's live entries, by time with the undated last; `S` is `draft`, `unreviewed` or `reviewed` |
+| `entry show <id>` | One entry and its evidence rows, each `unchanged`, `changed`, `superseded` or `source_removed` |
+| `entry add --title T [--description <text \| @file>] [--time <UTC>] [--tactic T] [--technique T1059,...]` | Write an entry; an agent's is `unreviewed` and `agent_added` |
+| `entry edit <id> [--title T] [--description ..] [--time <UTC> \| ""] [--tactic T \| ""] [--technique a,b \| --clear-techniques]` | Change the fields given; an empty `--time` or `--tactic` clears it |
+| `entry status <id> draft\|unreviewed\|reviewed` | Set the status (analyst only; `reviewed` needs a time) |
+| `entry delete <id>` | Delete an entry; the history keeps it |
+| `entry promote --rows 1,2,3` | Make an entry from each row, as M does in the app; the reply gives each row's outcome |
+| `entry attach <id> --rows 1,2,3` | Attach rows to an entry as evidence, by row id |
+| `entry detach <id> --row <row id>` | Detach a row |
+| `evidence list --entry <id> [--limit N] [--offset N]` | The rows attached to an entry |
+| `host\|account\|ioc list [--limit N] [--offset N]` | The live records (`ioc list` also takes `--type`, `--tool`, `--text`); ids are numbers, shown `H-3`, `A-7`, `I-40` |
+| `host\|account\|ioc show <id> [--limit N] [--offset N]` | One record and a page of the entries linked to it |
+| `host add --name N [--role R] [--note <text \| @file>]` | Write a host record |
+| `account add --name N [--domain D] [--sid S] [--description ..] [--privilege P] [--note ..]` | Write an account record; `P` is `standard`, `local_admin`, `domain_admin`, `service` or `unknown` |
+| `ioc add --type T --value V [--tool X] [--attack-id T1059,...] [--note ..]` | Write an IOC record; the value is validated for its type and stored in canonical form |
+| `host\|account\|ioc edit <id> [FIELDS]` | Change the fields given, as `add` names them; an empty `--domain`, `--sid` or `--tool` clears it, `--clear-attack-ids` empties an IOC's list |
+| `host\|account\|ioc delete <id>` | Delete a record and its links |
+| `host\|account\|ioc merge --from <id> --into <id>` | Move every link of one record to another and delete the first |
+| `host\|account\|ioc status <id> unreviewed\|reviewed` | Set the status (analyst only) |
+| `link add\|remove --entry <id> --kind host\|account\|ioc --id <record id>` | Link an entry to a record, or remove the link (a host stays linked while the entry holds evidence from it) |
+| `candidates --row <id>` | The accounts and IOCs a row names; `existing_id` says which the case already has |
+| `ioc sightings --id <id>` | Where the IOC's value occurs in the loaded data (Find, exact), computed each time |
+| `account logons --id <id>` | The account's Security 4624 and 4625 logons by host and logon type; each count's `filter` opens its rows |
+| `export timeline\|workbook\|report <path>` | Write the timeline as CSV, or the timeline, hosts, accounts and IOCs as an XLSX workbook (every cell a string) or a Markdown report (every value escaped); the file is new |
+
+Everything an agent creates is `unreviewed`, labelled `agent_added`, and
+stays so after an analyst reviews it. An agent changes only its own
+unreviewed entries and records; changing an analyst's, reviewing anything, or
+linking from an analyst's entry is `refused`, and the message names the owner.
+Titles, descriptions, notes, names, IOC values, evidence summaries, sighting
+and logon hosts and export paths come back inside the `untrusted` wrapper; each
+item's text carries the `id` (or `row_id`, `index`) of its other half outside.
 
 `QUERY` is the set of options every command that reads a relation shares:
 
@@ -310,7 +342,7 @@ process exit codes:
 
 Any number of commands that only read the case run at once. A command that
 changes it (`load`, `source remove`, `mark set` and `clear`, `tag add` and
-`remove`, `note add` and `delete`, the `column` commands), and `case compact`, which writes its copy from a case
+`remove`, `note add` and `delete`, the `column` commands, and the `entry`, `host`, `account`, `ioc` and `link` commands that write), and `case compact`, which writes its copy from a case
 opened that way, need the case to
 themselves: each reports `case_locked` while any other command has the case open,
 and every other command reports it until the change is done. Nothing waits;
@@ -354,6 +386,9 @@ remain.
 | Rows an agent marks or tags per call | 1,000 |
 | Tag | 64 characters of `a-z 0-9 : _ . -` (stored lower-case) |
 | Note | 10,000 characters |
+| Entry title, description, technique ids | `capabilities` gives the limits: `entry_title_chars`, `entry_description_chars`, `entry_techniques` |
+| Record name, label, note; IOC value | `record_name_chars`, `record_label_chars`, `record_note_chars`, `ioc_value_chars` |
+| Rows one action takes | `action_rows_max` (10,000); an agent 1,000 per call |
 | `around` window | at most 24h (`30s`, `5m`, `1h`) |
 | `query` rows, memory, time, length | 1,000 rows at a time, 2 GiB, 30 s (`--timeout`, 1 to 600 s), 100,000 characters |
 

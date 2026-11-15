@@ -124,12 +124,43 @@ pub enum Command {
     /// Declare a column's type or a relation's primary time.
     #[command(subcommand)]
     Column(ColumnCmd),
+    /// Work the case's timeline entries: list, show, write, review, attach evidence.
+    #[command(subcommand)]
+    Entry(EntryCmd),
+    /// List the rows attached to an entry as evidence.
+    #[command(subcommand)]
+    Evidence(EvidenceCmd),
+    /// Work the case's host records.
+    #[command(subcommand)]
+    Host(HostCmd),
+    /// Work the case's account records, and read an account's logons.
+    #[command(subcommand)]
+    Account(AccountCmd),
+    /// Work the case's IOC records, and read an IOC's sightings.
+    #[command(subcommand)]
+    Ioc(IocCmd),
+    /// Link an entry to a host, account or IOC record, or remove the link.
+    #[command(subcommand)]
+    Link(LinkCmd),
+    /// The accounts and IOCs a row names, for the analyst to record.
+    Candidates {
+        /// The row to read.
+        #[arg(long)]
+        row: i64,
+    },
+    /// Write the timeline, a workbook or a report to a file.
+    #[command(subcommand)]
+    Export(ExportCmd),
     /// List the changes made to the case, newest first.
     History {
         /// Only this kind of target: source, relation, row_mark, row_tag, note, case,
         /// saved_view, entry, evidence, host, account, ioc or link.
         #[arg(long)]
         kind: Option<String>,
+        /// Only this target's changes; needs --kind. An entry, host, account or IOC by
+        /// its id (12 or E-12); an evidence link as <entry>:<row>.
+        #[arg(long, requires = "kind")]
+        id: Option<String>,
         #[command(flatten)]
         page: PageArgs,
     },
@@ -454,6 +485,473 @@ impl Command {
             Command::Column(ColumnCmd::Declare { .. }) => "column declare",
             Command::Column(ColumnCmd::PrimaryTime { .. }) => "column primary-time",
             Command::History { .. } => "history",
+            Command::Entry(c) => match c {
+                EntryCmd::List { .. } => "entry list",
+                EntryCmd::Show { .. } => "entry show",
+                EntryCmd::Add { .. } => "entry add",
+                EntryCmd::Edit { .. } => "entry edit",
+                EntryCmd::Status { .. } => "entry status",
+                EntryCmd::Delete { .. } => "entry delete",
+                EntryCmd::Promote(_) => "entry promote",
+                EntryCmd::Attach { .. } => "entry attach",
+                EntryCmd::Detach { .. } => "entry detach",
+            },
+            Command::Evidence(EvidenceCmd::List { .. }) => "evidence list",
+            Command::Host(c) => match c {
+                HostCmd::List { .. } => "host list",
+                HostCmd::Show { .. } => "host show",
+                HostCmd::Add { .. } => "host add",
+                HostCmd::Edit { .. } => "host edit",
+                HostCmd::Delete { .. } => "host delete",
+                HostCmd::Merge { .. } => "host merge",
+                HostCmd::Status { .. } => "host status",
+            },
+            Command::Account(c) => match c {
+                AccountCmd::List { .. } => "account list",
+                AccountCmd::Show { .. } => "account show",
+                AccountCmd::Add { .. } => "account add",
+                AccountCmd::Edit { .. } => "account edit",
+                AccountCmd::Delete { .. } => "account delete",
+                AccountCmd::Merge { .. } => "account merge",
+                AccountCmd::Status { .. } => "account status",
+                AccountCmd::Logons { .. } => "account logons",
+            },
+            Command::Ioc(c) => match c {
+                IocCmd::List { .. } => "ioc list",
+                IocCmd::Show { .. } => "ioc show",
+                IocCmd::Add { .. } => "ioc add",
+                IocCmd::Edit { .. } => "ioc edit",
+                IocCmd::Delete { .. } => "ioc delete",
+                IocCmd::Merge { .. } => "ioc merge",
+                IocCmd::Status { .. } => "ioc status",
+                IocCmd::Sightings { .. } => "ioc sightings",
+            },
+            Command::Link(LinkCmd::Add(_)) => "link add",
+            Command::Link(LinkCmd::Remove(_)) => "link remove",
+            Command::Candidates { .. } => "candidates",
+            Command::Export(c) => match c {
+                ExportCmd::Timeline { .. } => "export timeline",
+                ExportCmd::Workbook { .. } => "export workbook",
+                ExportCmd::Report { .. } => "export report",
+            },
         }
     }
+}
+
+/// `12` or `<letter>-12` (an id as the case shows it: `E-12`) as 12.
+fn shown_id(text: &str, prefix: char) -> Result<i64, String> {
+    let digits = match text.split_once('-') {
+        Some((p, rest)) if p.eq_ignore_ascii_case(&prefix.to_string()) => rest,
+        _ => text,
+    };
+    let shown = || text.chars().take(40).collect::<String>();
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!(
+            "an id is a number, or {prefix}- and a number; not {:?}",
+            shown()
+        ));
+    }
+    digits
+        .parse::<i64>()
+        .map_err(|_| format!("{:?} is too large for an id", shown()))
+}
+
+/// The history target id for `text` as typed: an entry, host, account or IOC
+/// by its shown id (`E-12`) is its number, anything else is left as it is.
+pub fn target_id(kind: &str, text: &str) -> String {
+    let prefix = match kind {
+        "entry" => 'E',
+        "host" => 'H',
+        "account" => 'A',
+        "ioc" => 'I',
+        _ => return text.to_string(),
+    };
+    shown_id(text, prefix).map_or_else(|_| text.to_string(), |n| n.to_string())
+}
+
+/// The id of a record of `kind` as typed: `12`, or `H-12` for a host.
+pub fn record_id_of(kind: oxl_engine::RecordKind, text: &str) -> oxl_engine::Result<i64> {
+    let prefix = kind.prefix().chars().next().unwrap_or('?');
+    shown_id(text, prefix).map_err(oxl_engine::EngineError::Invalid)
+}
+
+fn entry_id(text: &str) -> Result<i64, String> {
+    shown_id(text, 'E')
+}
+fn host_id(text: &str) -> Result<i64, String> {
+    shown_id(text, 'H')
+}
+fn account_id(text: &str) -> Result<i64, String> {
+    shown_id(text, 'A')
+}
+fn ioc_id(text: &str) -> Result<i64, String> {
+    shown_id(text, 'I')
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum EntryStatusArg {
+    Draft,
+    Unreviewed,
+    Reviewed,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum RecordStatusArg {
+    Unreviewed,
+    Reviewed,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EntryCmd {
+    /// List the live entries in the timeline's order (by time, undated last).
+    List {
+        /// Only entries with this status; repeat for several.
+        #[arg(long = "status", value_enum)]
+        status: Vec<EntryStatusArg>,
+        /// Only entries linked to the host record of this name.
+        #[arg(long)]
+        host: Option<String>,
+        /// Only entries with this ATT&CK tactic.
+        #[arg(long)]
+        tactic: Option<String>,
+        /// Only entries whose title or description contains this text.
+        #[arg(long)]
+        text: Option<String>,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Show one entry with its evidence.
+    Show {
+        #[arg(value_parser = entry_id)]
+        id: i64,
+    },
+    /// Write a new entry.
+    Add {
+        #[arg(long)]
+        title: String,
+        /// The description, or @file to read it from a file.
+        #[arg(long)]
+        description: Option<String>,
+        /// A UTC time, YYYY-MM-DDTHH:MM:SS[.f]Z; none leaves the entry undated.
+        #[arg(long)]
+        time: Option<String>,
+        /// One of the fourteen ATT&CK Enterprise tactics.
+        #[arg(long)]
+        tactic: Option<String>,
+        /// ATT&CK technique ids, comma-separated (T1059 or T1059.001).
+        #[arg(long = "technique", value_delimiter = ',')]
+        techniques: Vec<String>,
+    },
+    /// Change the fields given; the others stay as they are.
+    Edit {
+        #[arg(value_parser = entry_id)]
+        id: i64,
+        #[arg(long)]
+        title: Option<String>,
+        /// The description, or @file to read it from a file.
+        #[arg(long)]
+        description: Option<String>,
+        /// A UTC time; an empty value clears it.
+        #[arg(long)]
+        time: Option<String>,
+        /// A tactic; an empty value clears it.
+        #[arg(long)]
+        tactic: Option<String>,
+        /// Technique ids, comma-separated; they replace the entry's.
+        #[arg(long = "technique", value_delimiter = ',')]
+        techniques: Vec<String>,
+        /// Remove every technique id.
+        #[arg(long, conflicts_with = "techniques")]
+        clear_techniques: bool,
+    },
+    /// Set an entry's status (analyst only).
+    Status {
+        #[arg(value_parser = entry_id)]
+        id: i64,
+        #[arg(value_enum)]
+        status: EntryStatusArg,
+    },
+    /// Delete an entry; its history stays.
+    Delete {
+        #[arg(value_parser = entry_id)]
+        id: i64,
+    },
+    /// Make an entry from each row, as M does in the app.
+    Promote(RowsArg),
+    /// Attach rows to an entry as evidence.
+    Attach {
+        #[arg(value_parser = entry_id)]
+        id: i64,
+        #[command(flatten)]
+        rows: RowsArg,
+    },
+    /// Detach a row from an entry.
+    Detach {
+        #[arg(value_parser = entry_id)]
+        id: i64,
+        #[arg(long)]
+        row: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EvidenceCmd {
+    /// The rows attached to an entry, each compared with the case now.
+    List {
+        #[arg(long, value_parser = entry_id)]
+        entry: i64,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HostCmd {
+    /// List the live host records.
+    List {
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Show one host record and a page of the entries linked to it.
+    Show {
+        #[arg(value_parser = host_id)]
+        id: i64,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Write a new host record.
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        role: Option<String>,
+        /// The note, or @file to read it from a file.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Change the fields given; the others stay as they are.
+    Edit {
+        #[arg(value_parser = host_id)]
+        id: i64,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+        /// The note, or @file to read it from a file.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Delete a host record; its links to entries are removed.
+    Delete {
+        #[arg(value_parser = host_id)]
+        id: i64,
+    },
+    /// Merge one host record into another; the first is deleted.
+    Merge {
+        #[arg(long, value_parser = host_id)]
+        from: i64,
+        #[arg(long, value_parser = host_id)]
+        into: i64,
+    },
+    /// Set a host record's status (analyst only).
+    Status {
+        #[arg(value_parser = host_id)]
+        id: i64,
+        #[arg(value_enum)]
+        status: RecordStatusArg,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AccountCmd {
+    /// List the live account records.
+    List {
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Show one account record and a page of the entries linked to it.
+    Show {
+        #[arg(value_parser = account_id)]
+        id: i64,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Write a new account record.
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long)]
+        sid: Option<String>,
+        /// The description, or @file to read it from a file.
+        #[arg(long)]
+        description: Option<String>,
+        /// standard, local_admin, domain_admin, service or unknown (the default).
+        #[arg(long)]
+        privilege: Option<String>,
+        /// The note, or @file to read it from a file.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Change the fields given; the others stay as they are. An empty
+    /// --domain or --sid clears it.
+    Edit {
+        #[arg(value_parser = account_id)]
+        id: i64,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long)]
+        sid: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        privilege: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Delete an account record; its links to entries are removed.
+    Delete {
+        #[arg(value_parser = account_id)]
+        id: i64,
+    },
+    /// Merge one account record into another; the first is deleted.
+    Merge {
+        #[arg(long, value_parser = account_id)]
+        from: i64,
+        #[arg(long, value_parser = account_id)]
+        into: i64,
+    },
+    /// Set an account record's status (analyst only).
+    Status {
+        #[arg(value_parser = account_id)]
+        id: i64,
+        #[arg(value_enum)]
+        status: RecordStatusArg,
+    },
+    /// Count the account's Security 4624 and 4625 logons by host and logon type.
+    Logons {
+        #[arg(long, value_parser = account_id)]
+        id: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IocCmd {
+    /// List the live IOC records.
+    List {
+        /// Only this type: ip, domain, hostname, url, email, md5, sha1, sha256, file_name,
+        /// file_path, registry_key, service, scheduled_task or other.
+        #[arg(long = "type")]
+        ioc_type: Option<String>,
+        /// Only IOCs of this tool.
+        #[arg(long)]
+        tool: Option<String>,
+        /// Only IOCs whose value, tool or note contains this text.
+        #[arg(long)]
+        text: Option<String>,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Show one IOC record and a page of the entries linked to it.
+    Show {
+        #[arg(value_parser = ioc_id)]
+        id: i64,
+        #[command(flatten)]
+        page: PageArgs,
+    },
+    /// Write a new IOC record.
+    Add {
+        #[arg(long = "type")]
+        ioc_type: String,
+        #[arg(long)]
+        value: String,
+        #[arg(long)]
+        tool: Option<String>,
+        /// ATT&CK technique ids, comma-separated.
+        #[arg(long = "attack-id", value_delimiter = ',')]
+        attack_ids: Vec<String>,
+        /// The note, or @file to read it from a file.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Change the fields given; the others stay as they are. An empty --tool clears it.
+    Edit {
+        #[arg(value_parser = ioc_id)]
+        id: i64,
+        #[arg(long = "type")]
+        ioc_type: Option<String>,
+        #[arg(long)]
+        value: Option<String>,
+        #[arg(long)]
+        tool: Option<String>,
+        /// ATT&CK technique ids, comma-separated; they replace the IOC's.
+        #[arg(long = "attack-id", value_delimiter = ',')]
+        attack_ids: Vec<String>,
+        /// Remove every ATT&CK id.
+        #[arg(long, conflicts_with = "attack_ids")]
+        clear_attack_ids: bool,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Delete an IOC record; its links to entries are removed.
+    Delete {
+        #[arg(value_parser = ioc_id)]
+        id: i64,
+    },
+    /// Merge one IOC record into another; the first is deleted.
+    Merge {
+        #[arg(long, value_parser = ioc_id)]
+        from: i64,
+        #[arg(long, value_parser = ioc_id)]
+        into: i64,
+    },
+    /// Set an IOC record's status (analyst only).
+    Status {
+        #[arg(value_parser = ioc_id)]
+        id: i64,
+        #[arg(value_enum)]
+        status: RecordStatusArg,
+    },
+    /// Where the IOC's value occurs in the loaded data (Find, exact).
+    Sightings {
+        #[arg(long, value_parser = ioc_id)]
+        id: i64,
+    },
+}
+
+/// Which link `link add` or `link remove` acts on.
+#[derive(Args, Debug)]
+pub struct LinkArgs {
+    #[arg(long, value_parser = entry_id)]
+    pub entry: i64,
+    /// host, account or ioc.
+    #[arg(long)]
+    pub kind: String,
+    /// The record's id, as the case shows it (12 or H-12, A-12, I-12).
+    #[arg(long)]
+    pub id: String,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LinkCmd {
+    /// Link an entry to a record.
+    Add(LinkArgs),
+    /// Remove the link from an entry to a record.
+    Remove(LinkArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ExportCmd {
+    /// The live entries as CSV, in the timeline's order.
+    Timeline {
+        /// The file to write; it is made new, never over a folder or the case.
+        path: PathBuf,
+    },
+    /// The timeline, hosts, accounts and IOCs as an XLSX workbook, every cell a string.
+    Workbook { path: PathBuf },
+    /// The timeline, hosts, accounts and IOCs as a Markdown report with evidence text escaped.
+    Report { path: PathBuf },
 }

@@ -6,6 +6,7 @@ mod case;
 mod describe;
 mod load;
 mod read;
+mod record;
 
 use crate::args::{CaseCmd, Cli, ColumnCmd, Command, LoadCmd, MarkCmd, NoteCmd, SourceCmd, TagCmd};
 use oxl_engine::{Actor, Case, EngineError, Result};
@@ -145,7 +146,17 @@ pub fn execute(cli: &Cli) -> Result<Reply> {
             column,
             none,
         }) => annot::primary_time(&ctx, relation, column.as_deref().filter(|_| !*none)),
-        Command::History { kind, page } => annot::history(&ctx, kind.as_deref(), page),
+        Command::History { kind, id, page } => {
+            annot::history(&ctx, kind.as_deref(), id.as_deref(), page)
+        }
+        Command::Entry(c) => record::entry(&ctx, c),
+        Command::Evidence(c) => record::evidence(&ctx, c),
+        Command::Host(c) => record::host(&ctx, c),
+        Command::Account(c) => record::account(&ctx, c),
+        Command::Ioc(c) => record::ioc(&ctx, c),
+        Command::Link(c) => record::link(&ctx, c),
+        Command::Candidates { row } => record::candidates(&ctx, *row),
+        Command::Export(c) => record::export(&ctx, c),
     }
 }
 

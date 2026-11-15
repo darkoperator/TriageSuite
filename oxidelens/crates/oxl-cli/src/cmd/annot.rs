@@ -23,7 +23,7 @@ use serde_json::json;
 /// spaces or new lines, in any mix. Anything else, an empty entry between
 /// commas included, is `invalid`: a stray comma is a typo, and acting on the
 /// rest would hide it.
-fn parse_rows(text: &str) -> Result<Vec<i64>> {
+pub(super) fn parse_rows(text: &str) -> Result<Vec<i64>> {
     // Names the entry that is wrong, cut short: the whole list can be tens of
     // thousands of ids, and an error that repeats it is no help.
     let invalid = |what: &str| {
@@ -59,7 +59,7 @@ fn parse_rows(text: &str) -> Result<Vec<i64>> {
 }
 
 /// A batch call that was accepted: exit 0 even when some rows were not done.
-fn outcomes_reply(outcomes: Vec<RowOutcome>) -> Reply {
+pub(super) fn outcomes_reply(outcomes: Vec<RowOutcome>) -> Reply {
     let done = outcomes.iter().filter(|o| o.done).count();
     Reply::new(json!({
         "done": done,
@@ -184,9 +184,14 @@ pub fn primary_time(ctx: &Ctx, relation: &str, column: Option<&str>) -> Result<R
     Ok(Reply::new(json!({"set": column.is_some()})))
 }
 
-pub fn history(ctx: &Ctx, kind: Option<&str>, page: &PageArgs) -> Result<Reply> {
+pub fn history(ctx: &Ctx, kind: Option<&str>, id: Option<&str>, page: &PageArgs) -> Result<Reply> {
     let case = ctx.read_case()?;
-    let entries = oxl_engine::history(&case, kind, None, page.limit, page.offset)?;
+    // An entry or record by the id the case shows (`E-12`) is its number.
+    let id = match (kind, id) {
+        (Some(kind), Some(id)) => Some(crate::args::target_id(kind, id)),
+        _ => None,
+    };
+    let entries = oxl_engine::history(&case, kind, id.as_deref(), page.limit, page.offset)?;
     Ok(Reply {
         data: json!({
             "entries": entries.items.len(),

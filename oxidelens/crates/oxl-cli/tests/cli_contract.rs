@@ -52,10 +52,76 @@ fn newest_source(p: &str) -> i64 {
         .unwrap()
 }
 
+/// Stand-ins in `calls` for the ids the record commands' own replies give:
+/// the first and second record of each kind a `... add` made, and the entry
+/// `entry promote` made.
+const ENTRY_ID: &str = "{entry id}";
+const PROMOTED_ID: &str = "{promoted entry id}";
+const HOST_ID: &str = "{host id}";
+const HOST2_ID: &str = "{host2 id}";
+const ACCOUNT_ID: &str = "{account id}";
+const ACCOUNT2_ID: &str = "{account2 id}";
+const IOC_ID: &str = "{ioc id}";
+const IOC2_ID: &str = "{ioc2 id}";
+
+/// The ids replies gave, by kind: `entry`, `host`, `account`, `ioc`, in the
+/// order they were made, and `promoted`.
+type Ids = std::collections::HashMap<&'static str, Vec<String>>;
+
+fn stand_in(token: &str, ids: &Ids) -> Option<String> {
+    let (kind, at) = match token {
+        ENTRY_ID => ("entry", 0),
+        PROMOTED_ID => ("promoted", 0),
+        HOST_ID => ("host", 0),
+        HOST2_ID => ("host", 1),
+        ACCOUNT_ID => ("account", 0),
+        ACCOUNT2_ID => ("account", 1),
+        IOC_ID => ("ioc", 0),
+        IOC2_ID => ("ioc", 1),
+        _ => return None,
+    };
+    Some(
+        ids.get(kind)
+            .and_then(|v| v.get(at))
+            .unwrap_or_else(|| panic!("no id for {token}: the call that makes it did not run"))
+            .clone(),
+    )
+}
+
+/// Remember the id a successful `entry add`, `host add`, ... reply gave.
+fn capture(args: &[String], reply: &Value, ids: &mut Ids) {
+    let word = |i: usize| args.get(i).map(String::as_str);
+    let kind = match (word(0), word(1)) {
+        (Some("entry"), Some("add")) => "entry",
+        (Some("host"), Some("add")) => "host",
+        (Some("account"), Some("add")) => "account",
+        (Some("ioc"), Some("add")) => "ioc",
+        (Some("entry"), Some("promote")) => {
+            let made = reply["data"]["outcomes"][0]["entry_id"].as_i64().unwrap();
+            ids.entry("promoted").or_default().push(made.to_string());
+            return;
+        }
+        _ => return,
+    };
+    let id = reply["data"]["id"].as_i64().unwrap();
+    ids.entry(kind).or_default().push(id.to_string());
+}
+
 /// Run each call in `calls` in order, with the stand-in ids replaced by what
 /// the case's own replies gave. `check` sees the arguments, the exit code and
 /// the raw output.
-fn run_calls(p: &str, dir: &std::path::Path, mut check: impl FnMut(&[String], i32, &str)) {
+fn run_calls(p: &str, dir: &std::path::Path, check: impl FnMut(&[String], i32, &str)) {
+    run_calls_with(p, dir, Ids::new(), check)
+}
+
+/// `run_calls` with ids already known: what `seed` made before the case was
+/// read elsewhere, so the calls that read them still have something to read.
+fn run_calls_with(
+    p: &str,
+    dir: &std::path::Path,
+    mut ids: Ids,
+    mut check: impl FnMut(&[String], i32, &str),
+) {
     let mut note_id = "1".to_string();
     for mut args in calls(p, dir) {
         for a in args.iter_mut() {
@@ -63,17 +129,132 @@ fn run_calls(p: &str, dir: &std::path::Path, mut check: impl FnMut(&[String], i3
                 *a = note_id.clone();
             } else if a == SOURCE_ID {
                 *a = newest_source(p).to_string();
+            } else if let Some(id) = stand_in(a, &ids) {
+                *a = id;
             }
         }
         let mut full = vec!["--case", p];
         full.extend(args.iter().map(String::as_str));
         let (code, raw) = ox_raw(&full);
-        if args.len() > 1 && args[..2] == ["note", "add"] && code == 0 {
+        if code == 0 {
             let v: Value = serde_json::from_str(&raw).unwrap();
-            note_id = v["data"]["id"].as_i64().unwrap().to_string();
+            capture(&args, &v, &mut ids);
+            if args.len() > 1 && args[..2] == ["note", "add"] {
+                note_id = v["data"]["id"].as_i64().unwrap().to_string();
+            }
         }
         check(&args, code, &raw);
     }
+}
+
+/// Make the records `calls` reads, as the analyst, and return their ids.
+fn seed(p: &str) -> Ids {
+    let mut ids = Ids::new();
+    for args in record_setup(p) {
+        let mut full = vec!["--case", p];
+        full.extend(args.iter().map(String::as_str));
+        let (code, raw) = ox_raw(&full);
+        assert_eq!(code, 0, "{args:?}: {raw}");
+        capture(&args, &serde_json::from_str(&raw).unwrap(), &mut ids);
+    }
+    ids
+}
+
+/// The calls that make one entry, two hosts, two accounts, two IOCs and an
+/// entry from a row: what every later record call needs to exist.
+fn record_setup(p: &str) -> Vec<Vec<String>> {
+    let r = first_row(p, "svch0st");
+    let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    vec![
+        s(&[
+            "entry",
+            "add",
+            "--title",
+            "svc_backup logon from 203.0.113.7",
+            "--time",
+            "2026-01-05T02:14:07Z",
+        ]),
+        s(&["host", "add", "--name", "WS01", "--role", "Workstation"]),
+        s(&["host", "add", "--name", "SRV01"]),
+        s(&["account", "add", "--name", "svc_backup", "--domain", "ACME"]),
+        s(&["account", "add", "--name", "jdoe"]),
+        s(&["ioc", "add", "--type", "ip", "--value", "203.0.113.7"]),
+        s(&[
+            "ioc",
+            "add",
+            "--type",
+            "domain",
+            "--value",
+            "evil.acme.local",
+        ]),
+        s(&["entry", "promote", "--rows", &r]),
+    ]
+}
+
+/// The record calls after `record_setup`: every read, every change, and the
+/// exports, with the deletions and merges last.
+fn record_reads(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
+    let r = first_row(p, "svch0st");
+    let r2 = first_row(p, "rclone");
+    // Fresh names per call list: an export never writes over a file.
+    let n = (0..)
+        .find(|i| !dir.join(format!("tl{i}.csv")).exists())
+        .unwrap();
+    let out = |name: String| dir.join(name).to_string_lossy().into_owned();
+    let (csv, xlsx, md) = (
+        out(format!("tl{n}.csv")),
+        out(format!("wb{n}.xlsx")),
+        out(format!("rp{n}.md")),
+    );
+    let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    vec![
+        s(&["entry", "list"]),
+        s(&["entry", "show", ENTRY_ID]),
+        s(&["entry", "edit", ENTRY_ID, "--description", "edited"]),
+        s(&["entry", "attach", ENTRY_ID, "--rows", &r2]),
+        s(&["evidence", "list", "--entry", ENTRY_ID]),
+        s(&["entry", "status", ENTRY_ID, "reviewed"]),
+        s(&["entry", "detach", ENTRY_ID, "--row", &r2]),
+        s(&["host", "list"]),
+        s(&["host", "show", HOST_ID]),
+        s(&["host", "edit", HOST_ID, "--role", "Server"]),
+        s(&["host", "status", HOST_ID, "unreviewed"]),
+        s(&["account", "list"]),
+        s(&["account", "show", ACCOUNT_ID]),
+        s(&["account", "edit", ACCOUNT_ID, "--note", "n"]),
+        s(&["account", "status", ACCOUNT_ID, "unreviewed"]),
+        s(&["account", "logons", "--id", ACCOUNT_ID]),
+        s(&["ioc", "list"]),
+        s(&["ioc", "show", IOC_ID]),
+        s(&["ioc", "edit", IOC_ID, "--tool", "rclone"]),
+        s(&["ioc", "status", IOC_ID, "unreviewed"]),
+        s(&["ioc", "sightings", "--id", IOC_ID]),
+        s(&[
+            "link", "add", "--entry", ENTRY_ID, "--kind", "account", "--id", ACCOUNT_ID,
+        ]),
+        s(&[
+            "link", "remove", "--entry", ENTRY_ID, "--kind", "account", "--id", ACCOUNT_ID,
+        ]),
+        s(&["candidates", "--row", &r]),
+        s(&["history", "--kind", "entry", "--id", ENTRY_ID]),
+        s(&["export", "timeline", &csv]),
+        s(&["export", "workbook", &xlsx]),
+        s(&["export", "report", &md]),
+        s(&["host", "merge", "--from", HOST2_ID, "--into", HOST_ID]),
+        s(&[
+            "account",
+            "merge",
+            "--from",
+            ACCOUNT2_ID,
+            "--into",
+            ACCOUNT_ID,
+        ]),
+        s(&["ioc", "merge", "--from", IOC2_ID, "--into", IOC_ID]),
+        s(&["entry", "delete", PROMOTED_ID]),
+        s(&["host", "delete", HOST_ID]),
+        s(&["account", "delete", ACCOUNT_ID]),
+        s(&["ioc", "delete", IOC_ID]),
+    ]
 }
 
 /// One representative successful call per command, in an order that works
@@ -102,7 +283,7 @@ fn calls(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
     );
     let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let ev = "evtxtriage_events";
-    vec![
+    let list = vec![
         s(&["case", "new", &new_case, "--name", "WS01 second case"]),
         s(&["case", "info"]),
         s(&["case", "compact", &compact]),
@@ -125,6 +306,7 @@ fn calls(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
         s(&["around", "--row", &r, "--window", "5m"]),
         s(&["around", "--row", &r, "--window", "5m", "--rows"]),
         s(&["row", &r]),
+        s(&["RECORDS"]),
         s(&["query", "SELECT 1 AS one"]),
         s(&["mark", "set", "--rows", &r]),
         s(&["mark", "list"]),
@@ -153,7 +335,20 @@ fn calls(p: &str, dir: &std::path::Path) -> Vec<Vec<String>> {
         s(&["column", "primary-time", "fw_csv", "--none"]),
         s(&["history"]),
         s(&["mark", "clear", "--rows", &r]),
-    ]
+    ];
+    // The record commands go in where RECORDS stands: their setup, then every
+    // read and change.
+    list.into_iter()
+        .flat_map(|call| {
+            if call == ["RECORDS"] {
+                let mut records = record_setup(p);
+                records.extend(record_reads(p, dir));
+                records
+            } else {
+                vec![call]
+            }
+        })
+        .collect()
 }
 
 #[test]
@@ -223,6 +418,30 @@ const CHANGES_THE_CASE: &[&str] = &[
     "note delete",
     "column declare",
     "column primary-time",
+    "entry add",
+    "entry edit",
+    "entry status",
+    "entry delete",
+    "entry promote",
+    "entry attach",
+    "entry detach",
+    "host add",
+    "host edit",
+    "host delete",
+    "host merge",
+    "host status",
+    "account add",
+    "account edit",
+    "account delete",
+    "account merge",
+    "account status",
+    "ioc add",
+    "ioc edit",
+    "ioc delete",
+    "ioc merge",
+    "ioc status",
+    "link add",
+    "link remove",
 ];
 
 /// Found on the first real run: every command opened the case for writing,
@@ -238,9 +457,11 @@ fn a_command_that_only_reads_runs_while_the_case_is_read_elsewhere() {
         );
     }
 
+    // The records the read calls name exist before the case is read elsewhere.
+    let ids = seed(&p);
     // This process reads the case for as long as the commands below run.
     let _reader = oxl_engine::Case::open_read_only(std::path::Path::new(&p)).unwrap();
-    run_calls(&p, d.path(), |args, code, raw| {
+    run_calls_with(&p, d.path(), ids, |args, code, raw| {
         let v: Value = serde_json::from_str(raw).unwrap();
         if CHANGES_THE_CASE.contains(&path_of(args, &known).as_str()) {
             // A change needs the case to itself, and says so.

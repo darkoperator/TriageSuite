@@ -2969,6 +2969,7 @@ dependencies = [
  "libc",
  "oxl-engine",
  "oxl-fixtures",
+ "serde",
  "serde_json",
  "tempfile",
 ]
