@@ -915,3 +915,44 @@ describe("fix round 2", () => {
     expect(screen.queryByRole("dialog", { name: "Add IOC" })).toBeNull();
   });
 });
+
+describe("fix round 3", () => {
+  it("a_grouped_i_read_is_dropped_when_another_column_takes_its_place", async () => {
+    // Every cell is clipped, so I reads the whole value; the read is held while a pin moves the columns.
+    overrideCommand("grid_page", async (args) => {
+      const page = (await mockCall("grid_page", args)) as GridPage;
+      return { ...page, cells: page.cells.map((row) => row.map((c) => (c === null ? c : { ...c, clipped: true }))) };
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    overrideCommand("cell_value", async (args) => {
+      await gate;
+      return { text: `whole ${(args as { column: string }).column}`, parts: [] };
+    });
+    const grouped: Tab = {
+      id: "scoped:grouped", kind: "dataset", relation: "mock_events", title: "grouped",
+      seed: { state: initialGridState("mock_events"), by: ["Channel"] },
+    };
+    const { user } = await mountGrid(grouped);
+    await user.click((await screen.findAllByRole("button", { name: /^Expand Channel/ }))[0]);
+    await waitFor(() => expect(document.querySelectorAll("[data-kind='row']").length).toBeGreaterThan(2));
+    const names = () => screen.getAllByRole("columnheader").flatMap((h) => (h.querySelector(".col-name") ? [h.querySelector(".col-name")!.textContent] : []));
+    const at = names().indexOf("Channel");
+    const first = document.querySelector<HTMLElement>("[data-kind='row']")!;
+    await user.click(within(first).getAllByRole("gridcell")[at + 1]);
+    await user.keyboard("i");
+    await waitFor(() => expect(callsOf("cell_value")).toHaveLength(1));
+    expect((callsOf("cell_value")[0].args as { column: string }).column).toBe("Channel");
+    const id = queryIdOf("cell_value");
+    // Pinning a later column puts it first: the focused position now holds the column before Channel's old place.
+    fireEvent.contextMenu(header("Provider"));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Pin left" }));
+    await waitFor(() => expect(names()[at]).not.toBe("Channel"));
+    await waitFor(() => expect(cancelledIds()).toContain(id));
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.queryByRole("dialog", { name: "Add IOC" })).toBeNull();
+  });
+});

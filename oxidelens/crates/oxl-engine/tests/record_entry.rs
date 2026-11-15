@@ -1093,5 +1093,7 @@ fn entries_list_newest_first_on_request() {
     assert_eq!(timeline[2..], [undated, tied]);
     // The order is applied before the page.
     assert_eq!(ids(recent(), 1), [early]);
+    // The case closes before its folder goes, or Windows cannot remove the open file.
+    drop(case);
     drop(d);
 }

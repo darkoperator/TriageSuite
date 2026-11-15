@@ -847,18 +847,24 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
     return () => setGrouped?.(false);
   }, [active, grouped, setGrouped]);
 
-  // I's read of a clipped cell's whole value, for one data row and column: a focus move (row or column) or the tab
-  // closing cancels it, and an answer for a cell no longer focused opens nothing.
-  const cellRead = useRef<{ queryId: string; rowId: number; col: number } | null>(null);
+  // I's read of a clipped cell's whole value, for one data row and column (by name: a reorder or a pin moves columns
+  // under the focused position), under one state key. A focus move, another column at the focused position, a change
+  // of state or the tab closing cancels it, and an answer for a cell no longer focused opens nothing.
+  const cellRead = useRef<{ queryId: string; rowId: number; column: string; key: string } | null>(null);
   const cancelCellRead = useCallback(() => {
     const r = cellRead.current;
     cellRead.current = null;
     if (r) void queryCancel([r.queryId]).catch(() => {});
   }, []);
+  const focusedColumn = groupFocus ? (names[groupFocus.col] ?? null) : null;
+  const namesRef = useRef(names);
+  useEffect(() => {
+    namesRef.current = names;
+  });
   useEffect(() => {
     const r = cellRead.current;
-    if (r && (groupFocus?.rowId !== r.rowId || groupFocus?.col !== r.col)) cancelCellRead();
-  }, [groupFocus, cancelCellRead]);
+    if (r && (groupFocus?.rowId !== r.rowId || focusedColumn !== r.column || shownKey !== r.key)) cancelCellRead();
+  }, [groupFocus, focusedColumn, shownKey, cancelCellRead]);
   useEffect(() => cancelCellRead, [cancelCellRead]);
   const groupFocusRef = useRef(groupFocus);
   const itemsRef = useRef(tree.items);
@@ -922,11 +928,14 @@ export default function Grid({ tab, active, scrollOffset, onScroll }: TabBodyPro
         if (!cell.clipped) return cell.text ?? "";
         cancelCellRead();
         const queryId = newQueryId();
-        cellRead.current = { queryId, rowId: g.rowId, col: g.col };
+        const key = shownKeyRef.current;
+        cellRead.current = { queryId, rowId: g.rowId, column, key };
         try {
           const whole = await readCell(g.rowId, column, `tab:${tab.id}:ioc`, queryId);
           const now = groupFocusRef.current;
-          return cellRead.current?.queryId === queryId && now?.rowId === g.rowId && now.col === g.col ? (whole.text ?? "") : null;
+          const still =
+            cellRead.current?.queryId === queryId && now?.rowId === g.rowId && namesRef.current[now.col] === column && shownKeyRef.current === key;
+          return still ? (whole.text ?? "") : null;
         } catch (e) {
           if (cellRead.current?.queryId !== queryId) return null; // cancelled by a focus move: nothing to say
           throw e;
