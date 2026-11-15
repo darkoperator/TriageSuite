@@ -51,3 +51,21 @@ export async function pickCsvFile(): Promise<string | null> {
   if (__OXL_MOCK__) return "/mock/loose.csv";
   return single(await open({ title: "Open CSV", multiple: false, directory: false, filters: CSV_FILTER }));
 }
+
+export type RecordExport = "timeline" | "workbook" | "report";
+
+const RECORD_FILES: Record<RecordExport, { title: string; suffix: string; filter: { name: string; extensions: string[] } }> = {
+  timeline: { title: "Export timeline CSV", suffix: "timeline.csv", filter: { name: "CSV", extensions: ["csv"] } },
+  workbook: { title: "Export XLSX workbook", suffix: "case.xlsx", filter: { name: "XLSX workbook", extensions: ["xlsx"] } },
+  report: { title: "Export report", suffix: "report.md", filter: { name: "Markdown", extensions: ["md"] } },
+};
+
+/** Where a case-record export goes (a save dialog, named `<case name>-<kind>`); `null` when the analyst cancels. */
+export async function pickRecordExportPath(kind: RecordExport, caseName: string): Promise<string | null> {
+  const f = RECORD_FILES[kind];
+  // control characters and path separators have no place in a suggested file name
+  const base = [...caseName].map((c) => (c.charCodeAt(0) < 32 || "\\/:*?\"<>|".includes(c) ? "_" : c)).join("").trim() || "case";
+  const name = `${base}-${f.suffix}`;
+  if (__OXL_MOCK__) return `/mock/${name}`;
+  return save({ title: f.title, filters: [f.filter, { name: "All files", extensions: ["*"] }], defaultPath: name });
+}

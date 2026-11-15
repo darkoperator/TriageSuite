@@ -3,7 +3,7 @@
 // keeps: the settings, the case summary, the open tabs, the job line. Screens inside it read `useShell()`.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  caseClose, caseSummary, isCmdError, loadFile, loadRun, onJob, onSettingsDamaged, queryCancel, recentClear, recentRemove,
+  caseClose, caseSummary, exportReport, exportTimeline, exportWorkbook, isCmdError, newQueryId, loadFile, loadRun, onJob, onSettingsDamaged, queryCancel, recentClear, recentRemove,
   sessions as readSessions, settingsGet, settingsUpdate,
 } from "../api";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
@@ -14,7 +14,7 @@ import type { DamagedSettings } from "../contract/generated/DamagedSettings";
 import type { Session } from "../contract/generated/Session";
 import type { Settings as SettingsData } from "../contract/generated/Settings";
 import type { SettingsReply } from "../contract/generated/SettingsReply";
-import { pickCsvFile, pickRunFolder } from "../dialogs";
+import { pickCsvFile, pickRecordExportPath, pickRunFolder, type RecordExport } from "../dialogs";
 import Settings, { type SettingsPatch } from "../settings/Settings";
 import { displaySafe } from "../text";
 import { applyAppearance } from "../theme/appearance";
@@ -309,6 +309,31 @@ export default function Shell() {
     readSessionsNow();
   });
 
+  /** Asks for the file, then writes the case record as the export job the status bar can cancel. */
+  const runRecordExport = async (kind: RecordExport) => {
+    if (!summary || exportRunning()) return;
+    let path: string | null;
+    try {
+      path = await pickRecordExportPath(kind, summary.name);
+    } catch (e) {
+      reportError(e);
+      return;
+    }
+    if (path === null) return;
+    const queryId = newQueryId();
+    if (!beginExport({ queryId, zoneTimes: false })) return setError("An export is running.");
+    try {
+      const write = kind === "timeline" ? exportTimeline : kind === "workbook" ? exportWorkbook : exportReport;
+      await write(path, "case:export", queryId);
+    } catch (e) {
+      // A refusal (the case file, a source's evidence) is shown as the engine worded it, without its code.
+      if (isCmdError(e)) setError(e.code === "interrupted" || e.code === "superseded" ? "Export cancelled." : e.message);
+      else reportError(e);
+    } finally {
+      endExport(queryId);
+    }
+  };
+
   const close = async () => {
     try {
       await caseClose();
@@ -466,6 +491,8 @@ export default function Shell() {
           summary={summary}
           analyst={settings!.analyst}
           busy={loading || job !== null}
+          exporting={exportJob !== null}
+          onExport={(kind) => void runRecordExport(kind)}
           onLoadRun={() => void runLoad(pickRunFolder, loadRun)}
           onOpenCsv={() => void runLoad(pickCsvFile, (p) => loadFile(p))}
           onClose={() => void close()}

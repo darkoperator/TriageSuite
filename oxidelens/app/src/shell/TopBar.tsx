@@ -1,13 +1,18 @@
 // The top bar: app name, case name, what the case holds, the analyst, and the two load buttons.
 import type { CaseSummary } from "../contract/generated/CaseSummary";
+import type { RecordExport } from "../dialogs";
 import { displaySafe } from "../text";
+import { ExportMenu } from "../views/ExportDialog";
 
 export default function TopBar({
-  summary, analyst, busy, onLoadRun, onOpenCsv, onClose, onSettings,
+  summary, analyst, busy, exporting, onExport, onLoadRun, onOpenCsv, onClose, onSettings,
 }: {
   summary: CaseSummary;
   analyst: string | null;
   busy: boolean;
+  /** An export is running: the menu is off until it ends (one at a time). */
+  exporting: boolean;
+  onExport(kind: RecordExport): void;
   onLoadRun(): void;
   onOpenCsv(): void;
   onClose(): void;
@@ -26,6 +31,7 @@ export default function TopBar({
       <span className="analyst" title="Analyst">{analyst === null ? "no analyst name" : displaySafe(analyst)}</span>
       <button type="button" disabled={busy} onClick={onLoadRun}>Load run…</button>
       <button type="button" disabled={busy} onClick={onOpenCsv}>Open CSV…</button>
+      <ExportMenu disabled={exporting} onChoose={onExport} />
       <button type="button" onClick={onClose}>Close case</button>
       <button type="button" className="icon-button" aria-label="Settings" title="Settings" onClick={(e) => onSettings(e.currentTarget)}>⚙</button>
     </header>

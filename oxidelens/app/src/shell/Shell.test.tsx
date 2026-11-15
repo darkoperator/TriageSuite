@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
@@ -15,6 +15,7 @@ vi.mock("../dialogs", () => ({
   pickCaseFile: vi.fn(),
   pickRunFolder: vi.fn(),
   pickCsvFile: vi.fn(),
+  pickRecordExportPath: vi.fn(),
 }));
 
 const HOSTILE = '<img src=x onerror=alert(1)>\u202E"; DROP';
@@ -486,6 +487,72 @@ describe("loading", () => {
     expect(screen.getByTestId("progress")).toHaveTextContent("Loading loose.csv…");
     act(() => emitEvent("job-finished", { kind: "load_file", ok: true, message: null }));
     expect(screen.getByTestId("progress")).toBeEmptyDOMElement();
+  });
+});
+
+describe("export menu", () => {
+  const KINDS = [
+    ["timeline CSV", "export_timeline"],
+    ["XLSX workbook", "export_workbook"],
+    ["report", "export_report"],
+  ] as const;
+
+  it("export_menu_writes_each_kind", async () => {
+    for (const [item, command] of KINDS) {
+      vi.mocked(dialogs.pickRecordExportPath).mockReset();
+      vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue(`/out/${command}`);
+      const user = await openRecent();
+      await user.click(screen.getByRole("button", { name: "Export" }));
+      await user.click(within(await screen.findByRole("dialog", { name: "Export case record" })).getByRole("button", { name: item }));
+      await waitFor(() => expect(callsOf(command)).toHaveLength(1));
+      expect(callsOf(command)[0].args).toMatchObject({ path: `/out/${command}` });
+      expect(vi.mocked(dialogs.pickRecordExportPath).mock.calls[0][0]).toBe(command.replace("export_", ""));
+      cleanup();
+    }
+  });
+
+  it("export_menu_shows_the_job_and_offers_cancel", async () => {
+    vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue("/out/case.xlsx");
+    let finish: (e: unknown) => void = () => {};
+    overrideCommand("export_workbook", () => {
+      emitEvent("job-started", { kind: "export", label: "case.xlsx" });
+      return new Promise((_, reject) => {
+        finish = reject;
+      });
+    });
+    const user = await openRecent();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "XLSX workbook" }));
+    expect(await screen.findByTestId("progress")).toHaveTextContent("Exporting case.xlsx…");
+    await user.click(screen.getByRole("button", { name: "Cancel export" }));
+    await waitFor(() => expect(callsOf("query_cancel")).toHaveLength(1));
+    act(() => {
+      emitEvent("job-finished", { kind: "export", ok: false, message: null });
+      finish({ code: "interrupted", message: "the query was cancelled" });
+    });
+    expect(await screen.findByText("Export cancelled.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel export" })).toBeNull());
+  });
+
+  it("a_refused_path_shows_the_reason", async () => {
+    vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue("/cases/acme.case.duckdb");
+    overrideCommand("export_report", () => Promise.reject({ code: "refused", message: "that path is the case file" }));
+    const user = await openRecent();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "report" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("that path is the case file");
+    expect(alert).not.toHaveTextContent("refused");
+    expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
+  });
+
+  it("a_cancelled_save_dialog_runs_nothing", async () => {
+    vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue(null);
+    const user = await openRecent();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "timeline CSV" }));
+    await waitFor(() => expect(dialogs.pickRecordExportPath).toHaveBeenCalled());
+    expect(callsOf("export_timeline")).toHaveLength(0);
   });
 });
 
