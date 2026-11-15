@@ -442,6 +442,7 @@ pub fn candidates(state: &AppState, at: At<'_>, row_id: i64) -> Result<Vec<Candi
 pub fn ioc_sightings(state: &AppState, at: At<'_>, id: i64) -> Result<Sightings, CmdError> {
     let cancel = Arc::new(AtomicBool::new(false));
     state.read_with_flag(at.slot, at.query_id, cancel.clone(), |c| {
+        state.hook(Point::SightingsRunning);
         oxl_engine::ioc_sightings(c, id, &cancel)
     })
 }
@@ -520,6 +521,7 @@ fn export(
         state.read_to_completion(at.slot, at.query_id, cancel.clone(), |c| {
             state.hook(Point::BeforeGate);
             let gate = state.wait_for_gate(&cancel)?;
+            state.hook(Point::GateHeld);
             let report = write(c, path, &cancel);
             drop(gate);
             report
@@ -866,5 +868,150 @@ pub mod commands {
         path: PathBuf,
     ) -> Result<ExportReport, CmdError> {
         super::export_report(&app, At::new(&query_id, &slot), &path)
+    }
+}
+
+/// What the export and sightings commands do while a test holds them at a
+/// `Point`: a record export holds the write gate until its file is in place,
+/// and a sightings read stopped while it runs answers its stop code.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::{case, load, query_cancel};
+    use crate::events::NoSink;
+    use crate::settings::SettingsStore;
+    use oxl_engine::IocType;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    const LIMIT: Duration = Duration::from_secs(60);
+
+    /// A case with the two-host run loaded, and its directory.
+    fn setup() -> (tempfile::TempDir, Arc<AppState>) {
+        let d = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::new(SettingsStore::in_memory(), Arc::new(NoSink)));
+        case::case_new(&state, &d.path().join("case.duckdb"), "WS01 triage").unwrap();
+        load::load_run(&state, &oxl_fixtures::two_hosts(d.path())).unwrap();
+        (d, state)
+    }
+
+    /// Hold the next pass through `point` until the returned sender sends;
+    /// the receiver hears when it is reached.
+    fn hold(state: &AppState, point: Point) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (reached_tx, reached) = mpsc::channel();
+        let (go, go_rx) = mpsc::channel::<()>();
+        state.on(point, move || {
+            reached_tx.send(()).unwrap();
+            go_rx.recv().unwrap();
+        });
+        (reached, go)
+    }
+
+    /// Run `work` on a thread of its own; its answer arrives on the receiver.
+    fn spawn<T: Send + 'static>(
+        state: &Arc<AppState>,
+        work: impl FnOnce(&AppState) -> T + Send + 'static,
+    ) -> mpsc::Receiver<T> {
+        let (tx, rx) = mpsc::channel();
+        let state = state.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(work(&state));
+        });
+        rx
+    }
+
+    /// Held after it took the write gate, each export makes every write
+    /// answer `busy` and has not written its file; released, it lands its
+    /// file and writes run again.
+    #[test]
+    fn a_record_export_holds_the_write_gate_until_its_file_lands() {
+        type Export = fn(&AppState, At<'_>, &Path) -> Result<ExportReport, CmdError>;
+        let exports: [(&str, Export); 3] = [
+            ("timeline.csv", export_timeline),
+            ("record.xlsx", export_workbook),
+            ("record.md", export_report),
+        ];
+        for (name, export) in exports {
+            let (d, state) = setup();
+            entry_new(
+                &state,
+                &EntryChanges {
+                    title: Some("Wiped logs".into()),
+                    ..EntryChanges::default()
+                },
+            )
+            .unwrap();
+            let (reached, go) = hold(&state, Point::GateHeld);
+            let out = d.path().join(name);
+            let done = {
+                let out = out.clone();
+                spawn(&state, move |s| export(s, At::new("x1", "export"), &out))
+            };
+            reached
+                .recv_timeout(LIMIT)
+                .expect("the export took the gate");
+            assert_eq!(mark_set(&state, &[1]).unwrap_err().code, "busy", "{name}");
+            let note = note_add(&state, 1, "meanwhile");
+            assert_eq!(note.unwrap_err().code, "busy", "{name}");
+            assert!(!out.exists(), "{name} landed before the gate was let go");
+            go.send(()).unwrap();
+            let report = done.recv_timeout(LIMIT).expect("the export answered");
+            assert_eq!(report.unwrap().path, out, "{name}");
+            assert!(out.is_file(), "{name}");
+            mark_set(&state, &[1]).expect("a write runs once the export is done");
+        }
+    }
+
+    /// A sightings read held while it runs, then superseded by a newer one on
+    /// its slot, answers `superseded`; the newer one answers the sightings.
+    #[test]
+    fn a_newer_sightings_query_supersedes_one_in_flight() {
+        let (_d, state) = setup();
+        let ioc = ioc_id(&state);
+        let (reached, go) = hold(&state, Point::SightingsRunning);
+        let first = spawn(&state, move |s| {
+            ioc_sightings(s, At::new("s1", "sightings"), ioc)
+        });
+        reached
+            .recv_timeout(LIMIT)
+            .expect("the first sweep is running");
+        let second = ioc_sightings(&state, At::new("s2", "sightings"), ioc).unwrap();
+        assert!(second.hits >= 2, "{second:?}");
+        go.send(()).unwrap();
+        let first = first.recv_timeout(LIMIT).expect("the first sweep answered");
+        assert_eq!(first.unwrap_err().code, "superseded");
+    }
+
+    /// A sightings read held while it runs, then cancelled by its id, answers
+    /// `interrupted`.
+    #[test]
+    fn a_sightings_query_cancelled_in_flight_is_interrupted() {
+        let (_d, state) = setup();
+        let ioc = ioc_id(&state);
+        let (reached, go) = hold(&state, Point::SightingsRunning);
+        let first = spawn(&state, move |s| {
+            ioc_sightings(s, At::new("s1", "sightings"), ioc)
+        });
+        reached.recv_timeout(LIMIT).expect("the sweep is running");
+        query_cancel(&state, &["s1".to_string()]).unwrap();
+        go.send(()).unwrap();
+        let first = first.recv_timeout(LIMIT).expect("the sweep answered");
+        assert_eq!(first.unwrap_err().code, "interrupted");
+    }
+
+    /// An IOC for the address both hosts' events name.
+    fn ioc_id(state: &AppState) -> i64 {
+        let spec = RecordSpec::Ioc(IocSpec {
+            id: None,
+            ioc_type: IocType::Ip,
+            value: "203.0.113.7".into(),
+            tool: None,
+            attack_ids: Vec::new(),
+            note: String::new(),
+        });
+        match record_upsert(state, &spec).unwrap() {
+            CaseRecord::Ioc(i) => i.id,
+            other => panic!("an IOC spec made {other:?}"),
+        }
     }
 }

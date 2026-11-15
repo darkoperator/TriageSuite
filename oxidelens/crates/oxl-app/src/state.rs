@@ -204,6 +204,11 @@ pub(crate) enum Point {
     /// A record export has its reader and has not yet taken the write gate
     /// it writes its file under.
     BeforeGate,
+    /// A record export holds the write gate and has not yet written its
+    /// file.
+    GateHeld,
+    /// A sightings read has its reader and is about to search.
+    SightingsRunning,
 }
 
 /// How often an export waiting for the write gate looks whether it was

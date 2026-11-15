@@ -662,20 +662,142 @@ fn record_exports_refuse_the_run_and_stop_when_cancelled() {
     assert_eq!(s.events.named(JOB_FINISHED)[0]["ok"], json!(false));
 }
 
-/// With no case open, every record command answers `no_case`.
+/// With no case open, every record command answers `no_case`. The table is
+/// held to the contract's record commands, so one added without a row here
+/// fails the test.
 #[test]
 fn the_record_commands_need_a_case() {
-    let (_events, st) = state();
-    assert_eq!(r::mark_set(&st, &[1]).unwrap_err().code, "no_case");
-    assert_eq!(
-        r::entries_list(&st, at("timeline"), &EntryQuery::default(), 10, 0)
-            .unwrap_err()
-            .code,
-        "no_case"
-    );
-    let out = std::env::temp_dir().join("oxl-no-case.md");
-    assert_eq!(
-        r::export_report(&st, at("export"), &out).unwrap_err().code,
-        "no_case"
-    );
+    type Call = Box<dyn Fn(&AppState) -> Result<(), oxl_app::CmdError>>;
+    fn ok<T>(r: Result<T, oxl_app::CmdError>) -> Result<(), oxl_app::CmdError> {
+        r.map(|_| ())
+    }
+    let out = std::env::temp_dir().join("oxl-no-case.out");
+    let (o1, o2, o3) = (out.clone(), out.clone(), out.clone());
+    let host = || host_spec(None, "WS01", "");
+    let calls: Vec<(&str, Call)> = vec![
+        ("mark_set", Box::new(|s| ok(r::mark_set(s, &[1])))),
+        ("mark_clear", Box::new(|s| ok(r::mark_clear(s, &[1])))),
+        ("tag_add", Box::new(|s| ok(r::tag_add(s, &[1], "triage")))),
+        (
+            "tag_remove",
+            Box::new(|s| ok(r::tag_remove(s, &[1], "triage"))),
+        ),
+        (
+            "tags_list",
+            Box::new(|s| ok(r::tags_list(s, at("t"), 10, 0))),
+        ),
+        ("note_add", Box::new(|s| ok(r::note_add(s, 1, "text")))),
+        ("note_delete", Box::new(|s| ok(r::note_delete(s, 1)))),
+        (
+            "notes_list",
+            Box::new(|s| ok(r::notes_list(s, at("n"), 1, 10, 0))),
+        ),
+        (
+            "entries_list",
+            Box::new(|s| ok(r::entries_list(s, at("e"), &EntryQuery::default(), 10, 0))),
+        ),
+        ("entry_get", Box::new(|s| ok(r::entry_get(s, at("e"), 1)))),
+        ("entry_new", Box::new(|s| ok(r::entry_new(s, &title("t"))))),
+        (
+            "entry_edit",
+            Box::new(|s| ok(r::entry_edit(s, 1, &title("t")))),
+        ),
+        (
+            "entry_status",
+            Box::new(|s| ok(r::entry_status(s, 1, EntryStatus::Reviewed))),
+        ),
+        ("entry_delete", Box::new(|s| ok(r::entry_delete(s, 1)))),
+        ("rows_promote", Box::new(|s| ok(r::rows_promote(s, &[1])))),
+        ("rows_attach", Box::new(|s| ok(r::rows_attach(s, 1, &[1])))),
+        (
+            "evidence_detach",
+            Box::new(|s| ok(r::evidence_detach(s, 1, 1))),
+        ),
+        (
+            "evidence_list",
+            Box::new(|s| ok(r::evidence_list(s, at("ev"), 1))),
+        ),
+        (
+            "records_list",
+            Box::new(|s| ok(r::records_list(s, at("r"), &RecordQuery::Host, 10, 0))),
+        ),
+        (
+            "record_get",
+            Box::new(|s| ok(r::record_get(s, at("r"), RecordKind::Host, 1))),
+        ),
+        (
+            "record_upsert",
+            Box::new(move |s| ok(r::record_upsert(s, &host()))),
+        ),
+        (
+            "record_delete",
+            Box::new(|s| ok(r::record_delete(s, RecordKind::Host, 1))),
+        ),
+        (
+            "record_merge",
+            Box::new(|s| ok(r::record_merge(s, RecordKind::Host, 1, 2))),
+        ),
+        (
+            "record_status",
+            Box::new(|s| {
+                ok(r::record_status(
+                    s,
+                    RecordKind::Host,
+                    1,
+                    RecordStatus::Reviewed,
+                ))
+            }),
+        ),
+        (
+            "record_link",
+            Box::new(|s| ok(r::record_link(s, 1, RecordKind::Host, 1))),
+        ),
+        (
+            "record_unlink",
+            Box::new(|s| ok(r::record_unlink(s, 1, RecordKind::Host, 1))),
+        ),
+        (
+            "record_entries",
+            Box::new(|s| ok(r::record_entries(s, at("re"), RecordKind::Host, 1, 10, 0))),
+        ),
+        ("candidates", Box::new(|s| ok(r::candidates(s, at("c"), 1)))),
+        (
+            "ioc_sightings",
+            Box::new(|s| ok(r::ioc_sightings(s, at("si"), 1))),
+        ),
+        (
+            "logon_summary",
+            Box::new(|s| ok(r::logon_summary(s, at("l"), 1))),
+        ),
+        (
+            "history_list",
+            Box::new(|s| ok(r::history_list(s, at("h"), None, None, 10, 0))),
+        ),
+        (
+            "export_timeline",
+            Box::new(move |s| ok(r::export_timeline(s, at("x"), &o1))),
+        ),
+        (
+            "export_workbook",
+            Box::new(move |s| ok(r::export_workbook(s, at("x"), &o2))),
+        ),
+        (
+            "export_report",
+            Box::new(move |s| ok(r::export_report(s, at("x"), &o3))),
+        ),
+    ];
+    let names: BTreeSet<&str> = calls.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names.len(), calls.len(), "a command is in the table twice");
+    let start = COMMANDS.iter().position(|c| *c == "mark_set").unwrap();
+    let end = COMMANDS.iter().position(|c| *c == "export_report").unwrap();
+    let record: BTreeSet<&str> = COMMANDS[start..=end].iter().copied().collect();
+    assert_eq!(names, record);
+
+    let (events, st) = state();
+    for (name, call) in &calls {
+        let err = call(&st).expect_err(name);
+        assert_eq!(err.code, "no_case", "{name}: {}", err.message);
+    }
+    assert!(!out.exists());
+    assert!(events.named(CASE_CHANGED).is_empty());
 }

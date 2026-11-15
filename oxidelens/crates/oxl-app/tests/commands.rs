@@ -50,8 +50,18 @@ fn column(page: &oxl_engine::GridPage, name: &str) -> usize {
 }
 
 #[test]
-fn every_command_is_registered() {
+fn commands_list_matches_the_handler() {
     assert_eq!(oxl_app::HANDLERS, COMMANDS);
+    // The record commands among them, which the handler registers too.
+    for name in [
+        "mark_set",
+        "rows_promote",
+        "record_upsert",
+        "ioc_sightings",
+        "export_report",
+    ] {
+        assert!(oxl_app::HANDLERS.contains(&name), "{name}");
+    }
 }
 
 #[test]
