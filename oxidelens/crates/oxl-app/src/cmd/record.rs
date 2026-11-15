@@ -139,8 +139,8 @@ pub enum RecordQuery {
 /// How the Hosts or Accounts list narrows: by text in a host's name, or in
 /// an account's `DOMAIN\name` (so its name, its domain, or both as shown),
 /// case ignored. Absent or `null`, every record. `order` is the sheet's
-/// (by `name`, `entries`, `first_seen` or `last_seen`, then id); absent or
-/// `null`, the closest matches first, then by name.
+/// (by a column the kind has, `RecordOrderBy`, then id); absent or `null`,
+/// the closest matches first, then by name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, ts_rs::TS)]
 #[serde(deny_unknown_fields)]
 pub struct NameQuery {

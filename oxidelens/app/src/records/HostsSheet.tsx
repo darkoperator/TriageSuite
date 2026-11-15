@@ -13,11 +13,11 @@ type Host = { kind: "host" } & HostRecord;
 
 const COLUMNS: Column<Host>[] = [
   { header: "Name", cell: (r) => displaySafe(r.name), order: "name", filter: "text" },
-  { header: "Role", cell: (r) => displaySafe(r.role) },
+  { header: "Role", cell: (r) => displaySafe(r.role), order: "role" },
   { header: "Entries", cell: (r) => fmt(r.entries), order: "entries", num: true },
   { header: "First seen", zoned: true, cell: (r) => timeText(r.first_seen_shown), order: "first_seen" },
   { header: "Last seen", zoned: true, cell: (r) => timeText(r.last_seen_shown), order: "last_seen" },
-  { header: "Status", cell: (r) => <RecordStatusText record={r} /> },
+  { header: "Status", cell: (r) => <RecordStatusText record={r} />, order: "status" },
 ];
 const GROUPS: GroupOption<Host>[] = [
   { key: "role", label: "role", of: (r) => (r.role === "" ? "no role" : r.role) },

@@ -16,8 +16,8 @@ tool: string | null,
  */
 text: string | null, 
 /**
- * The sheet's order (by `entries`, `first_seen`, `last_seen`, `type`
- * or `value`, then id); absent or `null`, the closest values to `text`
- * first, then by type and value.
+ * The sheet's order (by a column an IOC has, `RecordOrderBy`, then
+ * id); absent or `null`, the closest values to `text` first, then by
+ * type and value.
  */
 order?: RecordOrder | null, };

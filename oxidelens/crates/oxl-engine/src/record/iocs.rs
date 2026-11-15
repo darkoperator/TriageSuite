@@ -98,9 +98,9 @@ pub struct IocQuery {
     pub tool: Option<String>,
     /// In the value, tool or note, case ignored.
     pub text: Option<String>,
-    /// The sheet's order (by `entries`, `first_seen`, `last_seen`, `type`
-    /// or `value`, then id); absent or `null`, the closest values to `text`
-    /// first, then by type and value.
+    /// The sheet's order (by a column an IOC has, `RecordOrderBy`, then
+    /// id); absent or `null`, the closest values to `text` first, then by
+    /// type and value.
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub order: Option<RecordOrder>,

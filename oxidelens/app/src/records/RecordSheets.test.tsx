@@ -13,6 +13,7 @@ import type { HostRecord } from "../contract/generated/HostRecord";
 import type { IocRecord } from "../contract/generated/IocRecord";
 import type { LogonSummary } from "../contract/generated/LogonSummary";
 import type { MergedSource } from "../contract/generated/MergedSource";
+import type { RecordOrderBy } from "../contract/generated/RecordOrderBy";
 import type { RecordQuery } from "../contract/generated/RecordQuery";
 import type { Sightings } from "../contract/generated/Sightings";
 import { HOSTILE_RECORD } from "../mock/generated";
@@ -194,8 +195,8 @@ describe("the record sheets", () => {
     // An order is read from the first page.
     const orderedReads = callsOf("records_list").filter((c) => (c.args as { slot: string }).slot === "sheet:iocs" && (c.args as { query: RecordQuery & { order?: unknown } }).query.order != null);
     expect(orderedReads.every((c) => (c.args as { offset: number }).offset === 0)).toBe(true);
-    // A column the engine does not order by has no sort button.
-    expect(within(grid("IOCs")).queryByRole("button", { name: /^Tool/ })).toBeNull();
+    // Sightings, which the engine never stores (S5), is the one column with no sort button.
+    expect(within(grid("IOCs")).queryByRole("button", { name: /^Sightings/ })).toBeNull();
 
     // The filter row goes to the engine: the value text and the tool.
     await user.type(screen.getByRole("textbox", { name: "Filter Value" }), "exe");
@@ -212,6 +213,47 @@ describe("the record sheets", () => {
     expect(groups()[0].textContent).toContain("2");
     expect(idsDrawn("IOCs")).toEqual([1, 4, 2, 3]);
     expect(sheetQueries("IOCs")).toHaveLength(reads);
+  });
+
+  it("every_shown_column_sorts_through_the_engine", async () => {
+    // The contract's orders, every one named (a new one in Rust fails the build here until it is listed), and the one
+    // each column of each sheet asks for. Sightings are computed in this session and never stored (S5), so the engine
+    // cannot order by them: the one column with no sort.
+    const ORDERS: Record<RecordOrderBy, true> = {
+      name: true, role: true, sid: true, privilege: true, hosts_seen: true, tool: true, status: true, entries: true,
+      first_seen: true, last_seen: true, type: true, value: true,
+    };
+    const want: Record<Sheet, Record<string, RecordOrderBy>> = {
+      Hosts: { Name: "name", Role: "role", Entries: "entries", "First seen": "first_seen", "Last seen": "last_seen", Status: "status" },
+      Accounts: {
+        Account: "name", SID: "sid", Privilege: "privilege", Entries: "entries", "Hosts seen": "hosts_seen", "First seen": "first_seen",
+        "Last seen": "last_seen", Status: "status",
+      },
+      IOCs: {
+        Value: "value", Type: "type", Tool: "tool", Entries: "entries", "Hosts seen": "hosts_seen", "First seen": "first_seen",
+        "Last seen": "last_seen", Status: "status",
+      },
+    };
+    const user = await openSheet("Hosts");
+    for (const s of ["Hosts", "Accounts", "IOCs"] as const) {
+      if (s !== "Hosts") {
+        await user.click(screen.getByRole("tab", { name: new RegExp(`^${s}`) }));
+        await waitFor(() => expect(recordRows(s).length).toBeGreaterThan(0));
+      }
+      const headers = within(grid(s)).getAllByRole("columnheader");
+      const names = headers.map((h) => (h.textContent ?? "").replace(/ \(.*$/, "").replace(/ [▴▾]$/, ""));
+      expect(names.filter((n) => n !== "Sightings")).toEqual(Object.keys(want[s]));
+      for (const h of headers) {
+        const name = (h.textContent ?? "").replace(/ \(.*$/, "");
+        if (name === "Sightings") {
+          expect(within(h).queryByRole("button")).toBeNull();
+          continue;
+        }
+        await user.click(within(h).getByRole("button"));
+        await waitFor(() => expect(sheetQueries(s).at(-1)?.order?.by).toBe(want[s][name]));
+        expect(ORDERS[sheetQueries(s).at(-1)!.order!.by]).toBe(true);
+      }
+    }
   });
 
   it("the_type_strip_counts_and_narrows", async () => {

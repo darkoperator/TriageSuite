@@ -73,13 +73,14 @@ export default function IocsSheet({ active }: TabBodyProps): ReactNode {
     () => [
       { header: "Value", cell: (r) => displaySafe(r.value), order: "value", filter: "text" },
       { header: "Type", cell: (r) => iocTypeLabel(r.ioc_type), order: "type" },
-      { header: "Tool", cell: (r) => displaySafe(r.tool ?? ""), filter: "tool" },
+      { header: "Tool", cell: (r) => displaySafe(r.tool ?? ""), order: "tool", filter: "tool" },
       { header: "Entries", cell: (r) => fmt(r.entries), order: "entries", num: true },
-      { header: "Hosts seen", cell: (r) => displaySafe(r.hosts_seen.join(", ")) },
+      { header: "Hosts seen", cell: (r) => displaySafe(r.hosts_seen.join(", ")), order: "hosts_seen" },
       { header: "First seen", zoned: true, cell: (r) => timeText(r.first_seen_shown), order: "first_seen" },
       { header: "Last seen", zoned: true, cell: (r) => timeText(r.last_seen_shown), order: "last_seen" },
+      // Sightings live in this session only (S5): the engine has nothing to order them by.
       { header: "Sightings", cell: (r) => sightingCell(results.get(r.id)), num: true },
-      { header: "Status", cell: (r) => <RecordStatusText record={r} /> },
+      { header: "Status", cell: (r) => <RecordStatusText record={r} />, order: "status" },
     ],
     [results],
   );

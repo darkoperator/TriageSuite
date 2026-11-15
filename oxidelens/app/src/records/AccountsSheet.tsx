@@ -15,13 +15,13 @@ type Account = { kind: "account" } & AccountRecord;
 
 const COLUMNS: Column<Account>[] = [
   { header: "Account", cell: (r) => displaySafe(accountText(r)), order: "name", filter: "text" },
-  { header: "SID", cell: (r) => displaySafe(r.sid ?? "") },
-  { header: "Privilege", cell: (r) => privilegeLabel(r.privilege) },
+  { header: "SID", cell: (r) => displaySafe(r.sid ?? ""), order: "sid" },
+  { header: "Privilege", cell: (r) => privilegeLabel(r.privilege), order: "privilege" },
   { header: "Entries", cell: (r) => fmt(r.entries), order: "entries", num: true },
-  { header: "Hosts seen", cell: (r) => displaySafe(r.hosts_seen.join(", ")) },
+  { header: "Hosts seen", cell: (r) => displaySafe(r.hosts_seen.join(", ")), order: "hosts_seen" },
   { header: "First seen", zoned: true, cell: (r) => timeText(r.first_seen_shown), order: "first_seen" },
   { header: "Last seen", zoned: true, cell: (r) => timeText(r.last_seen_shown), order: "last_seen" },
-  { header: "Status", cell: (r) => <RecordStatusText record={r} /> },
+  { header: "Status", cell: (r) => <RecordStatusText record={r} />, order: "status" },
 ];
 const GROUPS: GroupOption<Account>[] = [
   { key: "domain", label: "domain", of: (r) => r.domain ?? "no domain" },

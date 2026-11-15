@@ -19,7 +19,9 @@ use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection, OptionalExt};
 
-/// What a record sheet orders by (a header click), before paging.
+/// What a record sheet orders by (a header click), before paging: one
+/// value per column a sheet shows, each allowed only for the kinds that
+/// have it (`order_by`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +29,20 @@ pub enum RecordOrderBy {
     /// A host's name, an account's `DOMAIN\name` (case ignored); not an
     /// IOC's.
     Name,
+    /// A host's role (case ignored); only a host's.
+    Role,
+    /// An account's SID; only an account's. None sorts last.
+    Sid,
+    /// An account's privilege, as stored (`domain_admin`, `local_admin`,
+    /// ...); only an account's.
+    Privilege,
+    /// The host names its entries link, as listed (`hosts_seen`); an
+    /// account's or an IOC's. None sorts last.
+    HostsSeen,
+    /// An IOC's tool (case ignored); only an IOC's. None sorts last.
+    Tool,
+    /// The review status as stored (`reviewed` before `unreviewed`).
+    Status,
     /// The live entries linked to it.
     Entries,
     /// The earliest dated linked entry; a record with none sorts last.
@@ -55,6 +71,14 @@ pub struct RecordOrder {
 pub(super) fn order_by(kind: RecordKind, order: RecordOrder, name: &str) -> Result<String> {
     let column = match (order.by, kind) {
         (RecordOrderBy::Name, RecordKind::Host | RecordKind::Account) => format!("lower({name})"),
+        (RecordOrderBy::Role, RecordKind::Host) => "lower(r.role)".to_string(),
+        (RecordOrderBy::Sid, RecordKind::Account) => "r.sid".to_string(),
+        (RecordOrderBy::Privilege, RecordKind::Account) => "r.privilege".to_string(),
+        (RecordOrderBy::HostsSeen, RecordKind::Account | RecordKind::Ioc) => {
+            "seen_hosts".to_string()
+        }
+        (RecordOrderBy::Tool, RecordKind::Ioc) => "lower(r.tool)".to_string(),
+        (RecordOrderBy::Status, _) => "r.status".to_string(),
         (RecordOrderBy::Entries, _) => "seen_entries".to_string(),
         (RecordOrderBy::FirstSeen, _) => "seen_first".to_string(),
         (RecordOrderBy::LastSeen, _) => "seen_last".to_string(),

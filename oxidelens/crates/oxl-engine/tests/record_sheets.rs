@@ -1743,3 +1743,187 @@ fn seen_times_are_shown_in_the_case_zone() {
     drop(case);
     drop(d);
 }
+
+#[test]
+fn every_shown_column_orders_across_pages() {
+    use oxl_engine::{accounts_ordered, hosts_ordered, RecordOrder, RecordOrderBy as By};
+    let (d, mut case) = loaded();
+    let order = |by, descending| Some(RecordOrder { by, descending });
+    let link_to = |case: &mut Case, kind, id, host: &str| {
+        let e = entry(case, "seen", Some("2026-01-01T00:00:00Z"), &analyst());
+        let h = upsert_host(case, &host_spec(host), &analyst())
+            .map(|h| h.id)
+            .unwrap_or_else(|_| {
+                hosts(case, 100, 0)
+                    .unwrap()
+                    .items
+                    .into_iter()
+                    .find(|x| x.name == host)
+                    .unwrap()
+                    .id
+            });
+        link(case, e, RecordKind::Host, h, &analyst()).unwrap();
+        link(case, e, kind, id, &analyst()).unwrap();
+    };
+
+    // Hosts by role (none last) and by status.
+    let spec = |name: &str, role: &str| HostSpec {
+        role: role.to_string(),
+        ..host_spec(name)
+    };
+    let hb = upsert_host(&mut case, &spec("col-1", "server"), &analyst())
+        .unwrap()
+        .id;
+    let hn = upsert_host(&mut case, &spec("col-2", ""), &analyst())
+        .unwrap()
+        .id;
+    let ha = upsert_host(&mut case, &spec("col-3", "admin"), &analyst())
+        .unwrap()
+        .id;
+    let hg = upsert_host(&mut case, &host_spec("col-4"), &agent())
+        .unwrap()
+        .id;
+    let hosts_in = |o| -> Vec<i64> {
+        let mut out = Vec::new();
+        for offset in [0, 2] {
+            out.extend(
+                hosts_ordered(&case, Some("col-"), o, 2, offset)
+                    .unwrap()
+                    .items
+                    .iter()
+                    .map(|h| h.id),
+            );
+        }
+        out
+    };
+    assert_eq!(
+        hosts_in(order(By::Role, false)),
+        [hn, hg, ha, hb],
+        "an empty role is text, before any other"
+    );
+    assert_eq!(hosts_in(order(By::Role, true)), [hb, ha, hn, hg]);
+    // `reviewed` before `unreviewed`; equal statuses by id.
+    assert_eq!(hosts_in(order(By::Status, false)), [hb, hn, ha, hg]);
+    assert_eq!(hosts_in(order(By::Status, true)), [hg, hb, hn, ha]);
+
+    // Accounts by SID (none last either way), privilege and hosts seen.
+    let account = |name: &str, sid: Option<&str>, privilege: Privilege| AccountSpec {
+        sid: sid.map(str::to_string),
+        privilege,
+        ..account_spec(name, None)
+    };
+    let a1 = upsert_account(
+        &mut case,
+        &account("col-a", Some("S-1-5-21-1-2-3-1105"), Privilege::Standard),
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    let a2 = upsert_account(
+        &mut case,
+        &account("col-b", None, Privilege::DomainAdmin),
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    let a3 = upsert_account(
+        &mut case,
+        &account("col-c", Some("S-1-5-21-1-2-3-1104"), Privilege::Service),
+        &analyst(),
+    )
+    .unwrap()
+    .id;
+    link_to(&mut case, RecordKind::Account, a1, "HOST-B");
+    link_to(&mut case, RecordKind::Account, a3, "HOST-A");
+    let accounts_in = |case: &Case, o| -> Vec<i64> {
+        let mut out = Vec::new();
+        for offset in [0, 2] {
+            out.extend(
+                accounts_ordered(case, Some("col-"), o, 2, offset)
+                    .unwrap()
+                    .items
+                    .iter()
+                    .map(|a| a.id),
+            );
+        }
+        out
+    };
+    assert_eq!(accounts_in(&case, order(By::Sid, false)), [a3, a1, a2]);
+    assert_eq!(accounts_in(&case, order(By::Sid, true)), [a1, a3, a2]);
+    assert_eq!(
+        accounts_in(&case, order(By::Privilege, false)),
+        [a2, a3, a1]
+    );
+    assert_eq!(
+        accounts_in(&case, order(By::HostsSeen, false)),
+        [a3, a1, a2]
+    );
+    assert_eq!(accounts_in(&case, order(By::HostsSeen, true)), [a1, a3, a2]);
+
+    // IOCs by tool (none last) and hosts seen.
+    let ioc = |value: &str, tool: Option<&str>| IocSpec {
+        tool: tool.map(str::to_string),
+        ..ioc_spec(IocType::FileName, value)
+    };
+    let i1 = upsert_ioc(&mut case, &ioc("col-1.exe", Some("rclone")), &analyst())
+        .unwrap()
+        .id;
+    let i2 = upsert_ioc(&mut case, &ioc("col-2.exe", None), &analyst())
+        .unwrap()
+        .id;
+    let i3 = upsert_ioc(&mut case, &ioc("col-3.exe", Some("Mimikatz")), &analyst())
+        .unwrap()
+        .id;
+    link_to(&mut case, RecordKind::Ioc, i1, "HOST-A");
+    let iocs_in = |case: &Case, o| -> Vec<i64> {
+        let q = IocQuery {
+            text: Some("col-".into()),
+            order: o,
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        for offset in [0, 2] {
+            out.extend(
+                iocs(case, &q, 2, offset)
+                    .unwrap()
+                    .items
+                    .iter()
+                    .map(|i| i.id),
+            );
+        }
+        out
+    };
+    assert_eq!(
+        iocs_in(&case, order(By::Tool, false)),
+        [i3, i1, i2],
+        "case ignored, none last"
+    );
+    assert_eq!(iocs_in(&case, order(By::Tool, true)), [i1, i3, i2]);
+    assert_eq!(iocs_in(&case, order(By::HostsSeen, false)), [i1, i2, i3]);
+    assert_eq!(iocs_in(&case, order(By::Status, false)), [i1, i2, i3]);
+
+    // Each kind refuses the columns it does not have.
+    for by in [By::Sid, By::Privilege, By::HostsSeen, By::Tool] {
+        assert_eq!(
+            code(hosts_ordered(&case, None, order(by, false), 10, 0)).0,
+            "invalid",
+            "{by:?}"
+        );
+    }
+    for by in [By::Role, By::Tool] {
+        assert_eq!(
+            code(accounts_ordered(&case, None, order(by, false), 10, 0)).0,
+            "invalid",
+            "{by:?}"
+        );
+    }
+    for by in [By::Role, By::Sid, By::Privilege] {
+        let q = IocQuery {
+            order: order(by, false),
+            ..Default::default()
+        };
+        assert_eq!(code(iocs(&case, &q, 10, 0)).0, "invalid", "{by:?}");
+    }
+    drop(case);
+    drop(d);
+}

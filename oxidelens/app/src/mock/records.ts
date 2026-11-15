@@ -346,6 +346,12 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
     const value = (x: CaseRecord): string | number | null => {
       switch (order.by) {
         case "name": return x.kind === "host" ? x.name.toLowerCase() : x.kind === "account" ? shown(x as unknown as StoredRecord) : fail("invalid", "IOCs do not order by name");
+        case "role": return x.kind === "host" ? x.role.toLowerCase() : fail("invalid", `${x.kind} records do not order by role`);
+        case "sid": return x.kind === "account" ? x.sid : fail("invalid", `${x.kind} records do not order by sid`);
+        case "privilege": return x.kind === "account" ? x.privilege : fail("invalid", `${x.kind} records do not order by privilege`);
+        case "hosts_seen": return x.kind === "host" ? fail("invalid", "host records do not order by hosts_seen") : x.hosts_seen.length === 0 ? null : JSON.stringify(x.hosts_seen);
+        case "tool": return x.kind === "ioc" ? (x.tool?.toLowerCase() ?? null) : fail("invalid", `${x.kind} records do not order by tool`);
+        case "status": return x.status;
         case "entries": return x.entries;
         case "first_seen": return x.first_seen;
         case "last_seen": return x.last_seen;
