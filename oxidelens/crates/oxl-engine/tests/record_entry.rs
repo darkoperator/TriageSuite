@@ -938,3 +938,74 @@ fn an_undated_entry_quotes_the_written_time_whole() {
     );
     assert_eq!(n(&case, "select count(*) from evtxtriage_events"), rows);
 }
+
+#[test]
+fn entry_reads_one_live_entry_by_id() {
+    let (_d, mut case) = loaded();
+    let id = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let e = oxl_engine::entry(&case, id).unwrap();
+    assert_eq!((e.id, e.evidence_rows), (id, 1));
+    assert_eq!(e, one(&case, id));
+    assert_eq!(code(oxl_engine::entry(&case, id + 99)).0, "not_found");
+    delete_entry(&mut case, id, &analyst()).unwrap();
+    assert_eq!(code(oxl_engine::entry(&case, id)).0, "not_found");
+}
+
+/// S10 in the engine, for every actor and every batch write that shares the
+/// check: 10,000 distinct rows pass it, 10,001 are refused with the count.
+#[test]
+fn a_batch_takes_at_most_max_action_rows_from_anyone() {
+    let (_d, mut case) = loaded();
+    let entry_id = promote_at(&mut case, FAILED_LOGON_WS01, &analyst());
+    let max = oxl_engine::MAX_ACTION_ROWS as i64;
+    // Ids no row has: the call-wide check is all that is reached.
+    let ok_rows: Vec<i64> = (1_000_000..1_000_000 + max).collect();
+    let too_many: Vec<i64> = (1_000_000..=1_000_000 + max).collect();
+    let mut with_dups = too_many.clone();
+    with_dups.extend(&ok_rows);
+    let a = analyst();
+    for (what, result) in [
+        ("mark ok", code(mark_suspicious(&mut case, &ok_rows, &a))),
+        (
+            "tag ok",
+            code(oxl_engine::add_tag(&mut case, &ok_rows, "t", &a)),
+        ),
+        ("promote ok", code(promote_rows(&mut case, &ok_rows, &a))),
+        (
+            "attach ok",
+            code(attach_rows(&mut case, entry_id, &ok_rows, &a)),
+        ),
+    ] {
+        assert_eq!(result.0, "ok", "{what}: {}", result.1);
+    }
+    for (what, result) in [
+        ("mark", code(mark_suspicious(&mut case, &too_many, &a))),
+        (
+            "tag",
+            code(oxl_engine::add_tag(&mut case, &too_many, "t", &a)),
+        ),
+        ("promote", code(promote_rows(&mut case, &too_many, &a))),
+        (
+            "attach",
+            code(attach_rows(&mut case, entry_id, &too_many, &a)),
+        ),
+        // Counted after de-duplication: repeats do not add to the count.
+        (
+            "mark dups",
+            code(mark_suspicious(&mut case, &with_dups, &a)),
+        ),
+    ] {
+        assert_eq!(result.0, "refused", "{what}");
+        assert!(
+            result
+                .1
+                .contains("select at most 10,000 rows (you have 10,001)"),
+            "{what}: {}",
+            result.1
+        );
+    }
+    // Repeats of 10,000 distinct rows are still 10,000.
+    let mut repeated = ok_rows.clone();
+    repeated.extend(&ok_rows);
+    assert_eq!(code(mark_suspicious(&mut case, &repeated, &a)).0, "ok");
+}

@@ -488,7 +488,7 @@ fn check_action_rows(n: u128) -> Result<()> {
 
 /// `n` with a comma between each group of three digits, as the window
 /// writes counts.
-fn with_commas(n: u128) -> String {
+pub(crate) fn with_commas(n: u128) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, d) in digits.chars().enumerate() {

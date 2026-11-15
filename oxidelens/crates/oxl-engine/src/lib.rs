@@ -55,7 +55,7 @@ pub use query::{
 };
 pub use record::{
     account_record, accounts, attach_rows, candidates, delete_entry, delete_record, detach_row,
-    edit_entry, entries, evidence, export_report, export_timeline_csv, export_workbook,
+    edit_entry, entries, entry, evidence, export_report, export_timeline_csv, export_workbook,
     guess_ioc_type, host_record, hosts, ioc_record, ioc_sightings, iocs, link, logon_summary,
     merge_records, new_entry, promote_rows, record_entries, set_entry_status, set_record_status,
     unlink, upsert_account, upsert_host, upsert_ioc, validate_attack_id, validate_ioc,

@@ -23,8 +23,8 @@ use crate::args::{
 };
 use crate::envelope::wrap;
 use oxl_engine::{
-    AccountSpec, Case, EngineError, EntryEdit, EntryQuery, EntryStatus, HostSpec, IocQuery,
-    IocSpec, IocType, Privilege, RecordKind, RecordStatus, Result,
+    AccountSpec, EntryEdit, EntryQuery, EntryStatus, HostSpec, IocQuery, IocSpec, IocType,
+    Privilege, RecordKind, RecordStatus, Result,
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -245,7 +245,7 @@ pub fn entry(ctx: &Ctx, cmd: &EntryCmd) -> Result<Reply> {
 /// An entry and every row attached to it, one read.
 fn entry_show(ctx: &Ctx, id: i64) -> Result<Reply> {
     let case = ctx.read_case()?;
-    let entry = find_entry(&case, id)?;
+    let entry = oxl_engine::entry(&case, id)?;
     let evidence = oxl_engine::evidence(&case, id)?;
     let mut p = entry_parts(&entry);
     let rows: Vec<Parts> = evidence
@@ -255,24 +255,6 @@ fn entry_show(ctx: &Ctx, id: i64) -> Result<Reply> {
     p.safe.insert("evidence".to_string(), safe_array(&rows));
     p.text.insert("evidence".to_string(), text_array(&rows));
     Ok(one_reply(p))
-}
-
-/// The live entry `id`, found by paging the timeline: the engine lists
-/// entries but has no read by id.
-fn find_entry(case: &Case, id: i64) -> Result<oxl_engine::Entry> {
-    let q = EntryQuery::default();
-    let mut offset = 0u64;
-    loop {
-        let page = oxl_engine::entries(case, &q, oxl_engine::MAX_LIMIT, offset)?;
-        let seen = page.items.len() as u64;
-        if let Some(entry) = page.items.into_iter().find(|e| e.id == id) {
-            return Ok(entry);
-        }
-        if !page.truncated || seen == 0 {
-            return Err(EngineError::NotFound(format!("no entry E-{id}")));
-        }
-        offset += seen;
-    }
 }
 
 fn safe_array(items: &[Parts]) -> Value {
@@ -297,7 +279,7 @@ pub fn evidence(ctx: &Ctx, cmd: &EvidenceCmd) -> Result<Reply> {
     let EvidenceCmd::List { entry, page } = cmd;
     let case = ctx.read_case()?;
     // The entry must exist, as `entry show` has it.
-    find_entry(&case, *entry)?;
+    oxl_engine::entry(&case, *entry)?;
     let all = oxl_engine::evidence(&case, *entry)?;
     let (kept, truncated) = slice(all, page);
     let items = kept

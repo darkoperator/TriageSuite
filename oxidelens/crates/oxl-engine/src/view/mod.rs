@@ -26,6 +26,7 @@ mod values;
 pub use export::{
     check_export_target, create_export_partial, export_csv, export_csv_guarded, ExportReport,
 };
+pub(crate) use page::with_commas;
 pub use page::{
     page_view, row_ids_at, row_positions, ColumnMeta, GridCell, GridPage, PageOptions,
     MAX_ACTION_ROWS,

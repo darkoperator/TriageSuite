@@ -716,6 +716,8 @@ fn history_of_one_target() {
 #[test]
 fn agent_ownership_outcomes() {
     let (_d, p) = case();
+    let r = svch0st(&p);
+    let r2 = row(&p, "evtxtriage_events", "rclone.exe").to_string();
     ok(
         &p,
         &[
@@ -728,14 +730,27 @@ fn agent_ownership_outcomes() {
         ],
     );
     ok(&p, &["host", "add", "--name", "WS01"]);
+    ok(&p, &["host", "add", "--name", "SRV01"]);
     ok(&p, &["account", "add", "--name", "jdoe"]);
+    ok(&p, &["account", "add", "--name", "other"]);
     ok(
         &p,
         &["ioc", "add", "--type", "ip", "--value", "203.0.113.7"],
     );
-    ok(&p, &["host", "add", "--name", "SRV01"]);
-    let r = svch0st(&p);
+    ok(
+        &p,
+        &["ioc", "add", "--type", "domain", "--value", "a.acme.local"],
+    );
+    ok(&p, &["entry", "attach", "1", "--rows", &r2]);
+    ok(
+        &p,
+        &[
+            "link", "add", "--entry", "1", "--kind", "account", "--id", "1",
+        ],
+    );
+    ok(&p, &["mark", "set", "--rows", &r.to_string()]);
 
+    // Each refusal is exit 4 `refused`, and its reason names the owner.
     let refused = |args: &[&str]| {
         let (c, v) = run(&p, AGENT, args);
         assert_eq!(
@@ -743,7 +758,6 @@ fn agent_ownership_outcomes() {
             (4, Some("refused")),
             "{args:?} -> {v}"
         );
-        // The refusal names the owner, inside the wrapper.
         let message = inner(&v["error"]["untrusted"])["message"]
             .as_str()
             .unwrap()
@@ -753,36 +767,57 @@ fn agent_ownership_outcomes() {
     refused(&["entry", "edit", "1", "--title", "mine now"]);
     refused(&["entry", "delete", "1"]);
     refused(&["entry", "attach", "1", "--rows", &r.to_string()]);
+    refused(&["entry", "detach", "1", "--row", &r2]);
+    refused(&["entry", "status", "1", "reviewed"]);
     refused(&["host", "edit", "1", "--role", "x"]);
     refused(&["host", "delete", "1"]);
     refused(&["host", "merge", "--from", "2", "--into", "1"]);
+    refused(&["host", "status", "1", "reviewed"]);
     refused(&["account", "edit", "1", "--note", "x"]);
     refused(&["account", "delete", "1"]);
+    refused(&["account", "merge", "--from", "2", "--into", "1"]);
+    refused(&["account", "status", "1", "reviewed"]);
     refused(&["ioc", "edit", "1", "--note", "x"]);
     refused(&["ioc", "delete", "1"]);
-    // Linking from an analyst's entry.
+    refused(&["ioc", "merge", "--from", "2", "--into", "1"]);
+    refused(&["ioc", "status", "1", "reviewed"]);
+    // Linking and unlinking from an analyst's entry.
     refused(&["link", "add", "--entry", "1", "--kind", "host", "--id", "1"]);
-    // Nobody but an analyst reviews, an agent's own items included.
-    let (c, v) = run(&p, AGENT, &["entry", "status", "1", "reviewed"]);
+    refused(&[
+        "link", "remove", "--entry", "1", "--kind", "account", "--id", "1",
+    ]);
+
+    // An agent clearing an analyst's mark is an outcome, not an error, that
+    // names the owner; the mark stays.
+    let (c, v) = run(&p, AGENT, &["mark", "clear", "--rows", &r.to_string()]);
     assert_eq!(
-        (c, v["error"]["code"].as_str()),
-        (4, Some("refused")),
+        (
+            c,
+            v["data"]["done"].as_u64(),
+            v["data"]["not_done"].as_u64()
+        ),
+        (0, Some(0), Some(1)),
         "{v}"
     );
-    let (c, _) = run(&p, AGENT, &["host", "status", "1", "reviewed"]);
-    assert_eq!(c, 4);
-    let (c, _) = run(&p, AGENT, &["account", "status", "1", "reviewed"]);
-    assert_eq!(c, 4);
-    let (c, _) = run(&p, AGENT, &["ioc", "status", "1", "reviewed"]);
-    assert_eq!(c, 4);
+    let reason = v["data"]["outcomes"][0]["reason"].as_str().unwrap();
+    assert!(reason.contains(ANALYST), "{reason}");
+    let marks = ok(&p, &["mark", "list", "--by", ANALYST]);
+    assert!(
+        marks["data"]["row_ids"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(r)),
+        "{marks}"
+    );
 
     // The analyst's items are untouched.
     let v = ok(&p, &["entry", "show", "1"]);
     assert_eq!(inner(&v["data"]["untrusted"])["title"], "analyst entry");
-    assert_eq!(v["data"]["evidence_rows"], 0);
+    assert_eq!(v["data"]["evidence_rows"], 1);
+    assert_eq!(v["data"]["status"], "draft");
 
-    // The agent's own entry: unreviewed, labelled, editable, linkable to
-    // an analyst's record, and an analyst's review keeps the label.
+    // The agent's own entry: unreviewed, labelled, editable, linkable to an
+    // analyst's record; it cannot review it; an analyst's review keeps the label.
     let (c, v) = run(
         &p,
         AGENT,
@@ -816,13 +851,19 @@ fn agent_ownership_outcomes() {
         AGENT,
         &["link", "add", "--entry", &id, "--kind", "host", "--id", "1"],
     );
-    assert_eq!(c, 0, "{v}");
+    assert_eq!((c, v["data"]["linked"].as_bool()), (0, Some(true)), "{v}");
     let (c, v) = run(
         &p,
         AGENT,
         &["entry", "attach", &id, "--rows", &r.to_string()],
     );
     assert_eq!((c, v["data"]["done"].as_u64()), (0, Some(1)), "{v}");
+    let (c, v) = run(&p, AGENT, &["entry", "status", &id, "reviewed"]);
+    assert_eq!(
+        (c, v["error"]["code"].as_str()),
+        (4, Some("refused")),
+        "{v}"
+    );
     let (c, v) = run(&p, AGENT, &["host", "add", "--name", "agent-host"]);
     assert_eq!(
         (
@@ -831,6 +872,13 @@ fn agent_ownership_outcomes() {
             v["data"]["agent_added"].as_bool()
         ),
         (0, Some("unreviewed"), Some(true)),
+        "{v}"
+    );
+    let agent_host = v["data"]["id"].as_i64().unwrap().to_string();
+    let (c, v) = run(&p, AGENT, &["host", "status", &agent_host, "reviewed"]);
+    assert_eq!(
+        (c, v["error"]["code"].as_str()),
+        (4, Some("refused")),
         "{v}"
     );
     let v = ok(&p, &["entry", "status", &id, "reviewed"]);
@@ -845,89 +893,108 @@ fn agent_ownership_outcomes() {
     // Reviewed, it is no longer the agent's to change.
     let (c, _) = run(&p, AGENT, &["entry", "edit", &id, "--title", "again"]);
     assert_eq!(c, 4);
-    // Promoting a row that is evidence on an analyst's reviewed entry is an
-    // outcome, not an error, and makes nothing.
-    let (c, v) = run(&p, AGENT, &["entry", "promote", "--rows", &r.to_string()]);
-    assert_eq!(c, 0, "{v}");
-    assert_eq!(v["data"]["created"], 0, "{v}");
 }
 
 /// Text from evidence never appears outside the wrapper in the record
-/// commands: values taken from rows, account and host names, evidence
-/// summaries, titles made from rows.
+/// commands (values taken from rows, account and host names, evidence
+/// summaries, titles made from rows), and each call really returns data: a
+/// call is expected to succeed (or fail with the code named), and the text
+/// it is about must be found inside its wrapper.
 #[test]
 fn evidence_text_is_wrapped() {
     let (d, p) = case();
-    let r = svch0st(&p);
-    let mut raws: Vec<(String, String)> = Vec::new();
-    let mut go = |args: Vec<String>| {
-        let mut full = vec![
-            "--case".to_string(),
-            p.clone(),
-            "--as".into(),
-            ANALYST.into(),
-        ];
-        full.extend(args.clone());
-        let refs: Vec<&str> = full.iter().map(String::as_str).collect();
-        let (code, raw) = common::ox_raw(&refs);
-        raws.push((args.join(" "), raw.clone()));
-        assert!([0, 2, 3, 4].contains(&code), "{args:?}: {code} {raw}");
-        raw
-    };
-    let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-    go(s(&["entry", "promote", "--rows", &r.to_string()]));
-    go(s(&[
-        "entry",
-        "add",
-        "--title",
-        "svc_backup from 203.0.113.7",
-        "--description",
-        "svch0st on SRV01",
-    ]));
-    go(s(&["entry", "list"]));
-    go(s(&["entry", "show", "1"]));
-    go(s(&["entry", "edit", "2", "--title", "svc_backup"]));
-    go(s(&["evidence", "list", "--entry", "1"]));
-    go(s(&["host", "list"]));
-    go(s(&["host", "show", "1"]));
-    go(s(&["host", "add", "--name", "SRV01", "--note", "svch0st"]));
-    go(s(&[
-        "account",
-        "add",
-        "--name",
-        "svc_backup",
-        "--domain",
-        "ACME",
-    ]));
-    go(s(&["account", "list"]));
-    go(s(&["account", "show", "1"]));
-    go(s(&["account", "logons", "--id", "1"]));
-    go(s(&[
-        "ioc",
-        "add",
-        "--type",
-        "ip",
-        "--value",
-        "203.0.113.7",
-        "--tool",
-        "svch0st",
-    ]));
-    go(s(&["ioc", "list"]));
-    go(s(&["ioc", "show", "1"]));
-    go(s(&["ioc", "sightings", "--id", "1"]));
-    go(s(&["candidates", "--row", &r.to_string()]));
-    go(s(&[
-        "link", "add", "--entry", "2", "--kind", "host", "--id", "2",
-    ]));
-    go(s(&["history", "--kind", "entry"]));
-    go(s(&["history", "--kind", "host", "--id", "H-1"]));
-    // Errors that quote evidence-shaped text.
-    go(s(&["ioc", "add", "--type", "ip", "--value", "svc_backup"]));
-    go(s(&["host", "add", "--name", "WS01"]));
-    go(s(&["host", "add", "--name", "WS01"]));
-    go(s(&["entry", "show", "999"]));
+    let r = svch0st(&p).to_string();
     let out = d.path().join("evidence.csv").to_string_lossy().into_owned();
-    go(s(&["export", "timeline", &out]));
+    // (arguments, expected exit code, text that must be inside the wrapper).
+    let calls: Vec<(Vec<&str>, i32, Option<&str>)> = vec![
+        (vec!["entry", "promote", "--rows", &r], 0, None),
+        (
+            vec![
+                "entry",
+                "add",
+                "--title",
+                "svc_backup from 203.0.113.7",
+                "--description",
+                "svch0st on SRV01",
+            ],
+            0,
+            Some("svc_backup from 203.0.113.7"),
+        ),
+        (
+            vec!["entry", "list"],
+            0,
+            Some("svc_backup from 203.0.113.7"),
+        ),
+        (vec!["entry", "show", "1"], 0, Some("Network connection")),
+        (
+            vec!["entry", "edit", "2", "--title", "svc_backup"],
+            0,
+            Some("svc_backup"),
+        ),
+        (
+            vec!["evidence", "list", "--entry", "1"],
+            0,
+            Some("evtxtriage_events"),
+        ),
+        (vec!["host", "list"], 0, Some("WS01")),
+        (vec!["host", "show", "1"], 0, Some("WS01")),
+        (
+            vec!["host", "add", "--name", "SRV01", "--note", "svch0st"],
+            0,
+            Some("svch0st"),
+        ),
+        (
+            vec!["account", "add", "--name", "svc_backup", "--domain", "ACME"],
+            0,
+            Some("ACME"),
+        ),
+        (vec!["account", "list"], 0, Some("svc_backup")),
+        (vec!["account", "show", "1"], 0, Some("svc_backup")),
+        (
+            vec!["account", "logons", "--id", "1"],
+            0,
+            Some("evtxtriage_events"),
+        ),
+        (
+            vec![
+                "ioc",
+                "add",
+                "--type",
+                "ip",
+                "--value",
+                "203.0.113.7",
+                "--tool",
+                "svch0st",
+            ],
+            0,
+            Some("203.0.113.7"),
+        ),
+        (vec!["ioc", "list"], 0, Some("203.0.113.7")),
+        (vec!["ioc", "show", "1"], 0, Some("203.0.113.7")),
+        (vec!["ioc", "sightings", "--id", "1"], 0, Some("WS01")),
+        (vec!["candidates", "--row", &r], 0, Some("203.0.113.7")),
+        (
+            vec!["link", "add", "--entry", "2", "--kind", "host", "--id", "2"],
+            0,
+            None,
+        ),
+        (vec!["history", "--kind", "entry"], 0, Some("svc_backup")),
+        (
+            vec!["history", "--kind", "host", "--id", "H-1"],
+            0,
+            Some("WS01"),
+        ),
+        // Errors that quote evidence-shaped text: wrapped, with the right code.
+        (
+            vec!["ioc", "add", "--type", "ip", "--value", "svc_backup"],
+            2,
+            Some("svc_backup"),
+        ),
+        // The promoted row already made the WS01 host record.
+        (vec!["host", "add", "--name", "WS01"], 4, None),
+        (vec!["entry", "show", "999"], 3, None),
+        (vec!["export", "timeline", &out], 0, Some("evidence.csv")),
+    ];
 
     let markers = [
         "svc_backup",
@@ -938,21 +1005,48 @@ fn evidence_text_is_wrapped() {
         "ACME",
         "evtxtriage_events",
     ];
-    let mut inside_hits = 0;
-    for (label, raw) in &raws {
-        let outside = strip_wrappers(raw);
+    for (args, want, inside) in &calls {
+        let (code, raw) = {
+            let mut full = vec!["--case", p.as_str(), "--as", ANALYST];
+            full.extend(args.iter().copied());
+            common::ox_raw(&full)
+        };
+        let label = args.join(" ");
+        assert_eq!(code, *want, "{label}: {raw}");
+        let outside = strip_wrappers(&raw);
         for m in markers {
             assert!(
                 !outside.contains(m),
                 "{label}: {m:?} escaped the wrapper:\n{outside}"
             );
         }
-        inside_hits += raw.matches("<untrusted_data").count();
+        if let Some(text) = inside {
+            let inner_text = wrapped_text(&raw);
+            assert!(
+                inner_text.contains(text),
+                "{label}: {text:?} is not inside the wrapper:\n{raw}"
+            );
+        }
+        // A successful call carries its data; an error says why.
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["ok"], *want == 0, "{label}: {raw}");
     }
-    assert!(
-        inside_hits > 20,
-        "the wrapper was barely used: {inside_hits}"
-    );
+}
+
+/// Everything between the wrapper lines, joined.
+fn wrapped_text(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<untrusted_data boundary=") {
+        let tail = &rest[start..];
+        let b_end = tail.find('>').unwrap();
+        let boundary = &tail["<untrusted_data boundary=".len()..b_end];
+        let close = format!("</untrusted_data boundary={boundary}>");
+        let end = tail.find(&close).expect("every wrapper is closed");
+        out.push_str(&tail[b_end + 1..end]);
+        rest = &tail[end + close.len()..];
+    }
+    out
 }
 
 fn strip_wrappers(text: &str) -> String {
@@ -1056,4 +1150,316 @@ fn bad_ids_are_usage_errors() {
             "{args:?} -> {v}"
         );
     }
+}
+
+const HOST_KEYS: [&str; 13] = [
+    "agent_added",
+    "created_at",
+    "created_by",
+    "deleted",
+    "entries",
+    "first_seen",
+    "id",
+    "last_seen",
+    "modified_at",
+    "modified_by",
+    "shown",
+    "status",
+    "untrusted",
+];
+
+/// A reply's keys, plus `extra` ones, sorted.
+fn with(base: &[&'static str], extra: &[&'static str]) -> Vec<&'static str> {
+    let mut all: Vec<&'static str> = base.iter().chain(extra).copied().collect();
+    all.sort_unstable();
+    all
+}
+
+/// `v` as an integer, whether the reply wrote it as a number or a string.
+fn int(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
+/// Every command's reply: its keys and the values that mean something (ids,
+/// shown ids, statuses, counts), pinned. Commands the other tests pin in
+/// more detail are repeated here for the whole set.
+#[test]
+fn reply_shapes_of_every_command() {
+    let (d, p) = case();
+    let r = svch0st(&p);
+    let r2 = row(&p, "evtxtriage_events", "rclone.exe");
+    let rs = r.to_string();
+    let r2s = r2.to_string();
+
+    // entry add / promote / attach / detach / status / show / delete
+    let v = ok(
+        &p,
+        &[
+            "entry",
+            "add",
+            "--title",
+            "t",
+            "--time",
+            "2026-01-05T02:14:07Z",
+        ],
+    );
+    assert_eq!(v["command"], "entry add");
+    let v = ok(&p, &["entry", "promote", "--rows", &rs]);
+    assert_eq!(v["command"], "entry promote");
+    assert_eq!(
+        keys(&v["data"]),
+        ["created", "done", "not_done", "outcomes"]
+    );
+    assert_eq!(
+        (
+            v["data"]["created"].as_u64(),
+            v["data"]["done"].as_u64(),
+            v["data"]["not_done"].as_u64()
+        ),
+        (Some(1), Some(1), Some(0))
+    );
+    let o = &v["data"]["outcomes"][0];
+    assert_eq!(keys(o), ["created", "entry_id", "reason", "row_id"]);
+    assert_eq!((int(&o["entry_id"]), int(&o["row_id"])), (Some(2), Some(r)));
+
+    let v = ok(&p, &["entry", "attach", "1", "--rows", &r2s]);
+    assert_eq!(v["command"], "entry attach");
+    assert_eq!(keys(&v["data"]), ["done", "not_done", "outcomes"]);
+    assert_eq!(
+        (v["data"]["done"].as_u64(), v["data"]["not_done"].as_u64()),
+        (Some(1), Some(0))
+    );
+    assert_eq!(v["data"]["outcomes"][0]["done"], true);
+
+    let evidence_keys = ["attached_at", "attached_by", "row_id", "standing"];
+    let v = ok(&p, &["entry", "show", "1"]);
+    assert_eq!(
+        keys(&v["data"]),
+        [
+            "agent_added",
+            "created_at",
+            "created_by",
+            "evidence",
+            "evidence_rows",
+            "id",
+            "modified_at",
+            "modified_by",
+            "needs_time",
+            "reviewed_by",
+            "shown",
+            "status",
+            "tactic",
+            "technique_ids",
+            "time",
+            "time_source",
+            "untrusted"
+        ]
+    );
+    assert_eq!(
+        (
+            v["data"]["id"].as_i64(),
+            v["data"]["evidence_rows"].as_u64()
+        ),
+        (Some(1), Some(1))
+    );
+    assert_eq!(keys(&v["data"]["evidence"][0]), evidence_keys);
+    assert_eq!(v["data"]["evidence"][0]["standing"], "unchanged");
+
+    let v = ok(&p, &["evidence", "list", "--entry", "1"]);
+    assert_eq!(v["command"], "evidence list");
+    assert_eq!(v["data"]["count"], 1);
+    assert_eq!(keys(&v["data"]["evidence"][0]), evidence_keys);
+
+    let v = ok(&p, &["entry", "detach", "1", "--row", &r2s]);
+    assert_eq!(keys(&v["data"]), ["entry", "row_id"]);
+    assert_eq!(
+        (int(&v["data"]["entry"]), int(&v["data"]["row_id"])),
+        (Some(1), Some(r2))
+    );
+
+    let v = ok(&p, &["entry", "status", "1", "reviewed"]);
+    assert_eq!(v["command"], "entry status");
+    assert_eq!(
+        (
+            v["data"]["id"].as_i64(),
+            v["data"]["status"].as_str(),
+            v["data"]["reviewed_by"].as_str()
+        ),
+        (Some(1), Some("reviewed"), Some(ANALYST))
+    );
+    let v = ok(&p, &["entry", "delete", "2"]);
+    assert_eq!(v["data"], json!({"id": 2, "shown": "E-2"}));
+
+    // hosts: the promoted row made WS01 (H-1).
+    let v = ok(&p, &["host", "show", "1"]);
+    assert_eq!(keys(&v["data"]), with(&HOST_KEYS, &["linked_entries"]));
+    assert_eq!(
+        (v["data"]["id"].as_i64(), v["data"]["shown"].as_str()),
+        (Some(1), Some("H-1"))
+    );
+    let listed = ok(&p, &["entry", "list"]);
+    assert_eq!(
+        keys(&v["data"]["linked_entries"][0]),
+        keys(&listed["data"]["entries"][0])
+    );
+    let v = ok(&p, &["host", "list"]);
+    assert_eq!(keys(&v["data"]), ["count", "hosts", "untrusted"]);
+    let item: Vec<&str> = with(&HOST_KEYS, &[])
+        .into_iter()
+        .filter(|k| *k != "untrusted")
+        .collect();
+    assert_eq!(keys(&v["data"]["hosts"][0]), item);
+    ok(&p, &["host", "add", "--name", "SRV01"]);
+    let v = ok(&p, &["host", "merge", "--from", "2", "--into", "1"]);
+    assert_eq!(v["data"], json!({"from": 2, "into": 1}));
+    let v = ok(&p, &["host", "status", "1", "unreviewed"]);
+    assert_eq!(
+        v["data"],
+        json!({"id": 1, "shown": "H-1", "status": "unreviewed"})
+    );
+    let v = ok(&p, &["host", "delete", "1"]);
+    assert_eq!(v["data"], json!({"id": 1, "shown": "H-1"}));
+
+    // accounts
+    let account_keys = [
+        "agent_added",
+        "created_at",
+        "created_by",
+        "deleted",
+        "entries",
+        "first_seen",
+        "id",
+        "last_seen",
+        "modified_at",
+        "modified_by",
+        "privilege",
+        "shown",
+        "status",
+        "untrusted",
+    ];
+    ok(
+        &p,
+        &["account", "add", "--name", "jdoe", "--domain", "ACME"],
+    );
+    ok(&p, &["account", "add", "--name", "other"]);
+    let v = ok(&p, &["account", "show", "1"]);
+    assert_eq!(keys(&v["data"]), with(&account_keys, &["linked_entries"]));
+    assert_eq!(
+        (v["data"]["shown"].as_str(), v["data"]["privilege"].as_str()),
+        (Some("A-1"), Some("unknown"))
+    );
+    let v = ok(&p, &["account", "list"]);
+    assert_eq!(keys(&v["data"]), ["accounts", "count", "untrusted"]);
+    assert_eq!(v["data"]["count"], 2);
+    let v = ok(&p, &["account", "merge", "--from", "2", "--into", "1"]);
+    assert_eq!(v["data"], json!({"from": 2, "into": 1}));
+    let v = ok(&p, &["account", "status", "1", "unreviewed"]);
+    assert_eq!(
+        v["data"],
+        json!({"id": 1, "shown": "A-1", "status": "unreviewed"})
+    );
+    let v = ok(&p, &["account", "logons", "--id", "1"]);
+    assert_eq!(
+        keys(&v["data"]),
+        ["count", "id", "logons", "unparsed", "untrusted"]
+    );
+    assert_eq!(v["data"]["id"], 1);
+    let logons = v["data"]["logons"].as_array().unwrap();
+    assert_eq!(v["data"]["count"], logons.len());
+    assert!(!logons.is_empty());
+    for l in logons {
+        assert_eq!(keys(l), ["count", "index", "logon_type", "outcome"]);
+    }
+    let v = ok(&p, &["account", "delete", "1"]);
+    assert_eq!(v["data"], json!({"id": 1, "shown": "A-1"}));
+
+    // iocs
+    let ioc_keys = [
+        "agent_added",
+        "attack_ids",
+        "created_at",
+        "created_by",
+        "deleted",
+        "entries",
+        "first_seen",
+        "id",
+        "ioc_type",
+        "last_seen",
+        "modified_at",
+        "modified_by",
+        "shown",
+        "status",
+        "untrusted",
+    ];
+    ok(
+        &p,
+        &["ioc", "add", "--type", "ip", "--value", "203.0.113.7"],
+    );
+    ok(
+        &p,
+        &["ioc", "add", "--type", "domain", "--value", "a.acme.local"],
+    );
+    let v = ok(&p, &["ioc", "show", "1"]);
+    assert_eq!(keys(&v["data"]), with(&ioc_keys, &["linked_entries"]));
+    assert_eq!(
+        (v["data"]["shown"].as_str(), v["data"]["ioc_type"].as_str()),
+        (Some("I-1"), Some("ip"))
+    );
+    let v = ok(&p, &["ioc", "list"]);
+    assert_eq!(keys(&v["data"]), ["count", "iocs", "untrusted"]);
+    assert_eq!(v["data"]["count"], 2);
+    let v = ok(&p, &["ioc", "sightings", "--id", "1"]);
+    assert_eq!(
+        keys(&v["data"]),
+        ["first", "hits", "id", "last", "untrusted"]
+    );
+    assert_eq!(v["data"]["id"], 1);
+    let v = ok(&p, &["ioc", "merge", "--from", "2", "--into", "1"]);
+    assert_eq!(v["data"], json!({"from": 2, "into": 1}));
+    let v = ok(&p, &["ioc", "status", "1", "unreviewed"]);
+    assert_eq!(
+        v["data"],
+        json!({"id": 1, "shown": "I-1", "status": "unreviewed"})
+    );
+    let v = ok(&p, &["ioc", "delete", "1"]);
+    assert_eq!(v["data"], json!({"id": 1, "shown": "I-1"}));
+
+    // link, candidates
+    ok(&p, &["host", "add", "--name", "WS01"]);
+    let v = ok(
+        &p,
+        &["link", "add", "--entry", "1", "--kind", "host", "--id", "3"],
+    );
+    assert_eq!(
+        v["data"],
+        json!({"entry": 1, "kind": "host", "id": 3, "linked": true})
+    );
+    let v = ok(
+        &p,
+        &[
+            "link", "remove", "--entry", "1", "--kind", "host", "--id", "3",
+        ],
+    );
+    assert_eq!(
+        v["data"],
+        json!({"entry": 1, "kind": "host", "id": 3, "linked": false})
+    );
+    let v = ok(&p, &["candidates", "--row", &rs]);
+    assert_eq!(keys(&v["data"]), ["candidates", "count", "untrusted"]);
+    let found = v["data"]["candidates"].as_array().unwrap();
+    assert_eq!(v["data"]["count"], found.len());
+    assert!(!found.is_empty());
+    for c in found {
+        assert_eq!(keys(c), ["existing_id", "index", "ioc_type", "kind"]);
+    }
+
+    // exports and history
+    let target = d.path().join("shape.csv").to_string_lossy().into_owned();
+    let v = ok(&p, &["export", "timeline", &target]);
+    assert_eq!(keys(&v["data"]), ["rows", "untrusted"]);
+    assert_eq!(v["data"]["rows"], 1);
+    let v = ok(&p, &["history", "--kind", "host"]);
+    assert_eq!(keys(&v["data"]), ["entries", "untrusted"]);
+    assert!(v["data"]["entries"].as_u64().unwrap() >= 3);
 }

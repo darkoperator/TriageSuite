@@ -584,6 +584,10 @@ pub fn set_entry_status(
     actor: &Actor,
 ) -> Result<Entry> {
     require_records(case)?;
+    let at = now_iso();
+    let tx = case.conn_mut().transaction()?;
+    let before = changeable(&tx, id, actor)?;
+    // Only after the owner check, so a refusal for someone else's entry names its owner.
     if actor.is_agent() {
         return Err(EngineError::Refused(
             "only an analyst sets an entry's status: an agent's entries stay unreviewed \
@@ -591,9 +595,6 @@ pub fn set_entry_status(
                 .to_string(),
         ));
     }
-    let at = now_iso();
-    let tx = case.conn_mut().transaction()?;
-    let before = changeable(&tx, id, actor)?;
     if before.status == status {
         return read_entry(&tx, id);
     }
@@ -701,6 +702,20 @@ fn change(id: i64, action: &'static str, before: &Stored, after: &Stored) -> Cha
         before: Some(before.json()),
         after: Some(after.json()),
     }
+}
+
+/// Live entry `id` as the Timeline shows it. `NotFound` for an unknown or
+/// deleted id, and in a case without the record tables.
+pub fn entry(case: &Case, id: i64) -> Result<Entry> {
+    let missing = || EngineError::NotFound(format!("no entry E-{id}"));
+    if !has_records(case) {
+        return Err(missing());
+    }
+    let (stored, evidence_rows, hosts) = read_full(case.conn(), id)?;
+    if stored.deleted {
+        return Err(missing());
+    }
+    Ok(shown(stored, evidence_rows, hosts))
 }
 
 /// Up to `limit` live entries from `offset` that `q` selects, in the

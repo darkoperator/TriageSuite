@@ -76,7 +76,8 @@ impl RowOutcome {
 
 /// The rows a batch works on: `rows` with each id kept once, at its first
 /// appearance, so a row named twice gets one outcome and counts once. The
-/// whole-call checks are made on them: at least one row, and no more than
+/// whole-call checks are made on them: at least one row, no more than
+/// `MAX_ACTION_ROWS` from anyone (S10), and no more than
 /// `AGENT_ROWS_PER_CALL` from an agent.
 pub(crate) fn check_batch(rows: &[i64], actor: &Actor) -> Result<Vec<i64>> {
     if rows.is_empty() {
@@ -84,6 +85,14 @@ pub(crate) fn check_batch(rows: &[i64], actor: &Actor) -> Result<Vec<i64>> {
     }
     let mut seen = HashSet::with_capacity(rows.len());
     let rows: Vec<i64> = rows.iter().copied().filter(|r| seen.insert(*r)).collect();
+    // Ruling S10: one action takes at most MAX_ACTION_ROWS rows, whoever acts.
+    if rows.len() > crate::view::MAX_ACTION_ROWS {
+        return Err(EngineError::Refused(format!(
+            "select at most {} rows (you have {})",
+            crate::view::with_commas(crate::view::MAX_ACTION_ROWS as u128),
+            crate::view::with_commas(rows.len() as u128)
+        )));
+    }
     if actor.is_agent() && rows.len() > AGENT_ROWS_PER_CALL {
         return Err(EngineError::Refused(format!(
             "an agent may change at most {AGENT_ROWS_PER_CALL} rows per call, not {}",
