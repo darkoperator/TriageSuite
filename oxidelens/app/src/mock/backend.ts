@@ -374,11 +374,11 @@ function select(state: GridState, skipChips: readonly string[] = []): Selection 
 }
 
 /** The cell a page carries: the text cut to the engine's 2,000 characters, a utc time also as display text. A cell is
- *  flagged as an IOC when its whole text equals a live IOC's value (the engine's rule is exact, case ignored). */
+ *  flagged as an IOC when its whole text equals a live IOC's value (the engine's rule is exact, case ignored; a clipped cell is never flagged). */
 function gridCell(col: ColumnMeta, v: string | null, iocs: ReadonlySet<string>): GridCell {
   const clipped = v !== null && v.length > 2000;
   const text = clipped ? v.slice(0, 2000) : v;
-  return { text, display: isUtc(col) && text !== null ? shown(col, text) : null, failed: false, clipped, ioc: v !== null && iocs.has(v.toLowerCase()) };
+  return { text, display: isUtc(col) && text !== null ? shown(col, text) : null, failed: false, clipped, ioc: v !== null && !clipped && iocs.has(v.toLowerCase()) };
 }
 
 const rowIdOf = (rel: MockRelation, index: number) => rel.firstId + index;

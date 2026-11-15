@@ -437,6 +437,31 @@ describe("pinned sheet tabs", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.getByRole("tab", { name: "Hosts 2" })).toBeInTheDocument();
   });
+
+  it("a recount that fails leaves no number, and unmounting cancels what is in flight", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<Shell />);
+    await user.click(await screen.findByRole("button", { name: /^\/cases\/acme\.case\.duckdb$/ }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^Hosts \d/ })).toBeInTheDocument());
+    // Hold the next host read, so the recount is pending: the old number is not kept.
+    let fail: (e: unknown) => void = () => {};
+    overrideCommand("records_list", (a) => {
+      if ((a?.query as { kind: string }).kind !== "host") return { items: [], truncated: false };
+      return new Promise((_, rej) => (fail = rej));
+    });
+    act(() => emitEvent("case-changed", { kinds: ["records"], generation: 70 }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Hosts" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Accounts 0" })).toBeInTheDocument());
+    act(() => fail({ code: "io", message: "boom" }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("tab", { name: "Hosts" })).toBeInTheDocument(); // still no number
+    // A recount still in flight when the shell goes away is cancelled.
+    act(() => emitEvent("case-changed", { kinds: ["records"], generation: 71 }));
+    await waitFor(() => expect(callsOf("records_list").length).toBeGreaterThan(8));
+    const before = callsOf("query_cancel").length;
+    unmount();
+    expect(callsOf("query_cancel").length).toBeGreaterThan(before);
+  });
 });
 
 describe("loading", () => {

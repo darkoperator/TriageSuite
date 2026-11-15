@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { GridCell } from "../contract/generated/GridCell";
@@ -16,5 +18,15 @@ describe("IOC cells", () => {
     expect(both).toHaveClass("cell-ioc");
     expect(both).toHaveAttribute("data-clipped", "true");
     expect(render(<CellText cell={cell({ ioc: true, failed: true })} />).container.querySelector(".cell-text")).toHaveClass("cell-ioc", "cell-failed");
+  });
+
+  it("a failed cell that is also an IOC keeps the accent underline", () => {
+    const css = readFileSync(join(process.cwd(), "src", "grid", "grid.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
+    const at = (pred: (sel: string) => boolean) => rules.findIndex((r) => pred(r.sel));
+    const failed = at((s) => s === ".cell-failed");
+    const both = at((s) => /^\.cell-ioc\.cell-failed$|^\.cell-failed\.cell-ioc$/.test(s));
+    expect(both).toBeGreaterThan(failed); // a later rule of equal or higher specificity wins
+    expect(rules[both].body).toMatch(/text-decoration-color:\s*var\(--accent\)/);
   });
 });

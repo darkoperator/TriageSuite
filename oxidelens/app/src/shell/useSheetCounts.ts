@@ -32,11 +32,19 @@ export function useSheetCounts(caseId: string | null, onError: (e: unknown) => v
     errorRef.current = onError;
   });
 
+  const cancelInFlight = useCallback(() => {
+    if (inFlight.current.size === 0) return;
+    const ids = [...inFlight.current];
+    inFlight.current = new Set();
+    queryCancel(ids).catch((e: unknown) => {
+      if (!isStale(e)) errorRef.current(e);
+    });
+  }, []);
+
   const read = useCallback((id: string | null) => {
     const mine = ++version.current;
     // Whatever the older version still has in flight is no longer wanted.
-    if (inFlight.current.size > 0) void queryCancel([...inFlight.current]).catch(() => {});
-    inFlight.current = new Set();
+    cancelInFlight();
     if (id === null) return; // `counts` is read only for the case it was made for, so nothing is left to clear
     for (const kind of KINDS) {
       const queryId = newQueryId();
@@ -55,7 +63,7 @@ export function useSheetCounts(caseId: string | null, onError: (e: unknown) => v
         },
       );
     }
-  }, []);
+  }, [cancelInFlight]);
 
   useEffect(() => {
     read(caseId);
@@ -63,11 +71,15 @@ export function useSheetCounts(caseId: string | null, onError: (e: unknown) => v
   useEffect(() => {
     const v = version;
     return () => {
-      v.current++; // the screen is gone: nothing in flight is drawn
+      v.current++; // the screen is gone: nothing in flight is drawn, and what is in flight is cancelled
+      cancelInFlight();
     };
-  }, []);
+  }, [cancelInFlight]);
   useCaseChanged(() => {
-    if (caseId !== null) read(caseId);
+    if (caseId === null) return;
+    // A recount is pending until its answer arrives: the old numbers are not kept, so a failed read shows none.
+    setCounts({ caseId, counts: {} });
+    read(caseId);
   });
   return counts.caseId === caseId ? counts.counts : {};
 }
