@@ -1341,3 +1341,62 @@ fn merging_a_host_with_evidence_into_another_name_is_refused() {
     let other = upsert_host(&mut case, &host_spec("SRV03"), &analyst()).unwrap();
     merge_records(&mut case, RecordKind::Host, ws01.id, other.id, &analyst()).unwrap();
 }
+
+#[test]
+fn hosts_and_accounts_narrow_by_text() {
+    use oxl_engine::{accounts_matching, hosts_matching};
+    let (d, mut case) = loaded();
+    for name in ["WS01", "WS02", "SRV01"] {
+        upsert_host(&mut case, &host_spec(name), &analyst()).unwrap();
+    }
+    upsert_account(&mut case, &account_spec("jdoe", Some("ACME")), &analyst()).unwrap();
+    upsert_account(&mut case, &account_spec("svc_backup", None), &analyst()).unwrap();
+    upsert_account(
+        &mut case,
+        &account_spec("asmith", Some("OTHER")),
+        &analyst(),
+    )
+    .unwrap();
+    let host_names = |text: Option<&str>| -> Vec<String> {
+        hosts_matching(&case, text, 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|h| h.name)
+            .collect()
+    };
+    // In the name, ASCII case ignored, in the sheet's order; no text lists every host.
+    assert_eq!(host_names(Some("ws")), ["WS01", "WS02"]);
+    assert_eq!(host_names(Some("srv")), ["SRV01"]);
+    assert_eq!(
+        host_names(None),
+        hosts(&case, 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|h| h.name)
+            .collect::<Vec<_>>()
+    );
+    let account_names = |text: &str| -> Vec<String> {
+        accounts_matching(&case, Some(text), 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|a| a.name)
+            .collect()
+    };
+    // In the name or the domain.
+    assert_eq!(account_names("JDO"), ["jdoe"]);
+    assert_eq!(account_names("acme"), ["jdoe"]);
+    assert_eq!(account_names("s"), ["asmith", "svc_backup"]);
+    assert_eq!(account_names("nobody"), Vec::<String>::new());
+    // A filter is bounded like the other sheets'.
+    let long = "x".repeat(1_001);
+    assert_eq!(code(hosts_matching(&case, Some(&long), 10, 0)).0, "invalid");
+    assert_eq!(
+        code(accounts_matching(&case, Some(&long), 10, 0)).0,
+        "invalid"
+    );
+    drop(case);
+    drop(d);
+}

@@ -293,8 +293,23 @@ pub fn host_record(case: &Case, id: i64) -> Result<HostRecord> {
 /// then id. A case without the record tables has none. `Invalid` for a
 /// `limit` of 0 or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
 pub fn hosts(case: &Case, limit: u32, offset: u64) -> Result<Listing<HostRecord>> {
+    hosts_matching(case, None, limit, offset)
+}
+
+/// [`hosts`] narrowed to the hosts whose name holds `text` (case ignored);
+/// `None` lists every one. `Invalid` as `hosts` is, and for a text over
+/// 1,000 characters.
+pub fn hosts_matching(
+    case: &Case,
+    text: Option<&str>,
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<HostRecord>> {
     check_limit(limit)?;
     check_offset(offset)?;
+    if let Some(text) = text {
+        super::check_name_filter(text)?;
+    }
     if !has_records(case) {
         return Ok(Listing {
             items: Vec::new(),
@@ -304,10 +319,12 @@ pub fn hosts(case: &Case, limit: u32, offset: u64) -> Result<Listing<HostRecord>
     let raw: Vec<RawHost> = case
         .conn()
         .prepare(&format!(
-            "{} WHERE NOT r.deleted ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?",
+            "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
+             OR contains(lower(r.name), lower(?))) \
+             ORDER BY lower(r.name), r.id LIMIT ? OFFSET ?",
             host_select()
         ))?
-        .query_map(params![fetch_limit(limit), offset], raw_host)?
+        .query_map(params![text, text, fetch_limit(limit), offset], raw_host)?
         .collect::<std::result::Result<_, _>>()?;
     let items = raw
         .into_iter()

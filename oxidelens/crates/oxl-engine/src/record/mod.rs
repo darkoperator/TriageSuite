@@ -41,9 +41,11 @@ pub use export::{
 #[cfg(feature = "test-support")]
 pub use iocs::ioc_sightings_paused;
 
-pub use accounts::{account_record, accounts, upsert_account, AccountRecord, AccountSpec};
+pub use accounts::{
+    account_record, accounts, accounts_matching, upsert_account, AccountRecord, AccountSpec,
+};
 pub use candidates::{candidates, Candidate};
-pub use hosts::{host_record, hosts, upsert_host, HostRecord, HostSpec};
+pub use hosts::{host_record, hosts, hosts_matching, upsert_host, HostRecord, HostSpec};
 pub(crate) use iocs::ioc_texts;
 pub use iocs::{
     ioc_record, ioc_sightings, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec, Sightings,
@@ -86,6 +88,21 @@ pub const TACTICS: [&str; 14] = [
     "Exfiltration",
     "Impact",
 ];
+
+/// The most characters of a Hosts or Accounts sheet's text filter.
+const MAX_NAME_FILTER: usize = 1_000;
+
+/// `Invalid` for a Hosts or Accounts text filter over `MAX_NAME_FILTER`
+/// characters.
+pub(crate) fn check_name_filter(text: &str) -> Result<()> {
+    let n = text.chars().count();
+    if n > MAX_NAME_FILTER {
+        return Err(EngineError::Invalid(format!(
+            "a record name filter is at most {MAX_NAME_FILTER} characters, not {n}"
+        )));
+    }
+    Ok(())
+}
 
 /// Whether `case` has the record tables.
 pub(crate) fn has_records(case: &Case) -> bool {

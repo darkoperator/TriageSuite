@@ -3,7 +3,7 @@
 // epoch): a glyph sits at (t - first) / (last - first) of the width, plain arithmetic on the engine's numbers, no date
 // parsed. The axis is labelled with the first and last times as the engine shows them. Undated entries ("needs a
 // time") are not drawn; they are counted under the axis.
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { Entry } from "../contract/generated/Entry";
 import { displaySafe } from "../text";
 import MarkGlyph from "./MarkGlyph";
@@ -13,14 +13,12 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 export const NO_HOST = "no host";
 
 export default function HostLanes({
-  entries, selected, onSelect, onKeyDown,
+  entries, selected, onSelect,
 }: {
   /** The entries, in the engine's order. */
   entries: Entry[];
   selected: number | null;
   onSelect(id: number): void;
-  /** The sheet's keys (N, Enter, R, Del), the same as on the table; a glyph names its entry by `data-entry`. */
-  onKeyDown(e: KeyboardEvent<HTMLElement>): void;
 }): ReactNode {
   const dated = entries.filter((e) => !e.needs_time && e.time_us !== null);
   const undated = entries.length - dated.length;
@@ -37,7 +35,8 @@ export default function HostLanes({
   const span = first && last ? last.time_us! - first.time_us! : 0;
   const at = (e: Entry) => (span === 0 ? 50 : ((e.time_us! - first!.time_us!) * 100) / span);
   return (
-    <section className="host-lanes" aria-label="Host lanes" onKeyDown={onKeyDown}>
+    // Focusable, so the sheet's keys (held by the sheet around it) work here with no glyph to focus: every entry undated.
+    <section className="host-lanes" aria-label="Host lanes" tabIndex={-1}>
       {lanes.length === 0 && <p className="pane-empty">No dated entries to draw.</p>}
       {lanes.map((host) => (
         <div key={host} className="lane" role="group" aria-label={`Host ${displaySafe(host)}`}>

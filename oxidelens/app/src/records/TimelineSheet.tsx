@@ -118,6 +118,18 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
 
   // ---- the right pane and the status bar, while this tab is shown ------------------------------------------------------
   const table = useRef<HTMLTableElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  // Switching views moves the focus into the view shown (the table, or the lanes: the first glyph, else the lanes
+  // themselves), so the keys keep working where the toggle left off. Not on the first render.
+  const shownView = useRef(view);
+  useEffect(() => {
+    if (shownView.current === view) return;
+    shownView.current = view;
+    const b = body.current;
+    if (!b) return;
+    const target = view === "table" ? b.querySelector<HTMLElement>("table") : (b.querySelector<HTMLElement>(".lane-glyph") ?? b.querySelector<HTMLElement>(".host-lanes"));
+    target?.focus();
+  }, [view]);
   const select = useCallback((id: number | null) => {
     setSelected(id);
     setCreating(false);
@@ -232,11 +244,13 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
           </button>
         </div>
       </div>
+      {/* Both views sit in one container that holds the sheet's keys; the view switch moves the focus into it. */}
+      <div ref={body} className="sheet-body" role="group" aria-label="Entries" tabIndex={-1} onKeyDown={onKeyDown}>
       {view === "lanes" ? (
-        <HostLanes entries={items} selected={selected} onSelect={select} onKeyDown={onKeyDown} />
+        <HostLanes entries={items} selected={selected} onSelect={select} />
       ) : (
         <div className="sheet-scroll">
-          <table ref={table} className="sheet-table" role="grid" aria-label="Timeline entries" tabIndex={0} onKeyDown={onKeyDown}>
+          <table ref={table} className="sheet-table" role="grid" aria-label="Timeline entries" tabIndex={0}>
             <thead>
               <tr>
                 <th aria-label="Mark" className="col-mark" />
@@ -289,6 +303,7 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
           {listed?.value?.items.length === 0 && <p className="pane-empty">No entries. Press M on a row, or N here, to make one.</p>}
         </div>
       )}
+      </div>
       {statusText !== null && (
         <div className="sheet-foot">
           <span>{statusText}</span>

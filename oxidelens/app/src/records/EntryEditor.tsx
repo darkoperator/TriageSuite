@@ -345,10 +345,11 @@ export default function EntryEditor({
 // ---- linking a record by hand -------------------------------------------------------------------------------------------
 /** How many records the picker lists at once. */
 const LISTED = 200;
-const QUERY: Record<RecordKind, RecordQuery> = {
-  host: { kind: "host" },
-  account: { kind: "account" },
-  ioc: { kind: "ioc", ioc_type: null, tool: null, text: null },
+/** The engine's query for `kind` narrowed by `text` (a host's name, an account's name or domain, an IOC's value, tool
+ *  or note); empty text lists them all. */
+const queryOf = (kind: RecordKind, text: string): RecordQuery => {
+  const t = text === "" ? null : text;
+  return kind === "ioc" ? { kind, ioc_type: null, tool: null, text: t } : { kind, text: t };
 };
 /** A record as one line in the picker: a host's name, an account's `domain\name`, an IOC's type and value. */
 function recordText(r: CaseRecord): string {
@@ -357,11 +358,20 @@ function recordText(r: CaseRecord): string {
   return `${r.ioc_type} ${r.value}`;
 }
 
-/** *+ link a host, account or IOC*: the case's records of one kind; a click links one (focus goes back to the button). */
+/** *+ link a host, account or IOC*: the case's records of one kind, the first 200, and typing asks the engine for the
+ *  ones whose text matches, so any record is reachable. A read is for one (kind, text): an answer for an older one is
+ *  dropped, and the read in flight is cancelled when they change or the picker closes. A click links one (focus goes
+ *  back to the button). */
 function LinkPicker({ entryId, onClose }: { entryId: number; onClose(): void }): ReactNode {
   const { change, reportError } = useShell();
   const [kind, setKind] = useState<RecordKind>("host");
-  const listed = useCaseRead(`records:${kind}`, change.generation, (next) => recordsList(QUERY[kind], LISTED, 0, "dialog:link", next()), reportError);
+  const [text, setText] = useState("");
+  const listed = useCaseRead(
+    JSON.stringify([kind, text]),
+    change.generation,
+    (next) => recordsList(queryOf(kind, text), LISTED, 0, "dialog:link", next()),
+    reportError,
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const close = onClose;
@@ -386,6 +396,7 @@ function LinkPicker({ entryId, onClose }: { entryId: number; onClose(): void }):
           <option value="ioc">IOC</option>
         </select>
       </label>
+      <input type="search" aria-label="Filter records" placeholder="Type to find a record" value={text} onChange={(e) => setText(e.target.value)} />
       <div className="record-list" role="listbox" aria-label="Records">
         {(listed?.value?.items ?? []).map((r) => (
           <button key={r.id} type="button" role="option" aria-selected={false} className="record-option" disabled={busy} onClick={() => void pick(r)}>
@@ -394,8 +405,8 @@ function LinkPicker({ entryId, onClose }: { entryId: number; onClose(): void }):
         ))}
       </div>
       {listed === null && <p className="form-hint">Loading…</p>}
-      {listed?.value?.items.length === 0 && <p className="form-hint">The case has none of these yet.</p>}
-      {listed?.value?.truncated && <p className="form-hint">{`The first ${LISTED}.`}</p>}
+      {listed?.value?.items.length === 0 && <p className="form-hint">{text === "" ? "The case has none of these yet." : "None match."}</p>}
+      {listed?.value?.truncated && <p className="form-hint">{`The first ${LISTED}: type to find the others.`}</p>}
       <div className="form-buttons">
         <button type="button" onClick={close}>Cancel</button>
       </div>

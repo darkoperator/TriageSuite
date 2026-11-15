@@ -315,8 +315,23 @@ pub fn account_record(case: &Case, id: i64) -> Result<AccountRecord> {
 /// tables has none. `Invalid` for a `limit` of 0 or over `MAX_LIMIT`, or an
 /// `offset` past `i64::MAX`.
 pub fn accounts(case: &Case, limit: u32, offset: u64) -> Result<Listing<AccountRecord>> {
+    accounts_matching(case, None, limit, offset)
+}
+
+/// [`accounts`] narrowed to the accounts whose name or domain holds `text`
+/// (case ignored); `None` lists every one. `Invalid` as `accounts` is, and
+/// for a text over 1,000 characters.
+pub fn accounts_matching(
+    case: &Case,
+    text: Option<&str>,
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<AccountRecord>> {
     check_limit(limit)?;
     check_offset(offset)?;
+    if let Some(text) = text {
+        super::check_name_filter(text)?;
+    }
     if !has_records(case) {
         return Ok(Listing {
             items: Vec::new(),
@@ -326,11 +341,16 @@ pub fn accounts(case: &Case, limit: u32, offset: u64) -> Result<Listing<AccountR
     let raw: Vec<RawAccount> = case
         .conn()
         .prepare(&format!(
-            "{} WHERE NOT r.deleted \
+            "{} WHERE NOT r.deleted AND (CAST(? AS VARCHAR) IS NULL \
+             OR contains(lower(r.name), lower(?)) \
+             OR contains(lower(coalesce(r.domain, '')), lower(?))) \
              ORDER BY lower(r.name), lower(r.domain) NULLS FIRST, r.id LIMIT ? OFFSET ?",
             account_select()
         ))?
-        .query_map(params![fetch_limit(limit), offset], raw_account)?
+        .query_map(
+            params![text, text, text, fetch_limit(limit), offset],
+            raw_account,
+        )?
         .collect::<std::result::Result<_, _>>()?;
     let items = raw
         .into_iter()

@@ -310,6 +310,10 @@ export function evidenceList(r: MockRecords, entry: number): Evidence[] {
 
 export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offset: number): Listing<CaseRecord> {
   let all = liveRecords(r, q.kind);
+  if (q.kind !== "ioc" && q.text) {
+    const text = q.text.toLowerCase();
+    all = all.filter((x) => [x.name, q.kind === "account" ? x.domain : null].some((v) => v?.toLowerCase().includes(text)));
+  }
   if (q.kind === "ioc") {
     const text = q.text?.toLowerCase();
     all = all

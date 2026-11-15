@@ -400,6 +400,32 @@ describe("Host lanes", () => {
     await within(rightPane()).findByRole("region", { name: "Entry E-2" });
   });
 
+  it("switching_to_lanes_moves_the_keys_there", async () => {
+    const user = await openTimeline();
+    // The switch leaves the focus where the analyst put it: the keys still reach the sheet.
+    await user.click(screen.getByRole("button", { name: "Host lanes" }));
+    const lanes = await screen.findByRole("region", { name: "Host lanes" });
+    expect(lanes.contains(document.activeElement)).toBe(true);
+    await user.keyboard("n");
+    await within(rightPane()).findByRole("form", { name: "New entry" });
+    // And back: the table takes the focus.
+    await user.click(within(rightPane()).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Table" }));
+    await waitFor(() => expect(sheet()).toHaveFocus());
+  });
+
+  it("n_works_in_lanes_with_only_undated_entries", async () => {
+    const items = [entryOf({ id: 1, hosts: ["WS01"] }), entryOf({ id: 2 })];
+    overrideCommand("entries_list", async () => ({ items, truncated: false }));
+    const user = await openTimeline();
+    await user.click(screen.getByRole("button", { name: "Host lanes" }));
+    const lanes = await screen.findByRole("region", { name: "Host lanes" });
+    expect(within(lanes).queryAllByRole("button")).toHaveLength(0);
+    expect(lanes.textContent).toContain("2 undated entries, not drawn");
+    await user.keyboard("n");
+    await within(rightPane()).findByRole("form", { name: "New entry" });
+  });
+
   it("the_sheet_keys_work_in_host_lanes", async () => {
     const items = [
       dated(1, "2026-01-05T02:14:00.000000Z", { hosts: ["WS01"] }),
@@ -448,6 +474,58 @@ async function promoteRow3() {
   await user.keyboard("m");
   return { user, editor: await within(rightPane()).findByRole("region", { name: "Entry E-5" }) };
 }
+
+describe("linking a record by hand", () => {
+  it("the_link_picker_finds_a_record_past_the_first_page_by_typing", async () => {
+    // The case has more hosts than the picker lists at once; the one wanted is not among them, and typing asks the
+    // engine for it. An answer for an older text is dropped.
+    const first = Array.from({ length: 200 }, (_, i) => ({ kind: "host", id: 1000 + i, name: `HOST${String(i).padStart(3, "0")}`, role: "", note: "" }));
+    const old = held<unknown>();
+    overrideCommand("records_list", (a) => {
+      const q = (a as { query: { kind: string; text?: string | null } }).query;
+      if (q.kind !== "host") return import("../mock/backend").then((m) => m.mockCall("records_list", a as Record<string, unknown>));
+      if (!q.text) return Promise.resolve({ items: first, truncated: true });
+      if (q.text === "WS9") return old.promise;
+      return Promise.resolve({ items: [{ kind: "host", id: 4242, name: "WS999", role: "", note: "" }], truncated: false });
+    });
+    overrideCommand("record_link", async () => null);
+    const user = await openTimeline();
+    const editor = await select(user, 1);
+    await user.click(await within(editor).findByRole("button", { name: "+ link a host, account or IOC" }));
+    const dialog = await screen.findByRole("dialog", { name: "Link a record" });
+    const list = within(dialog).getByRole("listbox", { name: "Records" });
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(200));
+    expect(within(list).queryByRole("option", { name: "WS999" })).toBeNull();
+    const box = within(dialog).getByRole("searchbox", { name: "Filter records" });
+    await user.type(box, "WS9");
+    await user.type(box, "9");
+    const found = await within(dialog).findByRole("option", { name: "WS999" });
+    await act(async () => old.release({ items: [{ kind: "host", id: 7, name: "STALE", role: "", note: "" }], truncated: false }));
+    expect(within(dialog).queryByRole("option", { name: "STALE" })).toBeNull();
+    const asked = callsOf("records_list").map((c) => (c.args as { query: { text?: string | null } }).query.text ?? null);
+    expect(asked).toContain("WS99");
+    await user.click(found);
+    await waitFor(() => expect(callsOf("record_link").map((c) => c.args)).toEqual([{ entryId: 1, kind: "host", recordId: 4242 }]));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closing_the_link_picker_cancels_its_read", async () => {
+    overrideCommand("records_list", (a) => {
+      const q = (a as { query: { kind: string } }).query;
+      if (q.kind === "host" && (a as { slot: string }).slot === "dialog:link") return new Promise(() => {});
+      return import("../mock/backend").then((m) => m.mockCall("records_list", a as Record<string, unknown>));
+    });
+    const user = await openTimeline();
+    const editor = await select(user, 1);
+    await user.click(await within(editor).findByRole("button", { name: "+ link a host, account or IOC" }));
+    const dialog = await screen.findByRole("dialog", { name: "Link a record" });
+    const pending = callsOf("records_list").filter((c) => (c.args as { slot: string }).slot === "dialog:link").at(-1)!;
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(callsOf("query_cancel").flatMap((c) => (c.args as { queryIds: string[] }).queryIds)).toContain((pending.args as { queryId: string }).queryId),
+    );
+  });
+});
 
 describe("the candidates after M", () => {
   it("candidates_scan_every_evidence_row", async () => {

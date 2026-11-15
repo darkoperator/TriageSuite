@@ -321,7 +321,14 @@ fn a_promoted_row_is_an_entry_with_its_evidence_and_host() {
 
     let listed = r::entries_list(&s.state, at("timeline"), &EntryQuery::default(), 10, 0).unwrap();
     assert_eq!(listed.items.iter().map(|e| e.id).collect::<Vec<_>>(), [id]);
-    let hosts = r::records_list(&s.state, at("hosts"), &RecordQuery::Host, 10, 0).unwrap();
+    let hosts = r::records_list(
+        &s.state,
+        at("hosts"),
+        &RecordQuery::Host(Default::default()),
+        10,
+        0,
+    )
+    .unwrap();
     let CaseRecord::Host(ws01) = &hosts.items[0] else {
         panic!("a host list holds hosts: {:?}", hosts.items);
     };
@@ -417,7 +424,10 @@ fn the_window_json_is_what_the_commands_take() {
         RecordQuery::Ioc(IocQuery { text: Some(_), .. })
     ));
     let host: RecordQuery = serde_json::from_value(json!({ "kind": "host" })).unwrap();
-    assert!(matches!(host, RecordQuery::Host));
+    assert!(matches!(
+        host,
+        RecordQuery::Host(r::NameQuery { text: None })
+    ));
 
     let s = setup();
     let hostile = oxl_fixtures::hostile_record_values();
@@ -490,7 +500,14 @@ fn records_of_every_kind_round_trip() {
     )
     .unwrap();
     assert_eq!(found.items.len(), 1);
-    let accounts = r::records_list(&s.state, at("accounts"), &RecordQuery::Account, 10, 0).unwrap();
+    let accounts = r::records_list(
+        &s.state,
+        at("accounts"),
+        &RecordQuery::Account(Default::default()),
+        10,
+        0,
+    )
+    .unwrap();
     assert!(matches!(&accounts.items[..], [CaseRecord::Account(x)] if x.name == "jdoe"));
     assert_eq!(
         r::record_upsert(&s.state, &ioc_spec(IocType::Ip, "not an address"))
@@ -722,7 +739,15 @@ fn the_record_commands_need_a_case() {
         ),
         (
             "records_list",
-            Box::new(|s| ok(r::records_list(s, at("r"), &RecordQuery::Host, 10, 0))),
+            Box::new(|s| {
+                ok(r::records_list(
+                    s,
+                    at("r"),
+                    &RecordQuery::Host(Default::default()),
+                    10,
+                    0,
+                ))
+            }),
         ),
         (
             "record_get",
@@ -803,4 +828,52 @@ fn the_record_commands_need_a_case() {
     }
     assert!(!out.exists());
     assert!(events.named(CASE_CHANGED).is_empty());
+}
+
+/// The link picker reaches any host or account by typing: `records_list`
+/// takes a text for hosts (the name) and accounts (name or domain), and a
+/// query without one, as every older caller sends it, lists them all.
+#[test]
+fn records_list_narrows_hosts_and_accounts_by_text() {
+    let s = setup();
+    for name in ["WS01", "WS02", "SRV01"] {
+        r::record_upsert(&s.state, &host_spec(None, name, "")).unwrap();
+    }
+    let query = |v: Value| -> RecordQuery { serde_json::from_value(v).unwrap() };
+    let names = |q: &RecordQuery| -> Vec<String> {
+        r::records_list(&s.state, at("hosts"), q, 100, 0)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|c| match c {
+                CaseRecord::Host(h) => h.name,
+                CaseRecord::Account(a) => a.name,
+                CaseRecord::Ioc(i) => i.value,
+            })
+            .collect()
+    };
+    assert_eq!(
+        names(&query(json!({ "kind": "host", "text": "ws0" }))),
+        ["WS01", "WS02"]
+    );
+    assert_eq!(
+        names(&query(json!({ "kind": "host", "text": null }))).len(),
+        3
+    );
+    assert_eq!(names(&query(json!({ "kind": "host" }))).len(), 3);
+    r::record_upsert(
+        &s.state,
+        &serde_json::from_value(json!({
+            "kind": "account", "id": null, "name": "jdoe", "domain": "ACME", "sid": null,
+            "description": "", "privilege": "unknown", "note": "",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        names(&query(json!({ "kind": "account", "text": "acme" }))),
+        ["jdoe"]
+    );
+    assert!(names(&query(json!({ "kind": "account", "text": "nobody" }))).is_empty());
+    assert!(serde_json::from_value::<RecordQuery>(json!({ "kind": "host", "other": 1 })).is_err());
 }
