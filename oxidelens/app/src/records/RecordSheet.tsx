@@ -45,6 +45,13 @@ export interface Column<R> {
   num?: boolean;
 }
 
+/**
+ * A group header's count. Groups split only the pages shown, so while the engine says more follow (`truncated`) the
+ * count is of what is shown, and says so ("12+ shown"): a later page can add to any group. The contract has no count per
+ * group, and a read per group is not worth it for a label.
+ */
+export const groupCount = (n: number, truncated: boolean): string => (truncated ? `${fmt(n)}+ shown` : fmt(n));
+
 /** A field the sheet can group by. */
 export interface GroupOption<R> {
   key: string;
@@ -262,7 +269,7 @@ export default function RecordSheet<R extends CaseRecord>({
               {grouped.map((g) => [
                 group !== null && (
                   <tr key={`group:${g.key}`} className="sheet-group" data-group={g.key}>
-                    <td role="gridcell" colSpan={columns.length}>{`${displaySafe(g.key)} · ${fmt(g.rows.length)}`}</td>
+                    <td role="gridcell" colSpan={columns.length}>{`${displaySafe(g.key)} · ${groupCount(g.rows.length, listed?.value?.truncated ?? false)}`}</td>
                   </tr>
                 ),
                 ...g.rows.map((r) => (

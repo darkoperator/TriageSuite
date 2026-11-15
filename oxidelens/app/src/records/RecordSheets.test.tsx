@@ -215,6 +215,28 @@ describe("the record sheets", () => {
     expect(sheetQueries("IOCs")).toHaveLength(reads);
   });
 
+  it("a_group_header_says_when_it_counts_loaded_pages_only", async () => {
+    // Three IOCs, two by Mimikatz. While the engine says more follow, the count is of what is shown, and says so.
+    const items = [iocOf({ id: 1, value: "a.exe", tool: "Mimikatz" }), iocOf({ id: 2, value: "b.exe" }), iocOf({ id: 3, value: "c.exe", tool: "Mimikatz" })];
+    let truncated = true;
+    overrideCommand("records_list", async (a) => {
+      const args = a as { slot: string; offset: number };
+      if (args.slot !== "sheet:iocs") return realCall("records_list", a);
+      return args.offset === 0 ? { items, truncated } : { items: [], truncated: false };
+    });
+    const user = await openSheet("IOCs");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "tool");
+    const header = (key: string) =>
+      within(grid("IOCs")).getAllByRole("row").find((r) => r.getAttribute("data-group") === key)!;
+    await waitFor(() => expect(header("Mimikatz").textContent).toBe("Mimikatz · 2+ shown"));
+    expect(header("no tool").textContent).toBe("no tool · 1+ shown");
+    // Once every page is shown, the count is the group's.
+    truncated = false;
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(header("Mimikatz").textContent).toBe("Mimikatz · 2"));
+    expect(header("no tool").textContent).toBe("no tool · 1");
+  });
+
   it("every_shown_column_sorts_through_the_engine", async () => {
     // The contract's orders, every one named (a new one in Rust fails the build here until it is listed), and the one
     // each column of each sheet asks for. Sightings are computed in this session and never stored (S5), so the engine

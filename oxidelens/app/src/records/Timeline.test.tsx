@@ -192,8 +192,26 @@ describe("the Timeline sheet", () => {
     await waitFor(() => expect(within(sheet()).getAllByRole("row").filter((r) => r.getAttribute("data-group") !== null)).toHaveLength(3));
     const groups = within(sheet()).getAllByRole("row").filter((r) => r.getAttribute("data-group") !== null);
     expect(groups.map((g) => g.getAttribute("data-group"))).toEqual(["WS01", "SRV01", "no host"]);
+    // The whole answer is shown: each header counts its group.
+    expect(groups.map((g) => g.textContent)).toEqual(["WS01 · 2", "SRV01 · 1", "no host · 1"]);
     expect(idsDrawn()).toEqual([1, 2, 2, 3]);
     expect(sheetQueries()).toHaveLength(before);
+  });
+
+  it("a_group_header_says_when_more_pages_follow", async () => {
+    // The engine says more entries follow these three: each header counts what is shown, and says so.
+    const items = [
+      dated(1, "2026-01-05T02:14:07.000000Z", { hosts: ["WS01"] }),
+      dated(2, "2026-01-05T02:15:00.000000Z", { hosts: ["SRV01", "WS01"] }),
+      entryOf({ id: 3, title: "Undated", hosts: ["WS01"] }),
+    ];
+    overrideCommand("entries_list", async () => ({ items, truncated: true }));
+    const user = await openTimeline();
+    const headers = () => within(sheet()).getAllByRole("row").filter((r) => r.getAttribute("data-group") !== null).map((g) => g.textContent);
+    // Ungrouped, the undated heading counts what is shown too.
+    await waitFor(() => expect(headers()).toEqual(["Undated · needs a time · 1+ shown"]));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "host");
+    await waitFor(() => expect(headers()).toEqual(["WS01 · 3+ shown", "SRV01 · 1+ shown"]));
   });
 
   it("the_host_filter_reaches_a_host_past_the_first_thousand", async () => {

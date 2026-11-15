@@ -26,6 +26,7 @@ import { displaySafe } from "../text";
 import EntryEditor, { NewEntryForm, useReview } from "./EntryEditor";
 import HostLanes, { NO_HOST } from "./HostLanes";
 import MarkGlyph from "./MarkGlyph";
+import { groupCount } from "./RecordSheet";
 import { messageOf, reportFailure } from "./outcomes";
 import RecordDialog from "./RecordDialog";
 import { useCaseRead } from "./useCaseRead";
@@ -282,7 +283,7 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
               {groups.map((g) => [
                 g.label !== "" && (
                   <tr key={`group:${g.key}`} className="sheet-group" data-group={g.key}>
-                    <td role="gridcell" colSpan={8}>{`${displaySafe(g.label)} · ${fmt(g.entries.length)}`}</td>
+                    <td role="gridcell" colSpan={8}>{`${displaySafe(g.label)} · ${groupCount(g.entries.length, listed?.value?.truncated ?? false)}`}</td>
                   </tr>
                 ),
                 ...g.entries.map((e) => {
