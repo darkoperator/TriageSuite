@@ -360,7 +360,18 @@ export default function Shell() {
     setPendingRow({ tabId: datasetTabId(relation), rowId });
   }, []);
   const clearPendingRow = useCallback(() => setPendingRow(null), []);
-  const openSheet = useCallback((kind: RecordKind) => setTabs((t) => activate(t, sheetTabId(SHEET_OF[kind]))), []);
+  // A sheet asked to select a record or an entry: the sheet's tab is shown, and the sheet takes the request (it is always
+  // mounted, being pinned).
+  const [pendingSelect, setPendingSelect] = useState<{ sheet: SheetKind; id: number } | null>(null);
+  const openSheet = useCallback((kind: RecordKind, id?: number) => {
+    setTabs((t) => activate(t, sheetTabId(SHEET_OF[kind])));
+    if (id !== undefined) setPendingSelect({ sheet: SHEET_OF[kind], id });
+  }, []);
+  const openEntry = useCallback((id: number) => {
+    setTabs((t) => activate(t, sheetTabId("timeline")));
+    setPendingSelect({ sheet: "timeline", id });
+  }, []);
+  const clearPendingSelect = useCallback(() => setPendingSelect(null), []);
   // A saved view applied from the left pane: opens the relation's tab when asked, then the tab takes the answer.
   const deliverApplied = useCallback((d: AppliedDelivery) => {
     if (d.openRelation) setTabs((t) => openDataset(t, d.relation));
@@ -400,11 +411,11 @@ export default function Shell() {
     () =>
       summary && settings
         ? {
-            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, openSheet, pendingRow, clearPendingRow, setGridStatus, setRightPane, setGrouped, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
+            summary, settings, change, openDataset: openTab, openScoped: openScopedTab, openRow, openSheet, openEntry, pendingSelect, clearPendingSelect, pendingRow, clearPendingRow, setGridStatus, setRightPane, setGrouped, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram,
             activeTab: tabs.tabs.find((t) => t.id === tabs.active) ?? null, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport,
           }
         : null,
-    [summary, settings, change, openTab, openScopedTab, openRow, openSheet, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram, tabs, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport],
+    [summary, settings, change, openTab, openScopedTab, openRow, openSheet, openEntry, pendingSelect, clearPendingSelect, pendingRow, clearPendingRow, rightPane, scroll, reportError, saveLayout, saveColourRules, setHistogram, tabs, pendingApply, clearPendingApply, deliverApplied, exportJob, exportRunning, beginExport, endExport],
   );
 
   const dismissNote = damaged && (

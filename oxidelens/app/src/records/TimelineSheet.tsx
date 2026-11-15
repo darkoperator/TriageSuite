@@ -56,7 +56,7 @@ function StatusText({ entry }: { entry: Entry }): ReactNode {
 }
 
 export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode {
-  const { summary, change, reportError, setRightPane } = useShell();
+  const { summary, change, reportError, setRightPane, pendingSelect, clearPendingSelect } = useShell();
   const [text, setText] = useState("");
   const [status, setStatus] = useState<EntryStatus | "">("");
   const [host, setHost] = useState("");
@@ -134,6 +134,17 @@ export default function TimelineSheet({ tab, active }: TabBodyProps): ReactNode 
     setSelected(id);
     setCreating(false);
   }, []);
+  // An entry another screen asked for (*open →* on a record's linked entry): selected as the request arrives, which the
+  // shell then forgets.
+  const [taken, setTaken] = useState<typeof pendingSelect>(null);
+  if (pendingSelect && pendingSelect.sheet === "timeline" && pendingSelect !== taken) {
+    setTaken(pendingSelect);
+    setSelected(pendingSelect.id);
+    setCreating(false);
+  }
+  useEffect(() => {
+    if (pendingSelect?.sheet === "timeline") clearPendingSelect?.();
+  }, [pendingSelect, clearPendingSelect]);
   const paneNode = useMemo(() => {
     if (creating) {
       return (

@@ -37,14 +37,21 @@ const TIMELINE_KEYS: KeyLine = [
   ["Del", "remove (keeps evidence rows)"],
 ];
 
+/** The Hosts, Accounts and IOCs sheets' keys (`records/RecordSheet.tsx`). */
+const RECORD_KEYS: KeyLine = [
+  ["↑ ↓", "select"],
+  ["Enter", "edit"],
+];
+
 /** The keys live on a tab of `kind`, in the order the key strip shows them: only what works there. A grouped grid
  *  (`grouped`) takes the row keys and I on its focused data row, and none of the flat grid's cell keys; the Timeline
- *  sheet (`timeline`) has its own. */
+ *  sheet (`timeline`) has its own, and the record sheets (`sheet`) theirs. */
 export function keyStrip(kind: "overview" | "sheet" | "timeline" | "dataset" | "merged" | "grouped" | null): KeyLine {
   if (kind === "timeline") return [...TIMELINE_KEYS, ...PANE_KEYS];
   if (kind === "dataset") return [...ROW_KEYS, ...CELL_KEYS, ...PANE_KEYS];
   if (kind === "grouped") return [...ROW_KEYS, CELL_KEYS[0], ...PANE_KEYS];
   if (kind === "merged") return [...ROW_KEYS, ...PANE_KEYS];
+  if (kind === "sheet") return [...RECORD_KEYS, ...PANE_KEYS];
   return PANE_KEYS;
 }
 

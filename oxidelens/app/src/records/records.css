@@ -73,3 +73,19 @@
 .sheet-foot { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .sheet-body { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
 .host-lanes:focus { outline: 1px solid var(--cell-focus); outline-offset: -2px; }
+
+/* The Hosts, Accounts and IOCs sheets (screens 09 and 10, without what D21 leaves out). */
+.sheet-sort { padding: 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+.sheet-sort:hover, .sheet-sort:focus { text-decoration: underline; outline: none; }
+.sheet-filter-row td { position: sticky; top: 22px; z-index: 1; padding: 2px 8px 4px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.sheet-filter-row .sheet-search { width: 100%; min-width: 60px; box-sizing: border-box; font: var(--cell-font); }
+.type-strip { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px 0; }
+.type-strip button { background: none; border: 1px solid transparent; border-radius: 4px; padding: 2px 8px; color: var(--text-2); font: inherit; cursor: pointer; }
+.type-strip button[aria-pressed="true"] { background: var(--raised-2); color: var(--text); border-color: var(--line-strong); }
+.sweep-progress { color: var(--muted); font-size: 11px; }
+.record-option-picked { background: var(--accent-soft); border-color: var(--accent); }
+.logon-table { border-collapse: collapse; font: var(--cell-font); }
+.logon-table th { padding: 2px 8px; text-align: left; color: var(--muted); font: var(--ui-font); font-size: 11px; border-bottom: 1px solid var(--line); }
+.logon-table td { padding: 2px 8px; border-bottom: 1px solid var(--line); }
+.logon-table .col-num { text-align: right; }
+.logon-table .link-button { align-self: auto; }

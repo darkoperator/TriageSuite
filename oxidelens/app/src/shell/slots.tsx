@@ -12,6 +12,9 @@
 import type { ReactNode } from "react";
 import Grid from "../grid/Grid";
 import { MergedTab } from "../grid/MergedTab";
+import AccountsSheet from "../records/AccountsSheet";
+import HostsSheet from "../records/HostsSheet";
+import IocsSheet from "../records/IocsSheet";
 import TimelineSheet from "../records/TimelineSheet";
 import ViewList from "../views/ViewList";
 import Overview from "./Overview";
@@ -30,7 +33,9 @@ export interface TabBodyProps {
 export function TabBody(props: TabBodyProps): ReactNode {
   if (props.tab.kind === "overview") return <Overview />;
   if (props.tab.kind === "sheet" && props.tab.sheet === "timeline") return <TimelineSheet {...props} />;
-  if (props.tab.kind === "sheet") return <p className="tab-placeholder">The {props.tab.sheet} sheet arrives in the next step.</p>;
+  if (props.tab.kind === "sheet" && props.tab.sheet === "hosts") return <HostsSheet {...props} />;
+  if (props.tab.kind === "sheet" && props.tab.sheet === "accounts") return <AccountsSheet {...props} />;
+  if (props.tab.kind === "sheet" && props.tab.sheet === "iocs") return <IocsSheet {...props} />;
   if (props.tab.kind === "merged") return <MergedTab tab={props.tab} active={props.active} />;
   return <Grid {...props} />;
 }

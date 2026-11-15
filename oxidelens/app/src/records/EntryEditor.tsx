@@ -1,7 +1,7 @@
 // The entry editor in the right pane: one timeline entry's time (UTC, with where it came from), title, description,
-// ATT&CK tactic and technique ids, status with *Mark reviewed*, the records it links (each opens its sheet; more are
-// linked from a picker), its evidence rows (each re-checked by the engine, each opening its dataset scrolled to the
-// row), its history (read when opened), and after M the candidates found in its evidence.
+// ATT&CK tactic and technique ids, status with *Mark reviewed*, the records it links (each opens its sheet, selected
+// there; more are linked from a picker), its evidence rows (each re-checked by the engine, each opening its dataset
+// scrolled to the row), its history (read when opened), and after M the candidates found in its evidence.
 //
 // Reads are by the late-answer rules (`useCaseRead`): the entry, its evidence and its history each for one key (entry,
 // case generation), on slots under `slot`. Every refusal the engine gives is shown in place, never in a dialog; a review
@@ -26,9 +26,9 @@ import { useCaseRead } from "./useCaseRead";
 import "./records.css";
 
 const AGENT = "agent:";
-/** Who added it: "added by agent: <name>" for an agent's entry, reviewed or not (`agent_added` says so), else the
- *  author as stored. The entry card shows the same. */
-export function addedBy(entry: Entry): string {
+/** Who added it: "added by agent: <name>" for an agent's entry or record, reviewed or not (`agent_added` says so),
+ *  else the author as stored. The entry card and the record editor show the same. */
+export function addedBy(entry: Pick<Entry, "agent_added" | "created_by">): string {
   if (!entry.agent_added) return displaySafe(entry.created_by);
   const name = entry.created_by.startsWith(AGENT) ? entry.created_by.slice(AGENT.length) : entry.created_by;
   return `added by agent: ${displaySafe(name)}`;
@@ -279,7 +279,7 @@ export default function EntryEditor({
                 <li key={`${l.kind}:${l.id}`} className="editor-item">
                   <span className="editor-item-text">{`${KIND_NAME[l.kind]} · ${displaySafe(l.label)}`}</span>
                   {openSheet && (
-                    <button type="button" className="link-button" aria-label={`Open ${KIND_NAME[l.kind]} ${displaySafe(l.label)}`} onClick={() => openSheet(l.kind)}>
+                    <button type="button" className="link-button" aria-label={`Open ${KIND_NAME[l.kind]} ${displaySafe(l.label)}`} onClick={() => openSheet(l.kind, l.id)}>
                       open →
                     </button>
                   )}

@@ -7,7 +7,7 @@ import type { ColumnLayout } from "../contract/generated/ColumnLayout";
 import type { CaseSummary } from "../contract/generated/CaseSummary";
 import type { RecordKind } from "../contract/generated/RecordKind";
 import type { Settings } from "../contract/generated/Settings";
-import type { Tab } from "./tabs";
+import type { SheetKind, Tab } from "./tabs";
 
 /** A saved view the engine resolved for one relation, on its way to the tab that takes it. */
 export interface AppliedDelivery {
@@ -51,8 +51,15 @@ export interface ShellContext {
   openScoped(tab: Tab): void;
   /** Opens (or switches to) a relation's dataset tab and shows one row of it in the right pane (the merged tab's *open* link). */
   openRow?(relation: string, rowId: number): void;
-  /** Switches to the pinned sheet of a record kind (a linked record's *open →* in the entry editor). */
-  openSheet?(kind: RecordKind): void;
+  /** Switches to the pinned sheet of a record kind and, given `id`, selects that record there (a linked record's
+   *  *open →* in the entry editor). */
+  openSheet?(kind: RecordKind, id?: number): void;
+  /** Switches to the Timeline and selects entry `id` there (a linked entry's *open →* in a record editor). */
+  openEntry?(id: number): void;
+  /** A record or entry a sheet was asked to select (`openSheet`, `openEntry`); the sheet it names takes it and calls
+   *  `clearPendingSelect`. */
+  pendingSelect?: { sheet: SheetKind; id: number } | null;
+  clearPendingSelect?(): void;
   /** A row a tab was asked to show (`openRow`); the dataset tab it names takes it and calls `clearPendingRow`. */
   pendingRow?: { tabId: string; rowId: number } | null;
   clearPendingRow?(): void;
