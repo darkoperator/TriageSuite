@@ -12,17 +12,18 @@
 //! never guessed at.
 
 use super::accounts::{account_record, AccountRecord};
-use super::candidates::logon_target;
+use super::candidates::{logon_target, TARGET};
+use super::validate::MAX_RECORD_NAME;
 use super::RecordKind;
 use crate::case::Case;
 use crate::catalog::{self, ColumnInfo};
 use crate::error::{EngineError, Result};
-use crate::filter::{FilterNode, Leaf, Op, MAX_IN};
+use crate::filter::{FilterNode, Leaf, Op, MAX_REGEX};
 use crate::query::{scope, GridQuery, ROW_ALIAS};
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use triage_core::output::duckdb::sql::quote_ident;
 
 /// The event-log dataset the summary reads.
@@ -55,8 +56,10 @@ pub struct LogonCount {
     pub count: u64,
     /// A filter document over the event-log dataset selecting exactly these
     /// rows: each leaf is case-sensitive, and the account and logon type are
-    /// the cell texts that were counted, so the grid it opens shows `count`
-    /// rows for as long as the case does not change.
+    /// regexes that take exactly what S6 reads as this account and type
+    /// (`count_filter`), so the grid it opens shows `count` rows for as long
+    /// as the case does not change. Its size does not grow with the ways
+    /// the rows spell the account.
     pub filter: FilterNode,
 }
 
@@ -119,9 +122,8 @@ pub fn logon_summary(case: &Case, account_id: i64) -> Result<LogonSummary> {
         logon_type: column("PayloadData2"),
     };
 
-    let groups = read_groups(case, &read)?;
-    let mut counted: BTreeMap<Key, Opened> = BTreeMap::new();
-    for g in groups {
+    let mut counted: BTreeMap<Key, u64> = BTreeMap::new();
+    for_each_group(case, &read, |g| {
         let parsed = g
             .account
             .as_deref()
@@ -129,10 +131,10 @@ pub fn logon_summary(case: &Case, account_id: i64) -> Result<LogonSummary> {
             .zip(g.logon_type.as_deref().and_then(logon_type));
         let Some(((name, domain), logon_type)) = parsed else {
             out.unparsed += g.count;
-            continue;
+            return;
         };
         if !matches(&account, &name, domain.as_deref()) {
-            continue;
+            return;
         }
         let outcome = if g.event_id == SUCCESS {
             LogonOutcome::Success
@@ -140,26 +142,22 @@ pub fn logon_summary(case: &Case, account_id: i64) -> Result<LogonSummary> {
             LogonOutcome::Failure
         };
         let host = g.host.filter(|h| !h.is_empty());
-        let opened = counted
+        *counted
             .entry(Key {
                 host_missing: host.is_none(),
                 host,
                 logon_type,
                 outcome,
             })
-            .or_default();
-        opened.count += g.count;
-        // Both are `Some`: they parsed.
-        opened.accounts.extend(g.account);
-        opened.types.extend(g.logon_type);
-    }
-    for (key, opened) in counted {
-        let filter = count_filter(&key, &opened, &read)?;
+            .or_default() += g.count;
+    })?;
+    for (key, count) in counted {
+        let filter = count_filter(&key, &account, &read)?;
         out.rows.push(LogonCount {
             outcome: key.outcome,
             logon_type: key.logon_type,
             host: key.host,
-            count: opened.count,
+            count,
             filter,
         });
     }
@@ -209,10 +207,12 @@ struct Group {
     count: u64,
 }
 
-/// The Security 4624 and 4625 rows of the dataset, as the grid sees it,
-/// grouped by the cell texts the summary reads, so that a dataset of many
-/// logons is read as its few distinct accounts.
-fn read_groups(case: &Case, read: &Read<'_>) -> Result<Vec<Group>> {
+/// Call `each` with every distinct `Group` of the dataset's Security 4624
+/// and 4625 rows, as the grid sees them, one at a time as DuckDB yields
+/// them: none is kept here, so what the summary holds is its counters,
+/// whatever the evidence holds. The grouping is DuckDB's, which spills to
+/// disk rather than outgrow its memory limit.
+fn for_each_group(case: &Case, read: &Read<'_>, mut each: impl FnMut(Group)) -> Result<()> {
     let scope = scope(
         case,
         &GridQuery {
@@ -241,20 +241,18 @@ fn read_groups(case: &Case, read: &Read<'_>) -> Result<Vec<Group>> {
     );
     let mut params = scope.params;
     params.extend([CHANNEL, SUCCESS, FAILURE].map(|v| SqlValue::Text(v.to_string())));
-    let groups = case
-        .conn()
-        .prepare(&sql)?
-        .query_map(params_from_iter(params), |r| {
-            Ok(Group {
-                host: r.get(0)?,
-                event_id: r.get(1)?,
-                account: r.get(2)?,
-                logon_type: r.get(3)?,
-                count: crate::query::as_count(r.get(4)?),
-            })
-        })?
-        .collect::<std::result::Result<_, _>>()?;
-    Ok(groups)
+    let mut stmt = case.conn().prepare(&sql)?;
+    let mut rows = stmt.query(params_from_iter(params))?;
+    while let Some(r) = rows.next()? {
+        each(Group {
+            host: r.get(0)?,
+            event_id: r.get(1)?,
+            account: r.get(2)?,
+            logon_type: r.get(3)?,
+            count: crate::query::as_count(r.get(4)?),
+        });
+    }
+    Ok(())
 }
 
 /// What a count is keyed by, in the order the summary lists them.
@@ -267,14 +265,6 @@ struct Key {
     outcome: LogonOutcome,
 }
 
-/// A count and the cell texts behind it.
-#[derive(Default)]
-struct Opened {
-    count: u64,
-    accounts: BTreeSet<String>,
-    types: BTreeSet<String>,
-}
-
 fn leaf(column: &ColumnInfo, op: Op, value: Value) -> FilterNode {
     FilterNode::Leaf(Leaf {
         column: column.name.clone(),
@@ -284,27 +274,133 @@ fn leaf(column: &ColumnInfo, op: Op, value: Value) -> FilterNode {
     })
 }
 
+fn regex(column: &ColumnInfo, pattern: String) -> FilterNode {
+    leaf(column, Op::Regex, Value::from(pattern))
+}
+
+/// The characters `str::trim` takes off, Unicode's White_Space, as a regex
+/// class: a domain that trims to nothing or `-` is no domain (S6).
+const WHITE_SPACE: &str =
+    r"[\t-\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}]";
+
+/// A regex matching exactly `c`, or `c` in the other ASCII case for an
+/// ASCII letter: `[jJ]`. A class, not `(?i)`, which folds by Unicode and
+/// would take the Kelvin sign for `k`. ASCII punctuation is escaped; any
+/// other character stands for itself.
+fn atom(c: char) -> String {
+    if c.is_ascii_alphabetic() {
+        format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase())
+    } else {
+        exact(c)
+    }
+}
+
+/// A regex matching exactly `c`, case and all.
+fn exact(c: char) -> String {
+    if c.is_ascii_punctuation() {
+        format!("\\{c}")
+    } else {
+        c.to_string()
+    }
+}
+
+/// `text` as a regex matching exactly it, case and all: the fixed parts of
+/// S6's reading (`Target: `, `LogonType `), which the parse takes as
+/// written.
+fn exact_text(text: &str) -> String {
+    text.chars().map(exact).collect()
+}
+
+/// Leaves that together match exactly the texts `atoms` match in ASCII
+/// case (one atom per character), at a fixed place: from the start, or,
+/// with `from_end`, ending at the end. Each leaf holds as many atoms as fit
+/// in `MAX_REGEX` characters and reaches its place past the others with
+/// `.{n}` (`(?s)`, so any character), so a long name never makes a pattern
+/// the filter refuses. A text matching every leaf has, in each place, a
+/// character its atom matches.
+fn placed(column: &ColumnInfo, atoms: &[String], from_end: bool) -> Vec<FilterNode> {
+    // Room for `(?s)^`, `.{1000}` and `$` around the atoms.
+    const ROOM: usize = MAX_REGEX - 16;
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < atoms.len() {
+        let mut end = start;
+        let mut len = 0;
+        while end < atoms.len() && len + atoms[end].chars().count() <= ROOM {
+            len += atoms[end].chars().count();
+            end += 1;
+        }
+        let body = atoms[start..end].concat();
+        let pattern = if from_end {
+            match atoms.len() - end {
+                0 => format!("(?s){body}$"),
+                after => format!("(?s){body}.{{{after}}}$"),
+            }
+        } else {
+            match start {
+                0 => format!("(?s)^{body}{}", if end == atoms.len() { "$" } else { "" }),
+                before => format!(
+                    "(?s)^.{{{before}}}{body}{}",
+                    if end == atoms.len() { "$" } else { "" }
+                ),
+            }
+        };
+        out.push(regex(column, pattern));
+        start = end;
+    }
+    out
+}
+
+/// The leaves that select exactly the `PayloadData1` texts S6 reads as
+/// `account`. With a domain: `Target: D\N`, both parts in ASCII case only.
+/// Without one: the name `N` (ASCII case), at the end, after `Target: `
+/// alone or after a domain and `\`, where the domain is either one that
+/// trims to nothing or `-` or one `upsert_account` would take (at most
+/// `MAX_RECORD_NAME` characters, no control character), as
+/// `candidates::logon_target` reads it. A count exists only for an account
+/// some row parsed into, so its name holds no `\` and is not `-`: the last
+/// `\` of a matching text is the one before the name.
+fn account_leaves(column: &ColumnInfo, account: &AccountRecord) -> Vec<FilterNode> {
+    let name: Vec<String> = account.name.chars().map(atom).collect();
+    match &account.domain {
+        Some(domain) => {
+            let atoms: Vec<String> = TARGET
+                .chars()
+                .map(exact)
+                .chain(domain.chars().map(atom))
+                .chain(std::iter::once(exact('\\')))
+                .chain(name)
+                .collect();
+            placed(column, &atoms, false)
+        }
+        None => {
+            let ws = WHITE_SPACE;
+            let mut out = vec![regex(
+                column,
+                format!(
+                    r"(?s)^{}(?:(?:{ws}*-?{ws}*|\P{{Cc}}{{0,{MAX_RECORD_NAME}}})\\)?.{{{}}}$",
+                    exact_text(TARGET),
+                    name.len()
+                ),
+            )];
+            out.extend(placed(column, &name, true));
+            out
+        }
+    }
+}
+
 /// The filter that selects exactly the rows of one count: the Security
-/// channel, its outcome's event id, its host (empty when it has none),
-/// and the account and logon type texts that were counted for it, each
-/// compared case-sensitively as the summary read them. A row it selects
-/// has texts that read as this count's, so it was counted here.
-fn count_filter(key: &Key, opened: &Opened, read: &Read<'_>) -> Result<FilterNode> {
+/// channel, its outcome's event id, its host (empty when it has none), the
+/// account as S6 matches it (`account_leaves`) and the logon type with any
+/// leading zeros. Its size depends on the account and the count, never on
+/// how many ways the rows spell them.
+fn count_filter(key: &Key, account: &AccountRecord, read: &Read<'_>) -> Result<FilterNode> {
     // A count exists only for rows whose account and type parsed, which
     // needs both columns.
-    let (Some(account), Some(logon_type)) = (read.account, read.logon_type) else {
+    let (Some(account_text), Some(type_text)) = (read.account, read.logon_type) else {
         return Err(EngineError::Internal(
             "a logon was counted without its account and type columns".into(),
         ));
-    };
-    let texts = |set: &BTreeSet<String>| -> Result<Value> {
-        if set.len() > MAX_IN {
-            return Err(EngineError::Invalid(format!(
-                "a logon count is written {} ways, more than a filter lists ({MAX_IN})",
-                set.len()
-            )));
-        }
-        Ok(Value::from(set.iter().cloned().collect::<Vec<_>>()))
     };
     let id = match key.outcome {
         LogonOutcome::Success => SUCCESS,
@@ -320,8 +416,11 @@ fn count_filter(key: &Key, opened: &Opened, read: &Read<'_>) -> Result<FilterNod
             None => leaf(host, Op::IsEmpty, Value::Null),
         });
     }
-    all.push(leaf(account, Op::In, texts(&opened.accounts)?));
-    all.push(leaf(logon_type, Op::In, texts(&opened.types)?));
+    all.extend(account_leaves(account_text, account));
+    all.push(regex(
+        type_text,
+        format!("^{}0*{}$", exact_text(LOGON_TYPE), key.logon_type),
+    ));
     Ok(FilterNode::And(all))
 }
 

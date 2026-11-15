@@ -25,11 +25,11 @@ use crate::query::{
     as_count, check_offset, check_zone, clip_text, mark_sql, order_sql, read_mark, scope,
     search_fragment, MarkState, Scope, CELL_CAP, ISO_FORMAT, ROW_ALIAS,
 };
-use crate::record::live_ioc_values;
+use crate::record::ioc_texts;
 use crate::search::SearchOptions;
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use triage_core::output::duckdb::sql::quote_ident;
 use triage_core::timestamp::zone;
 
@@ -267,7 +267,6 @@ pub fn page_view(
     }
     params.extend(out.row_ids.iter().map(|id| SqlValue::BigInt(*id)));
 
-    let iocs = live_ioc_values(case)?;
     let width = scope.columns.len();
     let (rule_at, hit_at) = (2 + 3 * width, 3 + 3 * width);
     type Read = (Option<MarkState>, Vec<GridCell>, Option<u16>, bool);
@@ -287,16 +286,12 @@ pub fn page_view(
                 _ => None,
             };
             let (text, clipped) = clip_text(text);
-            let ioc = !clipped
-                && text
-                    .as_deref()
-                    .is_some_and(|t| iocs.contains(&t.to_ascii_lowercase()));
             cells.push(GridCell {
                 text,
                 display,
                 failed,
                 clipped,
-                ioc,
+                ioc: false,
             });
         }
         let rule: Option<i64> = row.get(rule_at)?;
@@ -316,7 +311,37 @@ pub fn page_view(
         out.row_rule.push(rule);
         out.search_hits.push(hit);
     }
+    flag_iocs(case, &mut out.cells)?;
     Ok(out)
+}
+
+/// Set `ioc` on each cell of `cells` whose whole text is a live IOC's
+/// value, ASCII case ignored, asking the case only about the texts these
+/// cells hold. A cut cell is never flagged, since its whole text is not
+/// read.
+fn flag_iocs(case: &Case, cells: &mut [Vec<GridCell>]) -> Result<()> {
+    let texts: BTreeSet<String> = cells
+        .iter()
+        .flatten()
+        .filter(|c| !c.clipped)
+        .filter_map(|c| c.text.as_deref())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    if texts.is_empty() {
+        return Ok(());
+    }
+    let iocs = ioc_texts(case, &texts)?;
+    if iocs.is_empty() {
+        return Ok(());
+    }
+    for cell in cells.iter_mut().flatten() {
+        cell.ioc = !cell.clipped
+            && cell
+                .text
+                .as_deref()
+                .is_some_and(|t| iocs.contains(&t.to_ascii_lowercase()));
+    }
+    Ok(())
 }
 
 /// A converted UTC cell in `zone`: its text when that is UTC text, so the

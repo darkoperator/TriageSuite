@@ -34,7 +34,7 @@ pub use evidence::{
 pub use accounts::{account_record, accounts, upsert_account, AccountRecord, AccountSpec};
 pub use candidates::{candidates, Candidate};
 pub use hosts::{host_record, hosts, upsert_host, HostRecord, HostSpec};
-pub(crate) use iocs::live_ioc_values;
+pub(crate) use iocs::ioc_texts;
 pub use iocs::{
     ioc_record, ioc_sightings, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec, Sightings,
 };

@@ -449,17 +449,38 @@ pub fn ioc_sightings(case: &Case, ioc_id: i64, cancel: &AtomicBool) -> Result<Si
     Ok(out)
 }
 
-/// Every live IOC's value, ASCII lower-cased, for flagging the grid cells
-/// that hold one (`GridCell::ioc`). Empty in a case without the record
-/// tables, which has no IOCs.
-pub(crate) fn live_ioc_values(case: &Case) -> Result<HashSet<String>> {
+/// Texts bound in one statement of `ioc_texts`.
+const TEXTS_PER_QUERY: usize = 1_000;
+
+/// Which of `texts` (each ASCII lower-cased, as the caller gives them) are
+/// a live IOC's value, ASCII case ignored, for flagging the grid cells
+/// that hold one (`GridCell::ioc`). Only the IOCs that can match are read:
+/// SQL keeps those whose `lower` value is one of the texts' (Unicode
+/// lowering, which every ASCII-case match passes), bound in chunks of
+/// `TEXTS_PER_QUERY`, and each is then checked here in ASCII case. So what
+/// is read is bounded by `texts`, a page's cells, not by the case's IOCs.
+/// Empty in a case without the record tables, which has no IOCs.
+pub(crate) fn ioc_texts(case: &Case, texts: &BTreeSet<String>) -> Result<HashSet<String>> {
+    let mut out = HashSet::new();
     if !has_records(case) {
-        return Ok(HashSet::new());
+        return Ok(out);
     }
-    let values: Vec<String> = case
-        .conn()
-        .prepare("SELECT value FROM ox.ioc WHERE NOT deleted")?
-        .query_map([], |r| r.get(0))?
-        .collect::<std::result::Result<_, _>>()?;
-    Ok(values.iter().map(|v| v.to_ascii_lowercase()).collect())
+    let list: Vec<&String> = texts.iter().collect();
+    for chunk in list.chunks(TEXTS_PER_QUERY) {
+        let sql = format!(
+            "SELECT DISTINCT value FROM ox.ioc WHERE NOT deleted AND lower(value) IN ({})",
+            vec!["lower(?)"; chunk.len()].join(", ")
+        );
+        let params = chunk.iter().map(|t| SqlValue::Text((*t).clone()));
+        let mut stmt = case.conn().prepare(&sql)?;
+        let mut rows = stmt.query(params_from_iter(params))?;
+        while let Some(row) = rows.next()? {
+            let value: String = row.get(0)?;
+            let folded = value.to_ascii_lowercase();
+            if texts.contains(&folded) {
+                out.insert(folded);
+            }
+        }
+    }
+    Ok(out)
 }

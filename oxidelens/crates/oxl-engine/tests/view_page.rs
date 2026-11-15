@@ -634,7 +634,9 @@ fn ioc_cells(p: &GridPage) -> Vec<(String, String)> {
 /// A cell is flagged when its whole text is a live IOC's value, ASCII case
 /// ignored: `svch0st.exe` for the IOC `SVCH0ST.EXE`, but not
 /// `svch0st.exe:443`, nor Hayabusa's `SrcIP: 203.0.113.7`, which only
-/// contain a value; and not `wevtutil.exe`, whose IOC was deleted.
+/// contain a value; not `wevtutil.exe`, whose IOC was deleted; and not
+/// `svc_backup` for the IOC `svc_bac\u{212A}up`, whose Kelvin sign
+/// Unicode lowering takes for `k` but ASCII case does not.
 #[test]
 fn page_flags_ioc_cells() {
     let (_d, mut case) = loaded();
@@ -642,6 +644,7 @@ fn page_flags_ioc_cells() {
     new_ioc(&mut case, IocType::FileName, "SVCH0ST.EXE");
     let gone = new_ioc(&mut case, IocType::FileName, "wevtutil.exe");
     delete_record(&mut case, RecordKind::Ioc, gone, &analyst()).unwrap();
+    new_ioc(&mut case, IocType::Other, "svc_bac\u{212A}up");
 
     let p = whole(&case, &state(EVENTS), &opts("UTC", Vec::new()));
     let ip = ("RemoteHost".to_string(), "203.0.113.7".to_string());

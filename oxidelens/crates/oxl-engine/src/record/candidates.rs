@@ -144,7 +144,7 @@ const MAP: &[(Relations, &str, Take)] = &[
 ];
 
 /// What logon target text starts with (ruling S6).
-const TARGET: &str = "Target: ";
+pub(super) const TARGET: &str = "Target: ";
 
 /// The account and IOC candidates row `row_id` offers, in `MAP`'s order
 /// and its evidence path last, each once (the first column to offer it

@@ -7,9 +7,9 @@ mod common;
 
 use common::analyst;
 use oxl_engine::{
-    count, delete_record, find, ioc_sightings, load_file, load_run, logon_summary, upsert_account,
-    upsert_ioc, AccountSpec, Case, EngineError, FileOptions, FindMode, FindRequest, GridQuery,
-    IocSpec, IocType, LogonOutcome, RecordKind,
+    count, delete_record, find, ioc_sightings, load_file, load_run, logon_summary, parse_filter,
+    upsert_account, upsert_ioc, AccountSpec, Case, EngineError, FileOptions, FilterNode, FindMode,
+    FindRequest, GridQuery, IocSpec, IocType, LogonOutcome, RecordKind,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
@@ -220,22 +220,20 @@ fn accounts_match_by_name_and_domain_with_case_ignored() {
     }
 }
 
-/// `two_hosts_logons` with more Security logons, each a near miss for
-/// one leaf of a count's filter: the same account and type as the 4624
-/// type 10 but a 4625, on SRV01, in another channel, for another account,
-/// with another type; one spelled in other case, which is the same account
-/// and is counted with the first; and one whose `target: ` is in other
-/// case, which S6 does not read, so it is unparsed and no count opens it.
-fn near_misses() -> (tempfile::TempDir, Case) {
+/// A Security log row of the `two_hosts_logons` event files at `03:{t}`.
+fn logon(t: &str, id: u32, channel: &str, host: &str, account: &str, ty: &str) -> String {
+    let log = r"C:\Windows\System32\winevt\Logs\Security.evtx";
+    format!(
+        "2026-01-05T03:{t}.0000000Z,{id},{channel},{host},jdoe,,Logon,{account},{log},LogonType {ty}\n"
+    )
+}
+
+/// A new case with `two_hosts_logons` loaded, `ws01` and `srv01` (made by
+/// `logon`) appended to each host's event file first.
+fn with_logons(ws01: &[String], srv01: &[String]) -> (tempfile::TempDir, Case) {
     let d = tempfile::tempdir().unwrap();
     let root = oxl_fixtures::two_hosts_logons(&d.path().join("run"));
-    let log = r"C:\Windows\System32\winevt\Logs\Security.evtx";
-    let row = |t: &str, id: u32, channel: &str, host: &str, account: &str, ty: u32| {
-        format!(
-            "2026-01-05T03:{t}.0000000Z,{id},{channel},{host},jdoe,,Logon,{account},{log},LogonType {ty}\n"
-        )
-    };
-    let append = |host: &str, rows: &[String]| {
+    for (host, rows) in [("WS01", ws01), ("SRV01", srv01)] {
         let path = root
             .join(format!("Processed-{host}-20260101000000"))
             .join("EventLogs")
@@ -244,46 +242,38 @@ fn near_misses() -> (tempfile::TempDir, Case) {
         assert!(text.ends_with('\n'));
         text.extend(rows.iter().map(String::as_str));
         std::fs::write(&path, text).unwrap();
-    };
-    append(
-        "WS01",
+    }
+    let mut case = oxl_fixtures::new_case(d.path());
+    load_run(&mut case, &root, &analyst()).unwrap();
+    (d, case)
+}
+
+/// `two_hosts_logons` with more Security logons, each a near miss for
+/// one leaf of a count's filter: the same account and type as the 4624
+/// type 10 but a 4625, on SRV01, in another channel, for another account,
+/// with another type; one spelled in other case, which is the same account
+/// and is counted with the first; and one whose `target: ` is in other
+/// case, which S6 does not read, so it is unparsed and no count opens it.
+fn near_misses() -> (tempfile::TempDir, Case) {
+    let ws01 = |t, id, channel, account| logon(t, id, channel, "WS01", account, "10");
+    with_logons(
         &[
-            row("00:00", 4625, "Security", "WS01", r"Target: ACME\jdoe", 10),
-            row(
-                "01:00",
-                4624,
-                "Application",
-                "WS01",
-                r"Target: ACME\jdoe",
-                10,
-            ),
-            row(
-                "02:00",
-                4624,
-                "Security",
-                "WS01",
-                r"Target: ACME\asmith",
-                10,
-            ),
-            row("03:00", 4624, "Security", "WS01", r"Target: ACME\jdoe", 2),
-            row("04:00", 4624, "Security", "WS01", r"Target: acme\JDOE", 10),
-            row("06:00", 4624, "Security", "WS01", r"target: ACME\jdoe", 10),
+            ws01("00:00", 4625, "Security", r"Target: ACME\jdoe"),
+            ws01("01:00", 4624, "Application", r"Target: ACME\jdoe"),
+            ws01("02:00", 4624, "Security", r"Target: ACME\asmith"),
+            logon("03:00", 4624, "Security", "WS01", r"Target: ACME\jdoe", "2"),
+            ws01("04:00", 4624, "Security", r"Target: acme\JDOE"),
+            ws01("06:00", 4624, "Security", r"target: ACME\jdoe"),
         ],
-    );
-    append(
-        "SRV01",
-        &[row(
+        &[logon(
             "05:00",
             4624,
             "Security",
             "SRV01",
             r"Target: ACME\jdoe",
-            10,
+            "10",
         )],
-    );
-    let mut case = oxl_fixtures::new_case(d.path());
-    load_run(&mut case, &root, &analyst()).unwrap();
-    (d, case)
+    )
 }
 
 /// Each count's filter, applied to the event-log dataset, selects exactly
@@ -344,4 +334,181 @@ fn logon_summary_of_a_deleted_or_unknown_account_is_not_found() {
         let e = logon_summary(&case, id).unwrap_err();
         assert!(matches!(e, EngineError::NotFound(_)), "{id}: {e:?}");
     }
+}
+
+/// The filter of `account_id`'s count of `outcome` and `logon_type` on
+/// WS01, checked to open exactly the rows it counts.
+fn ws01_filter(
+    case: &Case,
+    account_id: i64,
+    outcome: LogonOutcome,
+    logon_type: u32,
+) -> (u64, FilterNode) {
+    let s = logon_summary(case, account_id).unwrap();
+    let row = s
+        .rows
+        .iter()
+        .find(|r| {
+            r.outcome == outcome && r.logon_type == logon_type && r.host.as_deref() == Some("WS01")
+        })
+        .unwrap_or_else(|| panic!("no {outcome:?} type {logon_type} on WS01: {:?}", s.rows));
+    let opened = count(
+        case,
+        &GridQuery {
+            relation: EVENTS.into(),
+            filter: Some(row.filter.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(opened, row.count, "{row:?}");
+    // The filter is one the app can send back: it passes the document caps.
+    let sent = serde_json::to_string(&row.filter).unwrap();
+    assert_eq!(parse_filter(&sent).unwrap(), row.filter);
+    (row.count, row.filter.clone())
+}
+
+/// Every ASCII-case spelling of `Target: ACME\jdoe` but the one
+/// `two_hosts_logons` already has: 255 of them.
+fn spellings() -> Vec<String> {
+    let letters: Vec<char> = "ACMEjdoe".chars().collect();
+    (1u32..256)
+        .map(|mask| {
+            let flipped: String = letters
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    if mask & (1 << i) == 0 {
+                        *c
+                    } else if c.is_ascii_uppercase() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        c.to_ascii_uppercase()
+                    }
+                })
+                .collect();
+            format!(r"Target: {}\{}", &flipped[..4], &flipped[4..])
+        })
+        .collect()
+}
+
+/// A count's filter names the account, not each way the rows spell it: a
+/// count over 256 spellings has the very filter of a count over one, and
+/// still opens exactly its rows.
+#[test]
+fn a_count_filter_does_not_grow_with_the_spellings() {
+    let (_one, mut plain) = with_logons(&[], &[]);
+    let jdoe = account(&mut plain, "jdoe", Some("ACME"));
+    let (n, single) = ws01_filter(&plain, jdoe, LogonOutcome::Success, 10);
+    assert_eq!(n, 1);
+
+    let rows: Vec<String> = spellings()
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let t = format!("{:02}:{:02}", i / 60, i % 60);
+            logon(&t, 4624, "Security", "WS01", a, "10")
+        })
+        .collect();
+    let (_many, mut spelled) = with_logons(&rows, &[]);
+    let jdoe = account(&mut spelled, "jdoe", Some("ACME"));
+    let (n, many) = ws01_filter(&spelled, jdoe, LogonOutcome::Success, 10);
+    assert_eq!(n, 256);
+    assert_eq!(many, single);
+}
+
+/// The filters are exact for every reading S6 makes: a domainless account
+/// opens its name in any domain (several, one with a `\`, blank, `-`) or
+/// none, but not a longer name or a name followed by more; an account
+/// with a domain is matched letter by letter in ASCII case only, so the
+/// Kelvin sign (U+212A), which case-insensitive text matching folds to
+/// `k`, is not `k`; and the logon type is the number however many leading
+/// zeros it has, but not with anything after it.
+#[test]
+fn count_filters_open_exactly_what_s6_reads() {
+    let ws01 = |t, account| logon(t, 4624, "Security", "WS01", account, "10");
+    let (_d, mut case) = with_logons(
+        &[
+            ws01("00:00", "Target: jdoe"),
+            ws01("01:00", r"Target: OTHER\JDOE"),
+            ws01("02:00", r"Target: a\b\jdoe"),
+            ws01("03:00", r"Target: \jdoe"),
+            ws01("04:00", r"Target: -\jdoe"),
+            ws01("05:00", r"Target: ACME\xjdoe"),
+            ws01("06:00", r"Target: ACME\jdoex"),
+            ws01("07:00", r"Target: ACME\jdoe\x"),
+            ws01("08:00", r"Target: ACME\kim"),
+            ws01("09:00", r"Target: acme\KIM"),
+            ws01("10:00", "Target: ACME\\\u{212A}im"),
+            ws01("11:00", r"Target: ACMEX\kim"),
+            logon(
+                "12:00",
+                4624,
+                "Security",
+                "WS01",
+                r"Target: ACME\kim",
+                "0010",
+            ),
+            logon(
+                "13:00",
+                4624,
+                "Security",
+                "WS01",
+                r"Target: ACME\kim",
+                "10x",
+            ),
+        ],
+        &[],
+    );
+    let domainless = account(&mut case, "jdoe", None);
+    // The five above and `two_hosts_logons`' own `ACME\jdoe`.
+    let (n, _) = ws01_filter(&case, domainless, LogonOutcome::Success, 10);
+    assert_eq!(n, 6);
+    let kim = account(&mut case, "KIM", Some("Acme"));
+    let (n, _) = ws01_filter(&case, kim, LogonOutcome::Success, 10);
+    assert_eq!(n, 3);
+}
+
+/// An account as long as a record allows, 256 characters of name and of
+/// domain, makes a pattern four times as long; the filter splits it into
+/// leaves within the regex cap, each pinned to its place, and still opens
+/// exactly the rows counted: not one with a letter changed at either end,
+/// nor one whose domain is a character longer (no domain `upsert_account`
+/// would take), which only the leaves' places tell apart.
+#[test]
+fn a_long_account_is_matched_within_the_regex_cap() {
+    let (name, domain) = ("k".repeat(256), "s".repeat(256));
+    let row = |t, account: String| logon(t, 4624, "Security", "WS01", &account, "10");
+    let (_d, mut case) = with_logons(
+        &[
+            row("00:00", format!(r"Target: {domain}\{name}")),
+            row(
+                "01:00",
+                format!(r"Target: {}\{}", domain.to_uppercase(), name.to_uppercase()),
+            ),
+            row("02:00", format!(r"Target: {domain}\{}x", &name[1..])),
+            row("03:00", format!(r"Target: x{}\{name}", &domain[1..])),
+            row("04:00", format!(r"Target: s{domain}\{name}")),
+        ],
+        &[],
+    );
+    let id = account(&mut case, &name, Some(&domain));
+    let (n, filter) = ws01_filter(&case, id, LogonOutcome::Success, 10);
+    assert_eq!(n, 2);
+    let FilterNode::And(leaves) = filter else {
+        panic!("{filter:?}")
+    };
+    let patterns: Vec<String> = leaves
+        .iter()
+        .filter_map(|l| match l {
+            FilterNode::Leaf(l) if l.column == "PayloadData1" => {
+                Some(l.value.as_str().unwrap().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(patterns.len() > 1, "{patterns:?}");
+    assert!(patterns
+        .iter()
+        .all(|p| p.chars().count() <= oxl_engine::filter::MAX_REGEX));
 }
