@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { displaySafe } from "../text";
 
 export default function StatusBar({
-  progress, progressKind = null, onCancel = null, exportZone = null, error, zone, zoneOffset, gridStatus, onDismissError,
+  progress, progressKind = null, onCancel = null, exportZone = null, note = null, error, zone, zoneOffset, gridStatus, onDismissError,
 }: {
   /** The running job's kind (`export` says "Exporting"; any other says "Loading"). */
   progressKind?: string | null;
@@ -15,6 +15,8 @@ export default function StatusBar({
   /** The engine's offset for the zone (`−05:00`); null when it has none to give. */
   zoneOffset: string | null;
   progress: string | null;
+  /** A neutral line (not an error), such as "Export cancelled.". */
+  note?: string | null;
   error: string | null;
   zone: string;
   gridStatus: ReactNode;
@@ -30,6 +32,7 @@ export default function StatusBar({
           Cancel
         </button>
       )}
+      {note !== null && <span className="status-note" role="status">{displaySafe(note)}</span>}
       {error !== null && (
         <span className="status-error" role="alert">
           {displaySafe(error)}

@@ -87,6 +87,8 @@ export default function Shell() {
   const [pendingApply, setPendingApply] = useState<AppliedDelivery | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A neutral line beside the job line (an export was cancelled); not an error.
+  const [note, setNote] = useState<string | null>(null);
   const [gridStatus, setGridStatus] = useState<ReactNode>(null);
   const [rightPane, setRightPane] = useState<ReactNode>(null);
   // Whether the shown dataset tab is grouped, as it says (`setGrouped`): the key strip follows it.
@@ -321,13 +323,17 @@ export default function Shell() {
     }
     if (path === null) return;
     const queryId = newQueryId();
+    setNote(null);
     if (!beginExport({ queryId, zoneTimes: false })) return setError("An export is running.");
     try {
       const write = kind === "timeline" ? exportTimeline : kind === "workbook" ? exportWorkbook : exportReport;
       await write(path, "case:export", queryId);
     } catch (e) {
-      // A refusal (the case file, a source's evidence) is shown as the engine worded it, without its code.
-      if (isCmdError(e)) setError(e.code === "interrupted" || e.code === "superseded" ? "Export cancelled." : e.message);
+      // Cancel is a neutral line; a superseded read or a closed case shows nothing (APP.md). A refusal (the case
+      // file, a source's evidence) is shown as the engine worded it, without its code.
+      if (isCmdError(e) && e.code === "interrupted") setNote("Export cancelled.");
+      else if (isCmdError(e) && (e.code === "superseded" || e.code === "no_case")) return;
+      else if (isCmdError(e)) setError(e.message);
       else reportError(e);
     } finally {
       endExport(queryId);
@@ -539,7 +545,7 @@ export default function Shell() {
             <Rail side="right" counts={summary.mark_counts} onExpand={() => togglePane("right_pane")} />
           )}
         </div>
-        <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
+        <StatusBar progress={job?.label ?? null} progressKind={job?.kind ?? null} onCancel={exportJob === null ? null : () => void cancelJob(exportJob.queryId, reportError)} exportZone={exportJob?.zoneTimes ? summary.display_zone : null} note={note} error={error} zone={summary.display_zone} zoneOffset={zoneOffset} gridStatus={gridStatus} onDismissError={() => setError(null)} />
         <KeyStrip kind={activeKind === "dataset" && grouped ? "grouped" : activeTab?.sheet === "timeline" ? "timeline" : activeKind} />
       </div>
     </ShellCtx.Provider>

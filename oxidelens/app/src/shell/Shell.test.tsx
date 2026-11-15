@@ -506,6 +506,10 @@ describe("export menu", () => {
       await user.click(within(await screen.findByRole("dialog", { name: "Export case record" })).getByRole("button", { name: item }));
       await waitFor(() => expect(callsOf(command)).toHaveLength(1));
       expect(callsOf(command)[0].args).toMatchObject({ path: `/out/${command}` });
+      act(() => emitEvent("job-started", { kind: "export", label: `${command}.out` }));
+      expect(screen.getByTestId("progress")).toHaveTextContent(`Exporting ${command}.out…`);
+      act(() => emitEvent("job-finished", { kind: "export", ok: true, message: null }));
+      expect(screen.getByTestId("progress")).toBeEmptyDOMElement();
       expect(vi.mocked(dialogs.pickRecordExportPath).mock.calls[0][0]).toBe(command.replace("export_", ""));
       cleanup();
     }
@@ -531,7 +535,21 @@ describe("export menu", () => {
       finish({ code: "interrupted", message: "the query was cancelled" });
     });
     expect(await screen.findByText("Export cancelled.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel export" })).toBeNull());
+  });
+
+  it.each(["superseded", "no_case"])("an_export_answering_%s_shows_nothing", async (code) => {
+    vi.mocked(dialogs.pickRecordExportPath).mockResolvedValue("/out/r.md");
+    overrideCommand("export_report", () => Promise.reject({ code, message: "gone" }));
+    const user = await openRecent();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "report" }));
+    await waitFor(() => expect(callsOf("export_report")).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Export cancelled.")).toBeNull();
+    expect(screen.queryByText("gone")).toBeNull();
   });
 
   it("a_refused_path_shows_the_reason", async () => {
