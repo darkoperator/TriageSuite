@@ -29,6 +29,7 @@ const MAX_FILTER: usize = 1_000;
 
 /// An IOC record, as the IOCs sheet shows it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct IocRecord {
     pub id: i64,
     pub ioc_type: IocType,
@@ -61,7 +62,9 @@ pub struct IocRecord {
 
 /// What `upsert_ioc` sets: a new record with `id: None`, else every field
 /// of record `id`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
 pub struct IocSpec {
     pub id: Option<i64>,
     pub ioc_type: IocType,
@@ -80,7 +83,9 @@ pub struct IocSpec {
 
 /// Which IOCs the sheet lists. Every field narrows; the default lists every
 /// live IOC.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
 pub struct IocQuery {
     pub ioc_type: Option<IocType>,
     /// This tool, case ignored.
@@ -377,6 +382,7 @@ pub fn iocs(case: &Case, q: &IocQuery, limit: u32, offset: u64) -> Result<Listin
 /// everywhere, exact and without regard to case, for the value. Computed
 /// each time it is asked for, never stored.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Sightings {
     /// Matching cells, as Find everywhere counts them: a row whose value is
     /// in two columns counts twice. 0 is "not found".

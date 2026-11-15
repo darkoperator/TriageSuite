@@ -43,7 +43,11 @@ npm --prefix app run dev:mock      # http://localhost:5173, with a MOCK banner
 5,000-row, 40-column `mock_events` relation (with hostile cell text: markup, a
 bidi override, a zero-width joiner, BEL, a formula, a 5,000-character value)
 and a Hayabusa-like `mock_hayabusa`, with the backend's supersede, cancel,
-`busy` and `case-changed` behaviour. It is a compile-time switch
+`busy` and `case-changed` behaviour. Its case record (`mock/records.ts`) holds
+an analyst's reviewed entry, an agent's unreviewed one, two undated entries,
+records of every kind, links, a tag, a note and history, with the engine
+fixtures' hostile record values (`HOSTILE_RECORD`) among their text. It is a
+compile-time switch
 (`__OXL_MOCK__`, true only for that dev server), so no other build holds any of
 it. The mock holds no rules and shows every time in UTC: use it for layout and
 interaction, never to check what the engine answers.
@@ -178,7 +182,9 @@ it is superseded or cancelled), so a slot's queries keep the order they
 arrived in. A write that arrives while another write runs answers `busy`
 rather than queueing; after every successful write the backend sends
 `case-changed` with what it touched (`sources` for a load, `views`,
-`display_zone`), and the front end reads again what that affects.
+`display_zone`; for the case record `marks`, `tags`, `notes`, `entries` and
+`records`, as `src/cmd/record.rs` lists per command), and the front end reads
+again what that affects.
 
 **A CSV export is a read and a job.** `grid_export` runs on a reader under its
 query id, announces `job-started` and `job-finished`, and registers a cancel
@@ -188,6 +194,16 @@ file is removed. Stopped after its file was renamed into place, it answers
 its report, because the file is there. **One export runs at a time** across
 all tabs: the shell holds the one cancel slot, and a second export is refused
 in the window until the first ends.
+
+**The record exports** (`export_timeline`, `export_workbook`,
+`export_report`) are reads and jobs in the same way. The record is the
+analyst's notes, read whole and quickly, so each holds the write gate for all
+its work: it waits for a running write first (giving up when stopped), and a
+write that arrives while it runs answers `busy`. No load can then make the
+target part of a source between the engine's checks and its rename.
+`ioc_sightings` is a read that also carries a cancel flag, which the engine
+looks at between relations; the window sweeps one IOC at a time on the
+`sightings` slot.
 
 **Closing the case** stops every registered query, lets none register until
 it is done (`no_case`), waits for the readers to come back, and drops them

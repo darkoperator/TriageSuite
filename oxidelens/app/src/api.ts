@@ -6,6 +6,13 @@ import { listen } from "@tauri-apps/api/event";
 import type { AppEvent, Command, CommandArgs, CommandResult, EventPayload } from "./contract/generated/commands";
 import type { CaseChanged } from "./contract/generated/CaseChanged";
 import type { DamagedSettings } from "./contract/generated/DamagedSettings";
+import type { EntryChanges } from "./contract/generated/EntryChanges";
+import type { EntryQuery } from "./contract/generated/EntryQuery";
+import type { EntryStatus } from "./contract/generated/EntryStatus";
+import type { RecordKind } from "./contract/generated/RecordKind";
+import type { RecordQuery } from "./contract/generated/RecordQuery";
+import type { RecordSpec } from "./contract/generated/RecordSpec";
+import type { RecordStatus } from "./contract/generated/RecordStatus";
 import type { JobFinished } from "./contract/generated/JobFinished";
 import type { JobStarted } from "./contract/generated/JobStarted";
 import type { FileOptions } from "./contract/generated/FileOptions";
@@ -224,8 +231,107 @@ export const viewExport = (id: number, path: string, slot: string, queryId = new
   call<CommandResult["view_export"]>("view_export", { queryId, slot, id, path } satisfies Args<"view_export">);
 export const viewImport = (path: string) => call<CommandResult["view_import"]>("view_import", { path } satisfies Args<"view_import">);
 
+// marks, tags and notes on rows (writes: `case-changed` with `marks`, `tags` or `notes`)
+/** S: each row marked Suspicious, or why not. At most 10,000 rows (`gridRowIds` resolves a selection). */
+export const markSet = (rows: number[]) => call<CommandResult["mark_set"]>("mark_set", { rows } satisfies Args<"mark_set">);
+/** U: each row's Suspicious mark cleared, or why not. */
+export const markClear = (rows: number[]) =>
+  call<CommandResult["mark_clear"]>("mark_clear", { rows } satisfies Args<"mark_clear">);
+export const tagAdd = (rows: number[], tag: string) =>
+  call<CommandResult["tag_add"]>("tag_add", { rows, tag } satisfies Args<"tag_add">);
+export const tagRemove = (rows: number[], tag: string) =>
+  call<CommandResult["tag_remove"]>("tag_remove", { rows, tag } satisfies Args<"tag_remove">);
+export const tagsList = (limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["tags_list"]>("tags_list", { queryId, slot, limit, offset } satisfies Args<"tags_list">);
+export const noteAdd = (rowId: number, text: string) =>
+  call<CommandResult["note_add"]>("note_add", { rowId, text } satisfies Args<"note_add">);
+export const noteDelete = (id: number) => call<CommandResult["note_delete"]>("note_delete", { id } satisfies Args<"note_delete">);
+export const notesList = (rowId: number, limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["notes_list"]>("notes_list", { queryId, slot, rowId, limit, offset } satisfies Args<"notes_list">);
+
+// timeline entries and their evidence (writes: `case-changed` with `entries`, and `marks` and `records` when evidence
+// or a review moves them)
+/** The live entries `query` selects, in the Timeline's order: by time, the undated ("needs a time") last. */
+export const entriesList = (query: EntryQuery, limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["entries_list"]>("entries_list", { queryId, slot, query, limit, offset } satisfies Args<"entries_list">);
+export const entryGet = (id: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["entry_get"]>("entry_get", { queryId, slot, id } satisfies Args<"entry_get">);
+/** A new entry; `edit.title` is required, every other field `null` for none. */
+export const entryNew = (edit: EntryChanges) => call<CommandResult["entry_new"]>("entry_new", { edit } satisfies Args<"entry_new">);
+/** Changes only the fields `edit` gives; `null` leaves a field as it is (a time the evidence gave stays the row's). */
+export const entryEdit = (id: number, edit: EntryChanges) =>
+  call<CommandResult["entry_edit"]>("entry_edit", { id, edit } satisfies Args<"entry_edit">);
+export const entryStatus = (id: number, status: EntryStatus) =>
+  call<CommandResult["entry_status"]>("entry_status", { id, status } satisfies Args<"entry_status">);
+export const entryDelete = (id: number) =>
+  call<CommandResult["entry_delete"]>("entry_delete", { id } satisfies Args<"entry_delete">);
+/** M: an entry per row, timed by the row when it gives a UTC time; a row already evidence answers its entry. */
+export const rowsPromote = (rows: number[]) =>
+  call<CommandResult["rows_promote"]>("rows_promote", { rows } satisfies Args<"rows_promote">);
+/** A: the rows attached to entry `entryId` as evidence, linking each row's host. */
+export const rowsAttach = (entryId: number, rows: number[]) =>
+  call<CommandResult["rows_attach"]>("rows_attach", { entryId, rows } satisfies Args<"rows_attach">);
+export const evidenceDetach = (entryId: number, rowId: number) =>
+  call<CommandResult["evidence_detach"]>("evidence_detach", { entryId, rowId } satisfies Args<"evidence_detach">);
+/** Every row attached to the entry, each re-checked against the case (`standing`). */
+export const evidenceList = (entryId: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["evidence_list"]>("evidence_list", { queryId, slot, entryId } satisfies Args<"evidence_list">);
+
+// host, account and IOC records (writes: `case-changed` with `records`, and `entries` when the Timeline shows it)
+/** The live records of `query.kind`, each tagged with its kind; IOCs narrowed by type, tool and text. */
+export const recordsList = (query: RecordQuery, limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["records_list"]>("records_list", { queryId, slot, query, limit, offset } satisfies Args<"records_list">);
+/** One record, a deleted one too (`deleted` says so). */
+export const recordGet = (kind: RecordKind, id: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["record_get"]>("record_get", { queryId, slot, kind, id } satisfies Args<"record_get">);
+/** A new record (`spec.id` null), or every field of record `spec.id`. */
+export const recordUpsert = (spec: RecordSpec) =>
+  call<CommandResult["record_upsert"]>("record_upsert", { spec } satisfies Args<"record_upsert">);
+export const recordDelete = (kind: RecordKind, id: number) =>
+  call<CommandResult["record_delete"]>("record_delete", { kind, id } satisfies Args<"record_delete">);
+/** Every entry linked to record `fromId` ends linked to `intoId`, and `fromId` is deleted. */
+export const recordMerge = (kind: RecordKind, fromId: number, intoId: number) =>
+  call<CommandResult["record_merge"]>("record_merge", { kind, fromId, intoId } satisfies Args<"record_merge">);
+export const recordStatus = (kind: RecordKind, id: number, status: RecordStatus) =>
+  call<CommandResult["record_status"]>("record_status", { kind, id, status } satisfies Args<"record_status">);
+export const recordLink = (entryId: number, kind: RecordKind, recordId: number) =>
+  call<CommandResult["record_link"]>("record_link", { entryId, kind, recordId } satisfies Args<"record_link">);
+export const recordUnlink = (entryId: number, kind: RecordKind, recordId: number) =>
+  call<CommandResult["record_unlink"]>("record_unlink", { entryId, kind, recordId } satisfies Args<"record_unlink">);
+/** The live entries linked to a record, in the Timeline's order. */
+export const recordEntries = (kind: RecordKind, id: number, limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["record_entries"]>("record_entries", { queryId, slot, kind, id, limit, offset } satisfies Args<"record_entries">);
+
+// reads over a row, an IOC, an account, the history
+/** The accounts and IOCs a row names, each with the record the case already has for it (`existing_id`). */
+export const candidates = (rowId: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["candidates"]>("candidates", { queryId, slot, rowId } satisfies Args<"candidates">);
+/** The slot a sightings sweep runs on, one IOC at a time, so a newer sweep supersedes the older (S5). */
+export const SIGHTINGS_SLOT = "sightings";
+/** Where an IOC's value occurs in the loaded data: computed each time, never stored. Cancellable by its query id. */
+export const iocSightings = (id: number, slot: string = SIGHTINGS_SLOT, queryId = newQueryId()) =>
+  call<CommandResult["ioc_sightings"]>("ioc_sightings", { queryId, slot, id } satisfies Args<"ioc_sightings">);
+/** An account's logons by host, type and outcome, each with the filter document that opens its rows. */
+export const logonSummary = (id: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["logon_summary"]>("logon_summary", { queryId, slot, id } satisfies Args<"logon_summary">);
+/** History rows, newest first: all, of one target kind, or of one target (`targetKind` and `targetId`). */
+export const historyList = (
+  targetKind: string | null, targetId: string | null, limit: number, offset: number, slot: string, queryId = newQueryId(),
+) =>
+  call<CommandResult["history_list"]>(
+    "history_list", { queryId, slot, targetKind, targetId, limit, offset } satisfies Args<"history_list">,
+  );
+
+// the record exports: each a read and a job (`job-started`, `job-finished`), cancelled by its query id
+export const exportTimeline = (path: string, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["export_timeline"]>("export_timeline", { queryId, slot, path } satisfies Args<"export_timeline">);
+export const exportWorkbook = (path: string, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["export_workbook"]>("export_workbook", { queryId, slot, path } satisfies Args<"export_workbook">);
+export const exportReport = (path: string, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["export_report"]>("export_report", { queryId, slot, path } satisfies Args<"export_report">);
+
 // settings
-export const settingsGet = () => call<CommandResult["settings_get"]>("settings_get");
+export const settingsGet =() => call<CommandResult["settings_get"]>("settings_get");
 /** Saves the whole settings object; the backend keeps its own `recent` list whatever this one holds. */
 export const settingsUpdate = (settings: Settings) =>
   call<CommandResult["settings_update"]>("settings_update", { settings } satisfies Args<"settings_update">);

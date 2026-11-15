@@ -32,7 +32,10 @@ const MAX_LABEL: usize = 63;
 const MAX_LOCAL_PART: usize = 64;
 
 /// An IOC's type (ruling S4). Each has its own validation in `validate_ioc`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum IocType {
     Ip,
@@ -106,7 +109,8 @@ impl IocType {
 }
 
 /// An account's privilege.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Privilege {
     Standard,

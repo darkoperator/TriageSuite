@@ -29,7 +29,10 @@ pub const MAX_TECHNIQUES: usize = 64;
 const MAX_FILTER: usize = 1_000;
 
 /// An entry's review state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum EntryStatus {
     /// An analyst's, not yet reviewed.
@@ -73,6 +76,7 @@ impl EntryStatus {
 
 /// One timeline entry, as the Timeline shows it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Entry {
     pub id: i64,
     /// When it happened, UTC text (`YYYY-MM-DDTHH:MM:SS.ffffffZ`); `None`
@@ -121,7 +125,9 @@ pub struct EntryEdit {
 
 /// Which entries the Timeline lists. Every field narrows; the default
 /// lists every live entry.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
 pub struct EntryQuery {
     /// Any of these statuses; empty for any status.
     pub status: Vec<EntryStatus>,

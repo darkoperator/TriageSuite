@@ -191,11 +191,7 @@ pub fn grid_export(
     zone_times: Option<&str>,
 ) -> Result<ExportReport, CmdError> {
     state.current()?;
-    let label = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
-    state.announced(EXPORT_JOB, &label, || {
+    state.announced(EXPORT_JOB, &job_label(path), || {
         let cancel = Arc::new(AtomicBool::new(false));
         state.read_to_completion(at.slot, at.query_id, cancel.clone(), |c| {
             // The rows are written beside any write; the target's second
@@ -207,6 +203,14 @@ pub fn grid_export(
             })
         })
     })
+}
+
+/// What the status bar names an export by: the file's name, or the whole
+/// path when it has none.
+pub(crate) fn job_label(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// A date-range chip on `relation`'s timestamp `column`, its bounds on

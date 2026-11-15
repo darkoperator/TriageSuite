@@ -30,6 +30,7 @@ const TARGET_KINDS: [&str; 13] = [
 ];
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct HistoryRow {
     pub id: i64,
     pub at: String,

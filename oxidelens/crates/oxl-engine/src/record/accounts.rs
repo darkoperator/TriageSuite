@@ -19,6 +19,7 @@ use duckdb::{params, Connection};
 
 /// An account record, as the Accounts sheet shows it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct AccountRecord {
     pub id: i64,
     /// The account's name, without its domain.
@@ -53,7 +54,9 @@ pub struct AccountRecord {
 
 /// What `upsert_account` sets: a new record with `id: None`, else every
 /// field of record `id`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(deny_unknown_fields)]
 pub struct AccountSpec {
     pub id: Option<i64>,
     /// 1 to `MAX_RECORD_NAME` characters, not blank, no control character.

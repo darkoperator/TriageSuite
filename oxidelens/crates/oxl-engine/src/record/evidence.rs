@@ -39,6 +39,7 @@ const SNAPSHOT_SUMMARY_VALUES: usize = 4;
 
 /// What M did with one row.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PromoteOutcome {
     pub row_id: i64,
     /// The entry made for the row, or the one it is already evidence on;
@@ -53,6 +54,7 @@ pub struct PromoteOutcome {
 
 /// How an evidence row compares with the row the case holds now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceStanding {
     /// In the view, and its cells and hash are as they were attached.
@@ -68,6 +70,7 @@ pub enum EvidenceStanding {
 
 /// One row attached to an entry.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Evidence {
     pub row_id: i64,
     pub relation: String,

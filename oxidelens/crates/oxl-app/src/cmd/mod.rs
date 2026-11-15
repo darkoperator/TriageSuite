@@ -12,6 +12,7 @@
 pub mod case;
 pub mod grid;
 pub mod load;
+pub mod record;
 pub mod row;
 pub mod settings;
 pub mod views;
@@ -78,7 +79,9 @@ pub mod commands {
 /// An export checks its target against the loaded sources before it writes
 /// and again, with the write gate held, before it renames its file into
 /// place. These tests pause an export between the two (`Point::BeforeRename`)
-/// and load a run whose folder holds the target meanwhile.
+/// and load a run whose folder holds the target meanwhile. A record export
+/// holds the gate for all its work, so it is paused before it takes the gate
+/// (`Point::BeforeGate`), and the load lands before any of its checks.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,16 +105,17 @@ mod tests {
         (d, state, later)
     }
 
-    /// Run `export` on a thread, paused before its rename until a run whose
-    /// root is `run` has been loaded; what it answered.
+    /// Run `export` on a thread, paused at `point` until a run whose root
+    /// is `run` has been loaded; what it answered.
     fn export_while_loading(
         state: &Arc<AppState>,
+        point: Point,
         run: &Path,
         export: impl FnOnce(&AppState) -> Result<(), CmdError> + Send + 'static,
     ) -> Result<(), CmdError> {
         let (reached_tx, reached) = mpsc::channel();
         let (go, go_rx) = mpsc::channel::<()>();
-        state.on(Point::BeforeRename, move || {
+        state.on(point, move || {
             reached_tx.send(()).unwrap();
             go_rx.recv().unwrap();
         });
@@ -124,7 +128,7 @@ mod tests {
         }
         reached
             .recv_timeout(LIMIT)
-            .expect("the export reached its rename");
+            .expect("the export reached its pause");
         load::load_run(state, run).expect("the load ran while the export was paused");
         go.send(()).unwrap();
         done.recv_timeout(LIMIT).expect("the export answered")
@@ -144,7 +148,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "relation": "evtxtriage_events" })).unwrap();
         let answer = {
             let target = target.clone();
-            export_while_loading(&state, &later, move |state| {
+            export_while_loading(&state, Point::BeforeRename, &later, move |state| {
                 grid::grid_export(state, At::new("e1", "export"), &grid, &target, None).map(|_| ())
             })
         };
@@ -161,12 +165,35 @@ mod tests {
         let target = later.join("all.oxlview.json");
         let answer = {
             let target = target.clone();
-            export_while_loading(&state, &later, move |state| {
+            export_while_loading(&state, Point::BeforeRename, &later, move |state| {
                 views::view_export(state, At::new("v1", "vexport"), view.id, &target)
             })
         };
         assert_eq!(answer.unwrap_err().code, "refused");
         assert!(!target.exists(), "the view landed inside the run");
         assert!(!partial(&target).exists(), "the partial file was left");
+    }
+
+    #[test]
+    fn a_record_export_into_a_run_loaded_meanwhile_is_refused() {
+        type Export = fn(&AppState, At<'_>, &Path) -> Result<oxl_engine::ExportReport, CmdError>;
+        let exports: [(&str, Export); 3] = [
+            ("timeline.csv", record::export_timeline),
+            ("record.xlsx", record::export_workbook),
+            ("record.md", record::export_report),
+        ];
+        for (name, export) in exports {
+            let (_d, state, later) = setup();
+            let target = later.join(name);
+            let answer = {
+                let target = target.clone();
+                export_while_loading(&state, Point::BeforeGate, &later, move |state| {
+                    export(state, At::new("r1", "rexport"), &target).map(|_| ())
+                })
+            };
+            assert_eq!(answer.unwrap_err().code, "refused", "{name}");
+            assert!(!target.exists(), "{name} landed inside the run");
+            assert!(!partial(&target).exists(), "{name}'s partial file was left");
+        }
     }
 }

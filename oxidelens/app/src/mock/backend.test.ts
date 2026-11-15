@@ -9,8 +9,15 @@ import type { Listing } from "../contract/generated/Listing";
 import type { GroupView } from "../contract/generated/GroupView";
 import type { ValueCount } from "../contract/generated/ValueCount";
 import type { MergedView } from "../contract/generated/MergedView";
-import { MOCK_COMMANDS, mockCall, mockOn, setMockLatency, setMockMarks } from "./backend";
-import { HOSTILE, HAYABUSA_COLUMNS, HAYABUSA_FIRST_ID, EVENT_COLUMNS, EVENT_ROWS, eventRows, hayabusaRows } from "./generated";
+import type { Command, CommandArgs } from "../contract/generated/commands";
+import type { CaseRecord } from "../contract/generated/CaseRecord";
+import type { Entry } from "../contract/generated/Entry";
+import type { Evidence } from "../contract/generated/Evidence";
+import type { PromoteOutcome } from "../contract/generated/PromoteOutcome";
+import { MOCK_COMMANDS, mockCall, mockOn, resetMock, setMockLatency, setMockMarks } from "./backend";
+import {
+  HOSTILE, HOSTILE_RECORD, HAYABUSA_COLUMNS, HAYABUSA_FIRST_ID, EVENT_COLUMNS, EVENT_ROWS, eventRows, hayabusaRows,
+} from "./generated";
 
 const apiCommands = [...apiSource.matchAll(/\bcall(?:<[^(]*>)?\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
 
@@ -231,5 +238,166 @@ describe("writes", () => {
     const running = mockCall("load_run", { path: "/runs/run-1" });
     expect(await rejection(mockCall("load_run", { path: "/runs/run-2" }))).toMatchObject({ code: "busy" });
     await running;
+  });
+});
+
+// Arguments for every command, of its contract's shape: the compiler holds the table to `CommandArgs` and to every
+// command, so a new command without a sample fails `npm run build`.
+const noEntryEdit = { title: null, description: null, time: null, tactic: null, technique_ids: null };
+const SAMPLES: { [C in Command]: CommandArgs[C] } = {
+  case_new: { path: "/cases/new.duckdb", name: "WS01 triage" },
+  case_open: { path: "/cases/acme.case.duckdb" },
+  case_close: {},
+  case_summary: q("s"),
+  load_run: { path: "/runs/run-1" },
+  load_file: { path: "/f.csv" },
+  columns: { ...q("c"), relation: "mock_events" },
+  sessions: q("s"),
+  host_zones: q("z"),
+  zone_names: {},
+  display_zone_set: { zone: "UTC" },
+  grid_page: { ...q("g"), state: state(), limit: 5, offset: 0, options: opts },
+  grid_counts: { ...q("g"), state: state() },
+  grid_groups: { ...q("g"), state: state(), by: ["Channel"], parent: [], limit: 5, offset: 0, zone: "UTC" },
+  grid_histogram: { ...q("g"), state: state(), column: null, maxBuckets: 10, zone: "UTC" },
+  grid_values: { ...q("g"), state: state(), column: "Channel", exceptChips: [], contains: null, order: "commonest", limit: 5, offset: 0 },
+  grid_empty_columns: { ...q("g"), state: state() },
+  grid_matches: { ...q("g"), state: state(), from: null, backward: false, limit: 5 },
+  grid_match_count: { ...q("g"), state: state() },
+  grid_row_offset: { ...q("g"), state: state(), rowId: 3 },
+  grid_row_ids: { ...q("g"), state: state(), ranges: [[0, 2]] },
+  grid_row_positions: { ...q("g"), state: state(), ids: [1, 2] },
+  grid_export: { ...q("e"), state: state(), path: "/out/events.csv", zoneTimes: null },
+  date_range_chip: { ...q("d"), relation: "mock_events", column: "TimeCreated", from: "2026-01-05", to: null, zone: "UTC" },
+  default_colour_rules: { ...q("r"), relation: "mock_hayabusa" },
+  row_view: { ...q("r"), rowId: 3, zone: "UTC" },
+  cell_value: { ...q("r"), rowId: 3, column: "Message" },
+  around_totals: { ...q("r"), rowId: 3, windows: [60] },
+  merged_page: { ...q("m"), source: { marked: { marks: ["suspicious"] } }, limit: 5, offset: 0, zone: "UTC" },
+  views_list: { ...q("v"), relation: null, limit: 5, offset: 0 },
+  views_matching: { ...q("v"), limit: 5, offset: 0 },
+  view_save: {
+    name: "Logons", kind: "view", pattern: "mock_*",
+    doc: { chips: [], search: state().search, hosts: [], group_by: [], sort: [], layout: null, colour_rules: [] },
+  },
+  view_delete: { id: 1 },
+  view_apply: { ...q("v"), id: 1, relation: "mock_events" },
+  view_export: { ...q("v"), id: 1, path: "/out/view.oxlview.json" },
+  view_import: { path: "/in/view.oxlview.json" },
+  mark_set: { rows: [3, 4] },
+  mark_clear: { rows: [5] },
+  tag_add: { rows: [3], tag: "triage" },
+  tag_remove: { rows: [5], tag: "seen" },
+  tags_list: { ...q("t"), limit: 10, offset: 0 },
+  note_add: { rowId: 3, text: HOSTILE.html },
+  note_delete: { id: 1 },
+  notes_list: { ...q("n"), rowId: 5, limit: 10, offset: 0 },
+  entries_list: { ...q("tl"), query: { status: [], host: null, tactic: null, text: null }, limit: 50, offset: 0 },
+  entry_get: { ...q("e"), id: 2 },
+  entry_new: { edit: { ...noEntryEdit, title: "Lateral movement" } },
+  entry_edit: { id: 3, edit: { ...noEntryEdit, time: { set: "2026-01-05T03:00:00Z" } } },
+  entry_status: { id: 1, status: "draft" },
+  entry_delete: { id: 3 },
+  rows_promote: { rows: [3] },
+  rows_attach: { entryId: 3, rows: [4] },
+  evidence_detach: { entryId: 1, rowId: 7 },
+  evidence_list: { ...q("ev"), entryId: 1 },
+  records_list: { ...q("rl"), query: { kind: "host" }, limit: 10, offset: 0 },
+  record_get: { ...q("rg"), kind: "ioc", id: 1 },
+  record_upsert: { spec: { kind: "host", id: null, name: "SRV02", role: "", note: "" } },
+  record_delete: { kind: "ioc", id: 2 },
+  record_merge: { kind: "host", fromId: 2, intoId: 1 },
+  record_status: { kind: "account", id: 2, status: "reviewed" },
+  record_link: { entryId: 3, kind: "ioc", recordId: 1 },
+  record_unlink: { entryId: 1, kind: "account", recordId: 1 },
+  record_entries: { ...q("re"), kind: "host", id: 1, limit: 10, offset: 0 },
+  candidates: { ...q("cand"), rowId: 3 },
+  ioc_sightings: { ...q("sightings"), id: 1 },
+  logon_summary: { ...q("logons"), id: 1 },
+  history_list: { ...q("h"), targetKind: "entry", targetId: "1", limit: 10, offset: 0 },
+  export_timeline: { ...q("x"), path: "/out/timeline.csv" },
+  export_workbook: { ...q("x"), path: "/out/record.xlsx" },
+  export_report: { ...q("x"), path: "/out/record.md" },
+  settings_get: {},
+  settings_update: {
+    settings: {
+      version: 1, theme: "dark", font_size: 12, left_pane: "open", right_pane: "open", histogram: true,
+      analyst: "analyst01", recent: [], layouts: {}, colour_rules: {},
+    },
+  },
+  recent_clear: {},
+  recent_remove: { path: "/cases/acme.case.duckdb" },
+  query_cancel: { queryIds: ["nothing"] },
+};
+
+describe("the case record", () => {
+  async function open() {
+    await mockCall("case_open", { path: "/cases/acme.case.duckdb" });
+  }
+
+  it("mock_answers_every_api_call", async () => {
+    expect(Object.keys(SAMPLES).sort()).toEqual([...COMMANDS].sort());
+    for (const cmd of COMMANDS) {
+      // Each command on a freshly opened case, so no answer depends on another's write.
+      resetMock();
+      setMockLatency(0);
+      await open();
+      const answer = await mockCall(cmd, SAMPLES[cmd] as Record<string, unknown>).then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      expect(answer, cmd).toMatchObject({ ok: true });
+    }
+  });
+
+  it("holds an agent entry, an undated entry, records of every kind and the hostile record values", async () => {
+    await open();
+    const entries = await mockCall<Listing<Entry>>("entries_list", SAMPLES.entries_list);
+    const agent = entries.items.find((e) => e.agent_added);
+    expect(agent).toMatchObject({ status: "unreviewed", created_by: expect.stringMatching(/^agent:/) });
+    const undated = entries.items.filter((e) => e.needs_time);
+    expect(undated.length).toBeGreaterThan(0);
+    // The engine's order: dated by time, the undated last.
+    expect(entries.items.slice(-undated.length).every((e) => e.needs_time && e.time === null)).toBe(true);
+    const texts: string[] = entries.items.flatMap((e) => [e.title, e.description]);
+    for (const kind of ["host", "account", "ioc"] as const) {
+      const query = kind === "ioc" ? { kind, ioc_type: null, tool: null, text: null } : { kind };
+      const listed = await mockCall<Listing<CaseRecord>>("records_list", { ...q("rl"), query, limit: 50, offset: 0 });
+      expect(listed.items.length, kind).toBeGreaterThan(0);
+      expect(listed.items.every((r) => r.kind === kind)).toBe(true);
+      for (const r of listed.items) texts.push(...Object.values(r).filter((v): v is string => typeof v === "string"));
+    }
+    for (const value of HOSTILE_RECORD) expect(texts, value.slice(0, 30)).toContain(value);
+    const evidence = await mockCall<Evidence[]>("evidence_list", SAMPLES.evidence_list);
+    expect(evidence.length).toBeGreaterThan(0);
+  });
+
+  it("M makes an entry and marks the row, emitting case-changed; refusals are the engine's codes", async () => {
+    const changed: string[][] = [];
+    mockOn("case-changed", (p) => changed.push(p.kinds));
+    await open();
+    const [outcome] = await mockCall<PromoteOutcome[]>("rows_promote", { rows: [3] });
+    expect(outcome).toMatchObject({ row_id: 3, created: true });
+    const entry = await mockCall<Entry>("entry_get", { ...q("e"), id: outcome.entry_id });
+    expect(entry).toMatchObject({ evidence_rows: 1, time_source: "row", needs_time: false });
+    const page = await mockCall<GridPage>("grid_page", { ...q("g"), state: state(), limit: 5, offset: 0, options: opts });
+    expect(page.marks[page.row_ids.indexOf(3)]).toBe("malicious");
+    expect(changed).toEqual([["entries", "marks", "records"]]);
+    expect(await rejection(mockCall("entry_get", { ...q("e"), id: 999 }))).toMatchObject({ code: "not_found" });
+    // The undated entry cannot be reviewed until it has a time.
+    expect(await rejection(mockCall("entry_status", { id: 4, status: "reviewed" }))).toMatchObject({ code: "refused" });
+  });
+
+  it("an export is a job, and ioc_sightings is a cancellable read", async () => {
+    setMockLatency(5);
+    await open();
+    const jobs: string[] = [];
+    mockOn("job-started", (p) => jobs.push(`start ${p.kind} ${p.label}`));
+    mockOn("job-finished", (p) => jobs.push(`end ${p.kind} ${p.ok}`));
+    await mockCall("export_report", SAMPLES.export_report);
+    expect(jobs).toEqual(["start export record.md", "end export true"]);
+    const sweep = rejection(mockCall("ioc_sightings", { slot: "sightings", queryId: "s1", id: 1 }));
+    await mockCall("query_cancel", { queryIds: ["s1"] });
+    expect(await sweep).toMatchObject({ code: "interrupted" });
   });
 });

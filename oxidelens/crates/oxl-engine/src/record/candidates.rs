@@ -20,6 +20,7 @@ use duckdb::Connection;
 
 /// A record the row names, for the analyst to link: an account or an IOC.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Candidate {
     /// `Account` or `Ioc`.
     pub kind: RecordKind,

@@ -40,6 +40,7 @@ pub const AGENT_ROWS_PER_CALL: usize = 1_000;
 
 /// What a batch call did to one of the rows it was given.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RowOutcome {
     pub row_id: i64,
     /// The row is now as asked, whether or not this call changed it.

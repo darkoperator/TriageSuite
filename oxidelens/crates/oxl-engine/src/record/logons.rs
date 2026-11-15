@@ -39,6 +39,7 @@ const LOGON_TYPE: &str = "LogonType ";
 
 /// Whether a logon succeeded (4624) or failed (4625).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum LogonOutcome {
     Success,
@@ -47,6 +48,7 @@ pub enum LogonOutcome {
 
 /// The logons of one outcome and logon type on one host.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LogonCount {
     pub outcome: LogonOutcome,
     pub logon_type: u32,
@@ -65,6 +67,7 @@ pub struct LogonCount {
 
 /// An account's logon summary.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LogonSummary {
     /// By host (rows without one last), logon type, then success before
     /// failure. Only the account's logons; empty when it has none.

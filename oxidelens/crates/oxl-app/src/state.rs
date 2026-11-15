@@ -201,6 +201,9 @@ pub(crate) enum Point {
     /// A view import has checked the file's metadata and is about to open
     /// it.
     BeforeImportOpen,
+    /// A record export has its reader and has not yet taken the write gate
+    /// it writes its file under.
+    BeforeGate,
 }
 
 /// How often an export waiting for the write gate looks whether it was
@@ -304,6 +307,25 @@ impl AppState {
         let ticket = self.queries.enter_case(open.generation, slot, query_id)?;
         let reader = open.readers.checkout(&ticket)?;
         self.hook(Point::AfterCheckout);
+        ticket.run(&reader, work)
+    }
+
+    /// `read`, for work that looks at a cancel flag between its statements
+    /// (a search across every relation): `flag` is set as soon as the query
+    /// is stopped (superseded, cancelled, or its case closing), and the
+    /// query answers its stop code then, as any read does.
+    pub fn read_with_flag<T>(
+        &self,
+        slot: &str,
+        query_id: &str,
+        flag: Arc<AtomicBool>,
+        work: impl FnOnce(&Case) -> oxl_engine::Result<T>,
+    ) -> Result<T, CmdError> {
+        let open = self.current()?;
+        let ticket = self
+            .queries
+            .enter_case_with_flag(open.generation, slot, query_id, flag)?;
+        let reader = open.readers.checkout(&ticket)?;
         ticket.run(&reader, work)
     }
 

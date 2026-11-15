@@ -20,7 +20,8 @@ use duckdb::types::Value as SqlValue;
 use duckdb::{params, Connection, OptionalExt};
 
 /// Which kind of record: the three sheets beside the Timeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
     Host,
@@ -100,7 +101,8 @@ impl RecordKind {
 
 /// A record's review state. An analyst's records are `reviewed` from the
 /// start; an agent's are `unreviewed` until an analyst reviews them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RecordStatus {
     Unreviewed,

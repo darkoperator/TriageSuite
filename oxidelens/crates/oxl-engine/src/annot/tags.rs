@@ -24,6 +24,7 @@ pub const AGENT_TAG_PREFIX: &str = "ai:";
 pub const MAX_TAG: usize = 64;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct TagInfo {
     pub name: String,
     /// Rows carrying it, rows out of the view included.

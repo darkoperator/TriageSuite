@@ -26,16 +26,19 @@
 //! `queryId` and `slot` first. An argument typed `Option` may be left out.
 
 use crate::cmd::case::CaseSummary;
+use crate::cmd::record::{CaseRecord, EntryChanges, RecordQuery, RecordSpec};
 use crate::error::CmdError;
 use crate::events::{
     CaseChanged, JobFinished, JobStarted, CASE_CHANGED, JOB_FINISHED, JOB_STARTED, SETTINGS_DAMAGED,
 };
 use crate::settings::{DamagedSettings, Settings, SettingsReply};
 use oxl_engine::{
-    AppliedView, CellValue, Chip, ColourRule, ColumnMeta, ExportReport, FileOptions, GridCounts,
-    GridPage, GridState, GroupView, Histogram, HostZone, Listing, LoadReport, MatchPos,
-    MatchingView, MergedSource, MergedView, PageOptions, RowView, SavedView, Session, ValueCount,
-    ValueOrder, ViewDoc, ViewKind, ViewListing, WindowTotal,
+    AppliedView, Candidate, CellValue, Chip, ColourRule, ColumnMeta, Entry, EntryQuery,
+    EntryStatus, Evidence, ExportReport, FileOptions, GridCounts, GridPage, GridState, GroupView,
+    Histogram, HistoryRow, HostZone, Listing, LoadReport, LogonSummary, MatchPos, MatchingView,
+    MergedSource, MergedView, Note, PageOptions, PromoteOutcome, RecordKind, RecordStatus,
+    RowOutcome, RowView, SavedView, Session, Sightings, TagInfo, ValueCount, ValueOrder, ViewDoc,
+    ViewKind, ViewListing, WindowTotal,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -81,6 +84,40 @@ pub const COMMANDS: &[&str] = &[
     "view_apply",
     "view_export",
     "view_import",
+    "mark_set",
+    "mark_clear",
+    "tag_add",
+    "tag_remove",
+    "tags_list",
+    "note_add",
+    "note_delete",
+    "notes_list",
+    "entries_list",
+    "entry_get",
+    "entry_new",
+    "entry_edit",
+    "entry_status",
+    "entry_delete",
+    "rows_promote",
+    "rows_attach",
+    "evidence_detach",
+    "evidence_list",
+    "records_list",
+    "record_get",
+    "record_upsert",
+    "record_delete",
+    "record_merge",
+    "record_status",
+    "record_link",
+    "record_unlink",
+    "record_entries",
+    "candidates",
+    "ioc_sightings",
+    "logon_summary",
+    "history_list",
+    "export_timeline",
+    "export_workbook",
+    "export_report",
     "settings_get",
     "settings_update",
     "recent_clear",
@@ -314,6 +351,78 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
         read!(c, view_apply(id: i64, relation: String) -> AppliedView),
         read!(c, view_export(id: i64, path: String) -> ()),
         cmd!(c, view_import(path: String) -> SavedView),
+        cmd!(c, mark_set(rows: Vec<i64>) -> Vec<RowOutcome>),
+        cmd!(c, mark_clear(rows: Vec<i64>) -> Vec<RowOutcome>),
+        cmd!(c, tag_add(rows: Vec<i64>, tag: String) -> Vec<RowOutcome>),
+        cmd!(
+            c,
+            tag_remove(rows: Vec<i64>, tag: String) -> Vec<RowOutcome>
+        ),
+        read!(c, tags_list(limit: u32, offset: u64) -> Listing<TagInfo>),
+        cmd!(c, note_add(rowId: i64, text: String) -> Note),
+        cmd!(c, note_delete(id: i64) -> ()),
+        read!(
+            c,
+            notes_list(rowId: i64, limit: u32, offset: u64) -> Listing<Note>
+        ),
+        read!(
+            c,
+            entries_list(query: EntryQuery, limit: u32, offset: u64) -> Listing<Entry>
+        ),
+        read!(c, entry_get(id: i64) -> Entry),
+        cmd!(c, entry_new(edit: EntryChanges) -> Entry),
+        cmd!(c, entry_edit(id: i64, edit: EntryChanges) -> Entry),
+        cmd!(c, entry_status(id: i64, status: EntryStatus) -> Entry),
+        cmd!(c, entry_delete(id: i64) -> ()),
+        cmd!(c, rows_promote(rows: Vec<i64>) -> Vec<PromoteOutcome>),
+        cmd!(
+            c,
+            rows_attach(entryId: i64, rows: Vec<i64>) -> Vec<RowOutcome>
+        ),
+        cmd!(c, evidence_detach(entryId: i64, rowId: i64) -> ()),
+        read!(c, evidence_list(entryId: i64) -> Vec<Evidence>),
+        read!(
+            c,
+            records_list(query: RecordQuery, limit: u32, offset: u64) -> Listing<CaseRecord>
+        ),
+        read!(c, record_get(kind: RecordKind, id: i64) -> CaseRecord),
+        cmd!(c, record_upsert(spec: RecordSpec) -> CaseRecord),
+        cmd!(c, record_delete(kind: RecordKind, id: i64) -> ()),
+        cmd!(
+            c,
+            record_merge(kind: RecordKind, fromId: i64, intoId: i64) -> ()
+        ),
+        cmd!(
+            c,
+            record_status(kind: RecordKind, id: i64, status: RecordStatus) -> ()
+        ),
+        cmd!(
+            c,
+            record_link(entryId: i64, kind: RecordKind, recordId: i64) -> ()
+        ),
+        cmd!(
+            c,
+            record_unlink(entryId: i64, kind: RecordKind, recordId: i64) -> ()
+        ),
+        read!(
+            c,
+            record_entries(kind: RecordKind, id: i64, limit: u32, offset: u64) -> Listing<Entry>
+        ),
+        read!(c, candidates(rowId: i64) -> Vec<Candidate>),
+        read!(c, ioc_sightings(id: i64) -> Sightings),
+        read!(c, logon_summary(id: i64) -> LogonSummary),
+        read!(
+            c,
+            history_list(
+                targetKind: Option<String>,
+                targetId: Option<String>,
+                limit: u32,
+                offset: u64,
+            ) -> Listing<HistoryRow>
+        ),
+        read!(c, export_timeline(path: String) -> ExportReport),
+        read!(c, export_workbook(path: String) -> ExportReport),
+        read!(c, export_report(path: String) -> ExportReport),
         cmd!(c, settings_get() -> SettingsReply),
         cmd!(c, settings_update(settings: Settings) -> SettingsReply),
         cmd!(c, recent_clear() -> SettingsReply),

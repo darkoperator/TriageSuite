@@ -15,6 +15,19 @@ export const HOSTILE = {
   long: ("LONG-" + "0123456789abcdef".repeat(400)).slice(0, 5000),
 } as const;
 
+/**
+ * The values every record screen must show as inert text: the engine fixtures' `hostile_record_values()`, the same
+ * five strings (a formula, markup, a right-to-left override, a 5,000-character value, Markdown's table and code
+ * delimiters). The mock's entries and records carry each of them.
+ */
+export const HOSTILE_RECORD = [
+  '=HYPERLINK("http://x")',
+  "<img src=x onerror=1>",
+  "invoice‮fdp.exe",
+  "A".repeat(5000),
+  "a | b `c` d",
+] as const;
+
 export const EVENT_ROWS = 5000;
 export const HAYABUSA_ROWS = 300;
 /** Row ids are the case's: the events take 1..5000, the Hayabusa rows follow. */

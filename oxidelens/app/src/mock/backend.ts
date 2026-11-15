@@ -6,7 +6,9 @@
 // the compiler and against `api.ts` by `backend.test.ts`), with the contract's shapes, from the seeded data in
 // `generated.ts` and the recorded answers in `test/fixtures`. It keeps the engine's behaviour where a screen depends
 // on it: no case open answers `no_case`, a newer query on a slot supersedes the older one, `query_cancel` interrupts
-// by id, a second write while one runs answers `busy`, and a write emits `case-changed` (a load also a job).
+// by id, a second write while one runs answers `busy`, and a write emits `case-changed` (a load also a job). The case
+// record (entries, evidence, records, links, tags, notes, history) is `records.ts`'s, seeded with an agent's entry, an
+// undated one and the engine fixtures' hostile record values; a record write names what it touched as the app does.
 //
 // What it does NOT do: it holds no rules. Filters, sorts and groups are only as faithful as a screen needs; times are
 // always shown in UTC whatever zone is asked (the answer says `UTC`); a regex is JavaScript's. Do not test engine
@@ -35,6 +37,7 @@ import type { ViewDoc } from "../contract/generated/ViewDoc";
 import type { ViewWarning } from "../contract/generated/ViewWarning";
 import * as fx from "../test/fixtures";
 import { EVENT_COLUMNS, EVENT_ROWS, HAYABUSA_COLUMNS, HAYABUSA_FIRST_ID, HAYABUSA_ROWS, eventRows, hayabusaRows } from "./generated";
+import * as rec from "./records";
 
 type CmdCode = "not_found" | "invalid" | "refused" | "no_case" | "busy" | "superseded" | "interrupted" | "internal";
 const fail = (code: CmdCode, message: string): never => {
@@ -89,6 +92,7 @@ interface MockCase {
   views: SavedView[];
   nextViewId: number;
   marks: Map<number, MarkState>;
+  records: rec.MockRecords;
 }
 
 function defaultSettings(): Settings {
@@ -119,7 +123,7 @@ export function resetMock(): void {
   latencyMs = 25;
 }
 
-/** Replace the open case's marks (tests only: the mock has no mark command yet). */
+/** Replace the open case's marks outright, whatever its evidence gives them (tests only). */
 export function setMockMarks(marks: ReadonlyArray<readonly [number, MarkState]>): void {
   theCase().marks = new Map(marks);
 }
@@ -184,11 +188,14 @@ function theCase(): MockCase {
 
 function openMock(path: string, name: string): CaseSummary {
   const base = path.split(/[\\/]/).pop() ?? path;
+  const suspicious = [5, 41, 902];
   current = {
     path, name: name || base.replace(/\.duckdb$/, "").replace(/\.case$/, ""), displayZone: "UTC",
     views: fx.viewsList().items.map((v) => ({ ...v, pattern: "mock_*" })), nextViewId: 100,
-    marks: new Map<number, MarkState>([[5, "suspicious"], [41, "suspicious"], [902, "suspicious"]]),
+    marks: new Map<number, MarkState>(suspicious.map((id) => [id, "suspicious"])),
+    records: rec.seedRecords(mockRows, analyst(), suspicious),
   };
+  syncMarks([...current.records.evidence.values()].flat().map((e) => e.row_id));
   generation += 1;
   settings = { ...settings, recent: [path, ...settings.recent.filter((p) => p !== path)].slice(0, 10) };
   return summary();
@@ -384,6 +391,44 @@ function findRow(rowId: number): { rel: MockRelation; row: Row } {
   return fail("not_found", `no row ${rowId}`);
 }
 
+/** The record's view of the mock's rows (`records.ts`): relation, host, primary time as an entry's, summary, cells. */
+function factsOf(rel: MockRelation, index: number): rec.RowFacts {
+  const row = rel.rows[index];
+  const at = (pred: (c: ColumnMeta) => boolean) => row[rel.columns.findIndex(pred)] ?? null;
+  const time = at((c) => c.name === rel.info.primary_time);
+  return {
+    relation: rel.info.name,
+    host: at((c) => c.role === "host"),
+    // The engine writes an entry's time with six fractional digits; the mock's rows have seven.
+    time: time === null ? null : time.replace(/(\.\d{6})\d(Z)$/, "$1$2"),
+    summary: (at((c) => c.name === "Message" || c.name === "Details") ?? "").slice(0, 300),
+    cells: rel.columns.map((c, i) => [c.name, row[i]] as const),
+  };
+}
+
+const mockRows: rec.Rows = {
+  facts(rowId) {
+    for (const rel of relations()) {
+      const index = rowId - rel.firstId;
+      if (index >= 0 && index < rel.rows.length) return factsOf(rel, index);
+    }
+    return null;
+  },
+  *all() {
+    for (const rel of relations()) for (let i = 0; i < rel.rows.length; i++) yield [rowIdOf(rel, i), factsOf(rel, i)];
+  },
+};
+
+/** Each of `rows` takes the mark its evidence and S give it (`records.ts`'s `derivedMark`). */
+function syncMarks(rows: Iterable<number>): void {
+  const c = theCase();
+  for (const id of rows) {
+    const mark = rec.derivedMark(c.records, id);
+    if (mark) c.marks.set(id, mark);
+    else c.marks.delete(id);
+  }
+}
+
 const clip = (text: string | null): [string | null, boolean] =>
   text !== null && text.length > 2000 ? [text.slice(0, 2000), true] : [text, false];
 
@@ -446,6 +491,28 @@ const globMatches = (pattern: string, name: string) =>
   new RegExp("^" + pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$").test(name);
 
 const analyst = () => `analyst:${settings.analyst ?? "analyst01"}`;
+
+// What each record write touches, as the app's `case-changed` names it (`cmd/record.rs`).
+const MARKS = ["marks"];
+const ENTRY = ["entries"];
+const REVIEW = ["entries", "marks"];
+const EVIDENCE = ["entries", "marks", "records"];
+const RECORD = ["records", "entries"];
+const LINK = ["entries", "records"];
+
+/** A record export: a read on its slot announced as a job, as the app's. */
+async function recordExport(a: { slot: string; queryId: string; path: string }) {
+  if (!current) fail("no_case", "no case is open");
+  mockEmit("job-started", { kind: "export", label: a.path.split(/[\\/]/).pop() ?? a.path });
+  try {
+    const rows = await read(a.slot, a.queryId, () => rec.exportRows(theCase().records));
+    mockEmit("job-finished", { kind: "export", ok: true, message: null });
+    return { rows, path: a.path };
+  } catch (e) {
+    mockEmit("job-finished", { kind: "export", ok: false, message: (e as { message?: string }).message ?? null });
+    throw e;
+  }
+}
 
 type Handlers = { [C in keyof CommandArgs]: (a: CommandArgs[C]) => Promise<CommandResult[C]> | CommandResult[C] };
 
@@ -828,6 +895,114 @@ const handlers: Handlers = {
       c.views.push(saved);
       return saved;
     }),
+
+  // marks, tags and notes on rows
+  mark_set: (a) =>
+    write(MARKS, () => {
+      const out = rec.markSet(theCase().records, mockRows, a.rows, true);
+      syncMarks(a.rows);
+      return out;
+    }),
+  mark_clear: (a) =>
+    write(MARKS, () => {
+      const out = rec.markSet(theCase().records, mockRows, a.rows, false);
+      syncMarks(a.rows);
+      return out;
+    }),
+  tag_add: (a) => write(["tags"], () => rec.tagRows(theCase().records, mockRows, a.rows, a.tag, analyst(), true)),
+  tag_remove: (a) => write(["tags"], () => rec.tagRows(theCase().records, mockRows, a.rows, a.tag, analyst(), false)),
+  tags_list: (a) => read(a.slot, a.queryId, () => rec.tagsList(theCase().records, a.limit, a.offset)),
+  note_add: (a) => write(["notes"], () => rec.noteAdd(theCase().records, mockRows, a.rowId, a.text, analyst())),
+  note_delete: (a) =>
+    write(["notes"], () => {
+      rec.noteDelete(theCase().records, a.id, analyst());
+      return null;
+    }),
+  notes_list: (a) => read(a.slot, a.queryId, () => rec.notesList(theCase().records, a.rowId, a.limit, a.offset)),
+
+  // timeline entries and their evidence
+  entries_list: (a) => read(a.slot, a.queryId, () => rec.entriesList(theCase().records, a.query, a.limit, a.offset)),
+  entry_get: (a) => read(a.slot, a.queryId, () => rec.entryGet(theCase().records, a.id)),
+  entry_new: (a) => write(ENTRY, () => rec.entryNew(theCase().records, a.edit, analyst())),
+  entry_edit: (a) => write(ENTRY, () => rec.entryEdit(theCase().records, a.id, a.edit, analyst())),
+  entry_status: (a) =>
+    write(REVIEW, () => {
+      const r = theCase().records;
+      const entry = rec.entryStatus(r, a.id, a.status, analyst());
+      syncMarks(rec.evidenceRows(r, a.id));
+      return entry;
+    }),
+  entry_delete: (a) =>
+    write(EVIDENCE, () => {
+      const r = theCase().records;
+      const rows = rec.evidenceRows(r, a.id);
+      rec.entryDelete(r, a.id, analyst());
+      syncMarks(rows);
+      return null;
+    }),
+  rows_promote: (a) =>
+    write(EVIDENCE, () => {
+      const out = rec.promote(theCase().records, mockRows, a.rows, analyst());
+      syncMarks(a.rows);
+      return out;
+    }),
+  rows_attach: (a) =>
+    write(EVIDENCE, () => {
+      const out = rec.attachRows(theCase().records, mockRows, a.entryId, a.rows, analyst());
+      syncMarks(a.rows);
+      return out;
+    }),
+  evidence_detach: (a) =>
+    write(REVIEW, () => {
+      rec.detach(theCase().records, a.entryId, a.rowId, analyst());
+      syncMarks([a.rowId]);
+      return null;
+    }),
+  evidence_list: (a) => read(a.slot, a.queryId, () => rec.evidenceList(theCase().records, a.entryId)),
+
+  // host, account and IOC records
+  records_list: (a) => read(a.slot, a.queryId, () => rec.recordsList(theCase().records, a.query, a.limit, a.offset)),
+  record_get: (a) => read(a.slot, a.queryId, () => rec.recordGet(theCase().records, a.kind, a.id)),
+  record_upsert: (a) => write(RECORD, () => rec.recordUpsert(theCase().records, a.spec, analyst())),
+  record_delete: (a) =>
+    write(RECORD, () => {
+      rec.recordDelete(theCase().records, a.kind, a.id, analyst());
+      return null;
+    }),
+  record_merge: (a) =>
+    write(RECORD, () => {
+      rec.recordMerge(theCase().records, a.kind, a.fromId, a.intoId, analyst());
+      return null;
+    }),
+  record_status: (a) =>
+    write(["records"], () => {
+      rec.recordStatus(theCase().records, a.kind, a.id, a.status, analyst());
+      return null;
+    }),
+  record_link: (a) =>
+    write(LINK, () => {
+      rec.recordLink(theCase().records, a.entryId, a.kind, a.recordId, analyst(), true);
+      return null;
+    }),
+  record_unlink: (a) =>
+    write(LINK, () => {
+      rec.recordLink(theCase().records, a.entryId, a.kind, a.recordId, analyst(), false);
+      return null;
+    }),
+  record_entries: (a) =>
+    read(a.slot, a.queryId, () => rec.recordEntries(theCase().records, a.kind, a.id, a.limit, a.offset)),
+
+  // reads over a row, an IOC, an account, the history
+  candidates: (a) => read(a.slot, a.queryId, () => rec.candidates(theCase().records, mockRows, a.rowId)),
+  ioc_sightings: (a) => read(a.slot, a.queryId, () => rec.sightings(theCase().records, mockRows, a.id)),
+  logon_summary: (a) => read(a.slot, a.queryId, () => rec.logonSummary(theCase().records, mockRows, a.id)),
+  history_list: (a) =>
+    read(a.slot, a.queryId, () => rec.historyList(theCase().records, a.targetKind ?? null, a.targetId ?? null, a.limit, a.offset)),
+
+  // the record exports: reads and jobs, as the grid's export is
+  export_timeline: recordExport,
+  export_workbook: recordExport,
+  export_report: recordExport,
 
   // settings (the file in the app's config folder, not the case: no `case-changed`)
   settings_get: () => ({ settings, damaged: null, actor: analyst() }),

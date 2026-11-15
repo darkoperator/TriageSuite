@@ -92,9 +92,26 @@ fn the_signatures_are_the_commands() {
     assert_eq!(names, COMMANDS);
 }
 
-/// A value each argument name takes, of the shape its type asks for.
-fn sample(arg: &str, dir: &Path) -> Value {
+/// A value each argument of command `cmd` takes, of the shape its type
+/// asks for: by the argument's name, and for a name two commands type
+/// differently, by the command.
+fn sample(cmd: &str, arg: &str, dir: &Path) -> Value {
+    let record = cmd.starts_with("record") || cmd == "records_list";
     match arg {
+        "kind" if record => json!("host"),
+        "query" if record => json!({ "kind": "ioc", "ioc_type": null, "tool": null, "text": null }),
+        "query" => json!({ "status": [], "host": null, "tactic": null, "text": null }),
+        "status" => json!("reviewed"),
+        "rows" => json!([1]),
+        "tag" | "text" => json!("sample"),
+        "entryId" | "recordId" | "fromId" => json!(1),
+        "intoId" => json!(2),
+        "edit" => {
+            json!({ "title": "sample", "description": null, "time": { "set": "2026-01-05T03:00:00Z" },
+                          "tactic": "clear", "technique_ids": null })
+        }
+        "spec" => json!({ "kind": "host", "id": null, "name": "WS01", "role": "", "note": "" }),
+        "targetKind" | "targetId" => Value::Null,
         "queryId" => json!("contract-q"),
         "slot" => json!("contract"),
         "path" => json!(dir.join("sample.duckdb")),
@@ -175,7 +192,7 @@ fn every_command_takes_the_contract_arguments() {
         let all: Map<String, Value> = sig
             .args
             .iter()
-            .map(|a| (a.name.to_string(), sample(a.name, dir.path())))
+            .map(|a| (a.name.to_string(), sample(sig.name, a.name, dir.path())))
             .collect();
         // With every argument, the command runs: it answers, or fails with
         // its own error, never Tauri's refusal of the arguments.
