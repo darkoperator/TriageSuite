@@ -65,6 +65,8 @@ pub use record::{
     Sightings, MAX_DESCRIPTION, MAX_IOC_VALUE, MAX_RECORD_LABEL, MAX_RECORD_NAME, MAX_RECORD_NOTE,
     MAX_TECHNIQUES, MAX_TITLE, TACTICS,
 };
+#[cfg(feature = "test-support")]
+pub use record::{export_report_paused, export_timeline_csv_paused, export_workbook_paused};
 pub use search::{compile_search, parse_search, Search, SearchExpr, SearchOptions, Term};
 pub use time::{now_iso, parse_utc_text};
 pub use view::{

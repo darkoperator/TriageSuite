@@ -146,8 +146,30 @@ struct Table {
 /// file, its log, or a path inside a loaded source. On any failure the
 /// partial file is removed and what was at `path` is left as it was.
 pub fn export_timeline_csv(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
+    timeline_csv(case, path, cancel, &mut || {})
+}
+
+/// `export_timeline_csv`, calling `pause` between two of its reads (once
+/// the entries are read, before their evidence), for a test to commit a
+/// change from another connection there. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_timeline_csv_paused(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    timeline_csv(case, path, cancel, pause)
+}
+
+fn timeline_csv(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(),
+) -> Result<ExportReport> {
     check_export_target(case, path)?;
-    let timeline = timeline(case, cancel)?;
+    let timeline = snapshot(case, |case| timeline(case, cancel, pause))?;
     write_whole(case, path, cancel, |file| {
         let mut out = csv::Writer::from_writer(file);
         out.write_record(timeline.header).map_err(csv_error)?;
@@ -166,8 +188,29 @@ pub fn export_timeline_csv(case: &Case, path: &Path, cancel: &AtomicBool) -> Res
 /// `export_timeline_csv` does, and `Invalid` for a sheet past a
 /// workbook's 1,048,575 data rows.
 pub fn export_workbook(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
+    workbook(case, path, cancel, &mut || {})
+}
+
+/// `export_workbook`, calling `pause` where `export_timeline_csv_paused`
+/// does. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_workbook_paused(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    workbook(case, path, cancel, pause)
+}
+
+fn workbook(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(),
+) -> Result<ExportReport> {
     check_export_target(case, path)?;
-    let tables = record_tables(case, cancel)?;
+    let tables = snapshot(case, |case| record_tables(case, cancel, pause))?;
     let mut book = rust_xlsxwriter::Workbook::new();
     for table in &tables {
         let sheet = book.add_worksheet();
@@ -207,9 +250,32 @@ pub fn export_workbook(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<
 /// Every value from the case is escaped (`md`). `rows` counts the data
 /// rows of every table. Fails as `export_timeline_csv` does.
 pub fn export_report(case: &Case, path: &Path, cancel: &AtomicBool) -> Result<ExportReport> {
+    report(case, path, cancel, &mut || {})
+}
+
+/// `export_report`, calling `pause` where `export_timeline_csv_paused`
+/// does. Built only with `test-support`.
+#[cfg(feature = "test-support")]
+pub fn export_report_paused(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(),
+) -> Result<ExportReport> {
+    report(case, path, cancel, pause)
+}
+
+fn report(
+    case: &Case,
+    path: &Path,
+    cancel: &AtomicBool,
+    pause: &mut dyn FnMut(),
+) -> Result<ExportReport> {
     check_export_target(case, path)?;
-    let name = case.info()?.name;
-    let tables = record_tables(case, cancel)?;
+    let (name, tables) = snapshot(case, |case| {
+        let name = case.info()?.name;
+        Ok((name, record_tables(case, cancel, pause)?))
+    })?;
     let mut text = String::new();
     text.push_str("# Case record\n\n");
     text.push_str(&format!("Case: {}\n\n", md(&name)));
@@ -262,28 +328,45 @@ fn markdown_row(text: &mut String, cells: impl Iterator<Item = String>) {
 /// so that no value opens a code span, an emphasis, a link, a raw HTML tag
 /// or a new table cell; every line break (`\r\n`, `\r`, `\n`) and any other
 /// control character a space, so that a value stays on its table row.
+/// Every `://` is defanged to `[:]//`, so that no URL autolinks (and no
+/// link reference can be defined: every `[` from the case is escaped).
+/// Each bidi or invisible formatting character (`is_invisible`) is shown
+/// as the text `\u{XXXX}`, so that none reorders or hides what follows.
 /// Total: any text gives an answer. Applying it twice escapes the
 /// backslashes the first added, so it is applied once, to the case's text.
 pub(crate) fn md(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + text.len() / 8);
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
+    let mut chars = text.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
         match c {
             '\\' | '`' | '|' | '<' | '>' | '[' | ']' | '*' | '_' => {
                 out.push('\\');
                 out.push(c);
             }
+            ':' if text[at..].starts_with("://") => out.push_str("[:]"),
             '\r' => {
-                if chars.peek() == Some(&'\n') {
+                if chars.peek().map(|&(_, next)| next) == Some('\n') {
                     chars.next();
                 }
                 out.push(' ');
             }
             c if c.is_control() => out.push(' '),
+            c if is_invisible(c) => out.push_str(&format!("\\u{{{:04X}}}", u32::from(c))),
             c => out.push(c),
         }
     }
     out
+}
+
+/// The characters that change how the text around them reads without
+/// showing themselves: the zero-width space, joiners and direction marks
+/// (U+200B–U+200F), the bidi embeddings and overrides (U+202A–U+202E), the
+/// bidi isolates (U+2066–U+2069), and the byte order mark (U+FEFF).
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+    )
 }
 
 /// `cell`, or for one past `MAX_CELL` characters its start and a note of
@@ -371,6 +454,44 @@ fn write_whole(
     }
 }
 
+/// `read(case)` inside one read transaction on the case's connection, so
+/// that every read it makes (pages, evidence, records, the case's name)
+/// sees the case as one snapshot, whatever another connection commits
+/// meanwhile. `read` only reads, so the transaction is rolled back once it
+/// returns, keeping nothing because there is nothing to keep. A connection
+/// already in a transaction is refused by DuckDB's `BEGIN`, an error this
+/// returns.
+fn snapshot<T>(case: &Case, read: impl FnOnce(&Case) -> Result<T>) -> Result<T> {
+    let conn = case.conn();
+    conn.execute_batch("BEGIN TRANSACTION")?;
+    let open = ReadTransaction(conn);
+    let out = read(case);
+    open.end()?;
+    out
+}
+
+/// An open read transaction, rolled back when dropped: when the reads
+/// unwind as much as when they end.
+struct ReadTransaction<'a>(&'a duckdb::Connection);
+
+impl ReadTransaction<'_> {
+    /// Roll it back now, saying whether that failed.
+    fn end(self) -> Result<()> {
+        let conn = self.0;
+        std::mem::forget(self);
+        conn.execute_batch("ROLLBACK")?;
+        Ok(())
+    }
+}
+
+impl Drop for ReadTransaction<'_> {
+    fn drop(&mut self) {
+        // Reached only when the reads unwind: nothing was written, and the
+        // panic under way is the failure worth reporting.
+        let _ = self.0.execute_batch("ROLLBACK");
+    }
+}
+
 /// Every page of a listing, `MAX_LIMIT` at a time from the start, the
 /// cancel flag read before each.
 fn all<T>(
@@ -390,8 +511,8 @@ fn all<T>(
 }
 
 /// The four tables, in the order the workbook and the report write them.
-fn record_tables(case: &Case, cancel: &AtomicBool) -> Result<[Table; 4]> {
-    let timeline = timeline(case, cancel)?;
+fn record_tables(case: &Case, cancel: &AtomicBool, pause: &mut dyn FnMut()) -> Result<[Table; 4]> {
+    let timeline = timeline(case, cancel, pause)?;
     let hosts: Vec<HostRecord> = all(cancel, |limit, offset| hosts(case, limit, offset))?;
     let accounts: Vec<AccountRecord> = all(cancel, |limit, offset| accounts(case, limit, offset))?;
     let iocs: Vec<IocRecord> = all(cancel, |limit, offset| {
@@ -419,10 +540,11 @@ fn record_tables(case: &Case, cancel: &AtomicBool) -> Result<[Table; 4]> {
 
 /// The Timeline table: the live entries in the Timeline's order, each with
 /// the rows attached to it as evidence, in the order they were attached.
-fn timeline(case: &Case, cancel: &AtomicBool) -> Result<Table> {
+fn timeline(case: &Case, cancel: &AtomicBool, pause: &mut dyn FnMut()) -> Result<Table> {
     let listed: Vec<Entry> = all(cancel, |limit, offset| {
         entries(case, &EntryQuery::default(), limit, offset)
     })?;
+    pause();
     let evidence = evidence_refs(case)?;
     let rows = listed
         .iter()
@@ -568,6 +690,13 @@ mod tests {
         assert_eq!(md("a\r\nb\rc\nd\u{0}e\tf"), "a b c d e f");
         assert_eq!(md("plain text, 1.5 # - +"), "plain text, 1.5 # - +");
         assert_eq!(md(""), "");
+        assert_eq!(
+            md("http://x ftp://y a:/b ::"),
+            "http[:]//x ftp[:]//y a:/b ::"
+        );
+        assert_eq!(md("a\u{202E}b\u{FEFF}"), "a\\u{202E}b\\u{FEFF}");
+        // Just outside each range: left as it is.
+        assert_eq!(md("\u{200A}\u{2010}\u{2065}"), "\u{200A}\u{2010}\u{2065}");
     }
 
     #[test]

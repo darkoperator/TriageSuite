@@ -290,6 +290,15 @@ fn report_escapes_case_text() {
     )
     .unwrap();
     hostile_record(&mut case);
+    // Every invisible formatting character the report shows as an escape.
+    let invisible: Vec<char> = (0x200B..=0x200F)
+        .chain(0x202A..=0x202E)
+        .chain(0x2066..=0x2069)
+        .chain([0xFEFF])
+        .map(|c| char::from_u32(c).unwrap())
+        .collect();
+    let hidden: String = invisible.iter().map(|c| format!("{c}x")).collect();
+    entry(&mut case, "hidden", &hidden, Some("2026-01-06T00:00:00Z"));
     let undated = entry(&mut case, "no time yet", "first\r\nsecond\nthird", None);
 
     let out = d.path().join("report.md");
@@ -313,12 +322,28 @@ fn report_escapes_case_text() {
 
     // Every hostile value, escaped as S11 says, appears; none raw.
     let values = oxl_fixtures::hostile_record_values();
-    assert!(md.contains(values[0]));
+    // A URL cannot autolink: every `://` in a value is defanged.
+    assert!(md.contains("=HYPERLINK(\"http[:]//x\")"), "{md:.400}");
+    assert!(!md.contains("://"));
     assert!(md.contains("\\<img src=x onerror=1\\>"));
     // No `<` or `>` but escaped ones: no tag can open.
     let unescaped = md.replace("\\\\", "").replace("\\<", "").replace("\\>", "");
     assert!(!unescaped.contains('<') && !unescaped.contains('>'));
-    assert!(md.contains(values[2]));
+    // A bidi override or an invisible character is shown, never applied.
+    assert!(md.contains("invoice\\u{202E}fdp.exe"));
+    let shown: String = invisible
+        .iter()
+        .map(|&c| format!("\\u{{{:04X}}}x", u32::from(c)))
+        .collect();
+    assert!(md.contains(&shown), "{shown}");
+    assert!(shown.starts_with("\\u{200B}x") && shown.ends_with("\\u{FEFF}x"));
+    for c in &invisible {
+        assert!(
+            !md.contains(*c),
+            "U+{:04X} raw in the report",
+            u32::from(*c)
+        );
+    }
     assert!(md.contains(values[3]));
     assert!(md.contains("a \\| b \\`c\\` d"));
     assert!(!md.contains("a | b"));
@@ -492,4 +517,85 @@ fn history_of_one_entry() {
             .len(),
         3
     );
+}
+
+/// Each export reads the case in one read transaction: a second connection
+/// that commits between two of its reads (once the timeline is read, before
+/// its evidence and the records) changes nothing the export writes. Without
+/// the transaction the new evidence row and host record would be read.
+#[test]
+fn an_export_is_one_snapshot() {
+    type Paused = fn(
+        &Case,
+        &Path,
+        &AtomicBool,
+        &mut dyn FnMut(),
+    ) -> oxl_engine::Result<oxl_engine::ExportReport>;
+    let exports: [(&str, Paused); 3] = [
+        ("csv", oxl_engine::export_timeline_csv_paused),
+        ("workbook", oxl_engine::export_workbook_paused),
+        ("report", oxl_engine::export_report_paused),
+    ];
+    for (what, export) in exports {
+        let (d, mut case) = loaded();
+        let target = entry(&mut case, "target", "", Some("2026-01-05T10:00:00Z"));
+        let row = n(&case, FAILED_LOGON_WS01);
+        let mut other = case.try_clone().unwrap();
+        let mut committed = false;
+        let mut pause = || {
+            oxl_engine::attach_rows(&mut other, target, &[row], &analyst()).unwrap();
+            upsert_host(
+                &mut other,
+                &HostSpec {
+                    name: "SRV77".into(),
+                    ..Default::default()
+                },
+                &analyst(),
+            )
+            .unwrap();
+            committed = true;
+        };
+        let during = d.path().join(format!("during.{what}"));
+        let rows = export(&case, &during, &go(), &mut pause).unwrap().rows;
+        assert!(committed, "{what}: the pause ran");
+        // The commit is visible to the next read outside the export.
+        let after = d.path().join(format!("after.{what}"));
+        let rows_after = export(&case, &after, &go(), &mut || {}).unwrap().rows;
+
+        match what {
+            "csv" => {
+                let (header, during) = read_csv(&during);
+                let (_, after) = read_csv(&after);
+                assert_eq!(during[0][at(&header, "evidence")], "", "{what}");
+                assert_eq!(during[0][at(&header, "evidence_rows")], "0", "{what}");
+                assert_eq!(
+                    after[0][at(&header, "evidence")],
+                    format!("evtxtriage_events#{row}")
+                );
+                assert_eq!(rows, rows_after);
+            }
+            "workbook" => {
+                let shared = |path: &Path| {
+                    let mut z = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+                    unxml(&zip_text(&mut z, "xl/sharedStrings.xml"))
+                };
+                assert!(!shared(&during).contains(">SRV77<"), "{what}");
+                assert!(!shared(&during).contains("evtxtriage_events#"), "{what}");
+                assert!(shared(&after).contains(">SRV77<"));
+                assert!(shared(&after).contains(&format!(">evtxtriage_events#{row}<")));
+                // SRV77, and WS01, which attaching its row created (S7).
+                assert_eq!(rows + 2, rows_after, "{what}: two more hosts");
+            }
+            _ => {
+                let during = std::fs::read_to_string(&during).unwrap();
+                let after = std::fs::read_to_string(&after).unwrap();
+                assert!(!during.contains("SRV77"), "{what}");
+                assert!(!during.contains("evtxtriage\\_events#"), "{what}");
+                assert!(after.contains("SRV77"));
+                assert!(after.contains(&format!("evtxtriage\\_events#{row}")));
+                // SRV77, and WS01, which attaching its row created (S7).
+                assert_eq!(rows + 2, rows_after, "{what}: two more hosts");
+            }
+        }
+    }
 }
