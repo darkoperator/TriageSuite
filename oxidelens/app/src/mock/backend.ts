@@ -18,6 +18,7 @@ import type { Chip } from "../contract/generated/Chip";
 import type { ColourRule } from "../contract/generated/ColourRule";
 import type { ColumnMeta } from "../contract/generated/ColumnMeta";
 import type { FilterNode } from "../contract/generated/FilterNode";
+import type { GridCell } from "../contract/generated/GridCell";
 import type { GridState } from "../contract/generated/GridState";
 import type { GroupView } from "../contract/generated/GroupView";
 import type { Leaf } from "../contract/generated/Leaf";
@@ -365,11 +366,12 @@ function select(state: GridState, skipChips: readonly string[] = []): Selection 
   return { rel, rows, hits };
 }
 
-/** The cell a page carries: the text cut to the engine's 2,000 characters, a utc time also as display text. */
-function gridCell(col: ColumnMeta, v: string | null): { text: string | null; display: string | null; failed: boolean; clipped: boolean } {
+/** The cell a page carries: the text cut to the engine's 2,000 characters, a utc time also as display text. The mock
+ *  case has no IOCs, so no cell is flagged as one. */
+function gridCell(col: ColumnMeta, v: string | null): GridCell {
   const clipped = v !== null && v.length > 2000;
   const text = clipped ? v.slice(0, 2000) : v;
-  return { text, display: isUtc(col) && text !== null ? shown(col, text) : null, failed: false, clipped };
+  return { text, display: isUtc(col) && text !== null ? shown(col, text) : null, failed: false, clipped, ioc: false };
 }
 
 const rowIdOf = (rel: MockRelation, index: number) => rel.firstId + index;

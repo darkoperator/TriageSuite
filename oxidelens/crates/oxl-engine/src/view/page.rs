@@ -1,6 +1,7 @@
 //! The grid's page as the app shows it: the plain page's rows and cells,
 //! each UTC time also rendered in the display zone, which colour rule each
-//! row matches, and in find mode which rows the search selects.
+//! row matches, in find mode which rows the search selects, and which cells
+//! hold an IOC's value.
 //!
 //! The front end does no date arithmetic, so the text it shows for a time
 //! is `GridCell::display`, made here: the cell's own text, which the source
@@ -24,6 +25,7 @@ use crate::query::{
     as_count, check_offset, check_zone, clip_text, mark_sql, order_sql, read_mark, scope,
     search_fragment, MarkState, Scope, CELL_CAP, ISO_FORMAT, ROW_ALIAS,
 };
+use crate::record::live_ioc_values;
 use crate::search::SearchOptions;
 use duckdb::params_from_iter;
 use duckdb::types::Value as SqlValue;
@@ -72,6 +74,10 @@ pub struct GridCell {
     pub failed: bool,
     /// The text was longer than `CELL_CAP` characters and was cut.
     pub clipped: bool,
+    /// The text is a live IOC's value, ASCII case ignored: the whole text,
+    /// not one that only contains it. A cut cell is never flagged, since
+    /// its whole text is not read.
+    pub ioc: bool,
 }
 
 fn utc() -> String {
@@ -261,6 +267,7 @@ pub fn page_view(
     }
     params.extend(out.row_ids.iter().map(|id| SqlValue::BigInt(*id)));
 
+    let iocs = live_ioc_values(case)?;
     let width = scope.columns.len();
     let (rule_at, hit_at) = (2 + 3 * width, 3 + 3 * width);
     type Read = (Option<MarkState>, Vec<GridCell>, Option<u16>, bool);
@@ -280,11 +287,16 @@ pub fn page_view(
                 _ => None,
             };
             let (text, clipped) = clip_text(text);
+            let ioc = !clipped
+                && text
+                    .as_deref()
+                    .is_some_and(|t| iocs.contains(&t.to_ascii_lowercase()));
             cells.push(GridCell {
                 text,
                 display,
                 failed,
                 clipped,
+                ioc,
             });
         }
         let rule: Option<i64> = row.get(rule_at)?;

@@ -176,7 +176,7 @@ describe("grid", () => {
     overrideCommand("grid_page", async (args) => {
       const page = (await mockCall("grid_page", args)) as GridPage;
       const i = page.columns.findIndex((c) => c.name === "EventId");
-      page.cells[0][i] = { text: "12x", display: null, failed: true, clipped: false };
+      page.cells[0][i] = { text: "12x", display: null, failed: true, clipped: false, ioc: false };
       return page;
     });
     await mount();
@@ -196,7 +196,7 @@ describe("grid", () => {
     overrideCommand("grid_page", async (args) => {
       const page = (await mockCall("grid_page", args)) as GridPage;
       const i = page.columns.findIndex((c) => c.name === "TimeCreated");
-      page.cells[0][i] = { text: "2026-01-05T02:13:58.2040000Z", display: "2026-01-05 02:13:58.2040000", failed: false, clipped: false };
+      page.cells[0][i] = { text: "2026-01-05T02:13:58.2040000Z", display: "2026-01-05 02:13:58.2040000", failed: false, clipped: false, ioc: false };
       return page;
     });
     const { user } = await mount();

@@ -18,6 +18,7 @@ mod entry;
 mod evidence;
 pub(crate) mod hosts;
 mod iocs;
+mod logons;
 mod records;
 mod state;
 mod validate;
@@ -33,7 +34,11 @@ pub use evidence::{
 pub use accounts::{account_record, accounts, upsert_account, AccountRecord, AccountSpec};
 pub use candidates::{candidates, Candidate};
 pub use hosts::{host_record, hosts, upsert_host, HostRecord, HostSpec};
-pub use iocs::{ioc_record, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec};
+pub(crate) use iocs::live_ioc_values;
+pub use iocs::{
+    ioc_record, ioc_sightings, iocs, upsert_ioc, IocQuery, IocRecord, IocSpec, Sightings,
+};
+pub use logons::{logon_summary, LogonCount, LogonOutcome, LogonSummary};
 pub use records::{
     delete_record, link, merge_records, record_entries, set_record_status, unlink, RecordKind,
     RecordStatus,

@@ -1,6 +1,6 @@
 //! IOC records: a typed, validated value (ruling S4), the tool it belongs
 //! to, ATT&CK ids and a note, with the columns computed from their linked
-//! entries.
+//! entries, and the sightings computed from the loaded data.
 
 use super::entry::MAX_TECHNIQUES;
 use super::records::{
@@ -14,12 +14,15 @@ use super::{has_records, require_records};
 use crate::actor::Actor;
 use crate::annot::record;
 use crate::case::Case;
+use crate::catalog::TimeSemantics;
 use crate::error::{EngineError, Result};
 use crate::listing::{check_limit, fetch_limit, Listing};
-use crate::query::check_offset;
+use crate::query::{check_offset, find, FindMode, FindRequest};
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The most characters of an IOC sheet filter's tool or text.
 const MAX_FILTER: usize = 1_000;
@@ -368,4 +371,95 @@ pub fn iocs(case: &Case, q: &IocQuery, limit: u32, offset: u64) -> Result<Listin
         .map(decode_ioc)
         .collect::<Result<Vec<_>>>()?;
     Ok(Listing::from_fetched(items, limit))
+}
+
+/// Where an IOC's value occurs in the loaded data (ruling S5): Find
+/// everywhere, exact and without regard to case, for the value. Computed
+/// each time it is asked for, never stored.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Sightings {
+    /// Matching cells, as Find everywhere counts them: a row whose value is
+    /// in two columns counts twice. 0 is "not found".
+    pub hits: u64,
+    /// The relations with a hit and the hits in each, by relation name.
+    pub relations: Vec<(String, u64)>,
+    /// The hosts a hit came from, sorted; a hit with no host adds none.
+    pub hosts: Vec<String>,
+    /// The earliest and latest primary time among the hits of relations
+    /// whose primary time is UTC, as Find renders it. A time whose zone is
+    /// not known is never compared with a UTC one, so it is left out.
+    pub first: Option<String>,
+    pub last: Option<String>,
+}
+
+/// The sightings of live IOC `ioc_id`: `find` (`FindMode::Exact`) for its
+/// value across every relation and host. `NotFound` for an IOC the case
+/// does not have or has deleted, and in a case without the record tables;
+/// `Invalid` with the message `cancelled` when `cancel` is set, read before
+/// the search and after each relation; `Invalid` for a value longer than
+/// Find takes (`MAX_VALUE`).
+pub fn ioc_sightings(case: &Case, ioc_id: i64, cancel: &AtomicBool) -> Result<Sightings> {
+    let ioc = ioc_record(case, ioc_id)?;
+    if ioc.deleted {
+        return Err(EngineError::NotFound(format!(
+            "no {}: it was deleted",
+            RecordKind::Ioc.shown(ioc_id)
+        )));
+    }
+    let cancelled = || EngineError::Invalid("cancelled".to_string());
+    if cancel.load(Ordering::Relaxed) {
+        return Err(cancelled());
+    }
+    let found = find(
+        case,
+        &FindRequest {
+            value: ioc.value,
+            mode: FindMode::Exact,
+            hosts: Vec::new(),
+            from: None,
+            to: None,
+        },
+        &mut |_, _| !cancel.load(Ordering::Relaxed),
+    )?;
+    if found.cancelled {
+        return Err(cancelled());
+    }
+    let mut relations: BTreeMap<String, u64> = BTreeMap::new();
+    let mut hosts: BTreeSet<String> = BTreeSet::new();
+    let mut out = Sightings {
+        hits: 0,
+        relations: Vec::new(),
+        hosts: Vec::new(),
+        first: None,
+        last: None,
+    };
+    for hit in found.hits {
+        out.hits += hit.count;
+        *relations.entry(hit.relation).or_default() += hit.count;
+        hosts.extend(hit.host);
+        if hit.time_semantics == Some(TimeSemantics::Utc) {
+            // Find renders every UTC time in one fixed-width form, so text
+            // order is time order.
+            out.first = out.first.into_iter().chain(hit.first).min();
+            out.last = out.last.into_iter().chain(hit.last).max();
+        }
+    }
+    out.relations = relations.into_iter().collect();
+    out.hosts = hosts.into_iter().collect();
+    Ok(out)
+}
+
+/// Every live IOC's value, ASCII lower-cased, for flagging the grid cells
+/// that hold one (`GridCell::ioc`). Empty in a case without the record
+/// tables, which has no IOCs.
+pub(crate) fn live_ioc_values(case: &Case) -> Result<HashSet<String>> {
+    if !has_records(case) {
+        return Ok(HashSet::new());
+    }
+    let values: Vec<String> = case
+        .conn()
+        .prepare("SELECT value FROM ox.ioc WHERE NOT deleted")?
+        .query_map([], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(values.iter().map(|v| v.to_ascii_lowercase()).collect())
 }

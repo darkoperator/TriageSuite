@@ -5,10 +5,11 @@ mod common;
 
 use common::{analyst, loaded};
 use oxl_engine::{
-    default_colour_rules, load_file, mark_suspicious, page_view, parse_filter, row_ids_at,
-    row_positions, Case, Chip, ChipOrigin, ColourRule, EngineError, FileOptions, GridPage,
-    GridState, PageOptions, RuleColour, RuleScope, SearchMode, SearchState, SortKey, SqlType,
-    TimeSemantics, MAX_ACTION_ROWS, MAX_RULES,
+    default_colour_rules, delete_record, load_file, mark_suspicious, page_view, parse_filter,
+    row_ids_at, row_positions, upsert_ioc, Case, Chip, ChipOrigin, ColourRule, EngineError,
+    FileOptions, GridPage, GridState, IocSpec, IocType, PageOptions, RecordKind, RuleColour,
+    RuleScope, SearchMode, SearchState, SortKey, SqlType, TimeSemantics, MAX_ACTION_ROWS,
+    MAX_RULES,
 };
 use oxl_fixtures::loose_fw_csv;
 
@@ -597,4 +598,75 @@ fn positions_of_ids_after_a_change() {
         ]
     );
     assert!(row_positions(&case, &st, &[]).unwrap().is_empty());
+}
+
+fn new_ioc(case: &mut Case, t: IocType, value: &str) -> i64 {
+    upsert_ioc(
+        case,
+        &IocSpec {
+            id: None,
+            ioc_type: t,
+            value: value.into(),
+            tool: None,
+            attack_ids: Vec::new(),
+            note: String::new(),
+        },
+        &analyst(),
+    )
+    .unwrap()
+    .id
+}
+
+/// `(column, text)` of every cell of `p` flagged as an IOC, sorted.
+fn ioc_cells(p: &GridPage) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for row in &p.cells {
+        for (i, cell) in row.iter().enumerate() {
+            if cell.ioc {
+                out.push((p.columns[i].name.clone(), cell.text.clone().unwrap()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// A cell is flagged when its whole text is a live IOC's value, ASCII case
+/// ignored: `svch0st.exe` for the IOC `SVCH0ST.EXE`, but not
+/// `svch0st.exe:443`, nor Hayabusa's `SrcIP: 203.0.113.7`, which only
+/// contain a value; and not `wevtutil.exe`, whose IOC was deleted.
+#[test]
+fn page_flags_ioc_cells() {
+    let (_d, mut case) = loaded();
+    new_ioc(&mut case, IocType::Ip, "203.0.113.7");
+    new_ioc(&mut case, IocType::FileName, "SVCH0ST.EXE");
+    let gone = new_ioc(&mut case, IocType::FileName, "wevtutil.exe");
+    delete_record(&mut case, RecordKind::Ioc, gone, &analyst()).unwrap();
+
+    let p = whole(&case, &state(EVENTS), &opts("UTC", Vec::new()));
+    let ip = ("RemoteHost".to_string(), "203.0.113.7".to_string());
+    assert_eq!(
+        ioc_cells(&p),
+        [
+            ("PayloadData1".to_string(), "svch0st.exe".to_string()),
+            ip.clone(),
+            ip.clone(),
+            ip,
+        ]
+    );
+    let r = row_with(&p, "PayloadData1", "svch0st.exe:443");
+    assert!(!p.cells[r][col(&p, "PayloadData1")].ioc);
+    assert!(p.cells[r][col(&p, "RemoteHost")].ioc);
+
+    let hayabusa = whole(
+        &case,
+        &state("ext_hayabusa_csv_timeline"),
+        &opts("UTC", Vec::new()),
+    );
+    let details = col(&hayabusa, "Details");
+    assert!(hayabusa.cells.iter().any(|r| r[details]
+        .text
+        .as_deref()
+        .is_some_and(|t| t.contains("203.0.113.7"))));
+    assert_eq!(ioc_cells(&hayabusa), []);
 }

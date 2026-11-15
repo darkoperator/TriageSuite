@@ -124,79 +124,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:13:58.2040000Z",
         "display": "2026-01-04 21:13:58.2040000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "4625",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Administrator",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "203.0.113.7",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Failed logon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "LogonType 10",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -204,79 +217,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:14:07.9110000Z",
         "display": "2026-01-04 21:14:07.9110000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "4624",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "203.0.113.7",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Successful logon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "LogonType 10",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -284,79 +310,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:15:44.3800000Z",
         "display": "2026-01-04 21:15:44.3800000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "1",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Sysmon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Process creation",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svch0st.exe",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Sysmon.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -364,79 +403,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:15:46.0180000Z",
         "display": "2026-01-04 21:15:46.0180000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "3",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Sysmon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "203.0.113.7",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Network connection",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svch0st.exe:443",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Sysmon.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -444,79 +496,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:17:02.6450000Z",
         "display": "2026-01-04 21:17:02.6450000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "1",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Sysmon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Process creation",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "rclone.exe",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Sysmon.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -524,79 +589,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SRV01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-SRV01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:22:03.1180000Z",
         "display": "2026-01-04 21:22:03.1180000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "4624",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SRV01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Successful logon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "LogonType 3",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -604,79 +682,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SRV01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-SRV01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:22:04.5510000Z",
         "display": "2026-01-04 21:22:04.5510000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "5140",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SRV01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "10.0.0.5",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Network share accessed",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "\\\\*\\finance$",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -684,79 +775,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:33:20.4610000Z",
         "display": "2026-01-04 21:33:20.4610000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "1102",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Audit log cleared",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "wevtutil.exe",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -764,79 +868,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "2026-01-05T02:33:20.4610000Z",
         "display": "2026-01-04 21:33:20.4610000",
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "1102",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Audit log cleared",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "wevtutil.exe",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -844,79 +961,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-WS01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "not-a-time",
         "display": null,
         "failed": true,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "4688",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SYSTEM",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Process creation",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "cmd.exe",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ],
     [
@@ -924,79 +1054,92 @@
         "text": "20260101000000-aaaa",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SRV01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "/fixture/run-20260101000000-aaaa/Processed-SRV01-20260101000000/EventLogs/evtx.csv",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": null,
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "4624",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Security",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "SRV01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "svc_backup",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "WS01",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "Successful logon",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "LogonType 3",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       },
       {
         "text": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
         "display": null,
         "failed": false,
-        "clipped": false
+        "clipped": false,
+        "ioc": false
       }
     ]
   ],

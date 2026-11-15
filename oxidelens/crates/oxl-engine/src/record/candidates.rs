@@ -172,9 +172,7 @@ pub fn candidates(case: &Case, row_id: i64) -> Result<Vec<Candidate>> {
                 let sid = sid.and_then(text).and_then(|s| validate_sid(s).ok());
                 account_candidate(name, domain, sid, column)
             }),
-            Take::LogonTarget => value
-                .strip_prefix(TARGET)
-                .and_then(account)
+            Take::LogonTarget => logon_target(value)
                 .map(|(name, domain)| account_candidate(name, domain, None, column)),
             Take::RemoteAddress => ioc_candidate(IocType::Ip, value, column).or_else(|| {
                 parenthesised(value).and_then(|ip| ioc_candidate(IocType::Ip, ip, column))
@@ -218,6 +216,14 @@ fn parenthesised(text: &str) -> Option<&str> {
     let inner = text.strip_suffix(')')?;
     let (_, inside) = inner.rsplit_once(" (")?;
     Some(inside)
+}
+
+/// A logon's target account as EvtxTriage writes it, `Target: D\N` or
+/// `Target: N` (ruling S6), read as `account` reads the part after
+/// `Target: `; `None` when the text does not start so or that part is no
+/// account (blank or `-`). The logon summary counts by this same reading.
+pub(super) fn logon_target(text: &str) -> Option<(String, Option<String>)> {
+    text.strip_prefix(TARGET).and_then(account)
 }
 
 /// `text` as an account: `(name, domain)` split at the last `\`, the

@@ -21,4 +21,10 @@ failed: boolean,
 /**
  * The text was longer than `CELL_CAP` characters and was cut.
  */
-clipped: boolean, };
+clipped: boolean, 
+/**
+ * The text is a live IOC's value, ASCII case ignored: the whole text,
+ * not one that only contains it. A cut cell is never flagged, since
+ * its whole text is not read.
+ */
+ioc: boolean, };
