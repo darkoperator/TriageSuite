@@ -45,8 +45,10 @@
 //!
 //! Both open the case through the app, which upgrades a format 1 or 2 case
 //! in place, and the walkthrough writes to it (the display zone, a saved
-//! view, marks, entries, records and IOCs) and exports next to it: give them
-//! a copy, never the analyst's case.
+//! view, marks, entries, records and IOCs): give them a copy, never the
+//! analyst's case. Its exports (the grid's CSV and the case record's) go
+//! into a temporary folder of the run's own, removed when the test ends;
+//! nothing is written beside the case.
 
 mod common;
 
