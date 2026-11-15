@@ -620,10 +620,12 @@ pub enum EntryCmd {
         #[command(flatten)]
         page: PageArgs,
     },
-    /// Show one entry with its evidence.
+    /// Show one entry and a page of its evidence.
     Show {
         #[arg(value_parser = entry_id)]
         id: i64,
+        #[command(flatten)]
+        page: PageArgs,
     },
     /// Write a new entry.
     Add {

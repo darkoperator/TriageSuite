@@ -304,7 +304,7 @@ const SAMPLES: { [C in Command]: CommandArgs[C] } = {
   rows_promote: { rows: [3] },
   rows_attach: { entryId: 3, rows: [4] },
   evidence_detach: { entryId: 1, rowId: 7 },
-  evidence_list: { ...q("ev"), entryId: 1 },
+  evidence_list: { ...q("ev"), entryId: 1, limit: 10, offset: 0 },
   records_list: { ...q("rl"), query: { kind: "host" }, limit: 10, offset: 0 },
   record_get: { ...q("rg"), kind: "ioc", id: 1 },
   record_upsert: { spec: { kind: "host", id: null, name: "SRV02", role: "", note: "" } },
@@ -371,8 +371,15 @@ describe("the case record", () => {
       for (const r of listed.items) texts.push(...Object.values(r).filter((v): v is string => typeof v === "string"));
     }
     for (const value of HOSTILE_RECORD) expect(texts, value.slice(0, 30)).toContain(value);
-    const evidence = await mockCall<Evidence[]>("evidence_list", SAMPLES.evidence_list);
-    expect(evidence.length).toBeGreaterThan(0);
+    const evidence = await mockCall<Listing<Evidence>>("evidence_list", SAMPLES.evidence_list);
+    expect(evidence.items.length).toBeGreaterThan(0);
+    // Paged as the engine pages it: a page of one past the first row holds the second, or nothing.
+    const all = evidence.items.map((e) => e.row_id);
+    const second = await mockCall<Listing<Evidence>>("evidence_list", { ...SAMPLES.evidence_list, limit: 1, offset: 1 });
+    expect(second.items.map((e) => e.row_id)).toEqual(all.slice(1, 2));
+    expect(second.truncated).toBe(all.length > 2);
+    const first = await mockCall<Listing<Evidence>>("evidence_list", { ...SAMPLES.evidence_list, limit: 1, offset: 0 });
+    expect(first.truncated).toBe(all.length > 1);
   });
 
   it("M makes an entry and marks the row, emitting case-changed; refusals are the engine's codes", async () => {

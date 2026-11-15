@@ -384,7 +384,10 @@ fn table(c: &mut Collector<'_>) -> Vec<Signature> {
             rows_attach(entryId: i64, rows: Vec<i64>) -> Vec<RowOutcome>
         ),
         cmd!(c, evidence_detach(entryId: i64, rowId: i64) -> ()),
-        read!(c, evidence_list(entryId: i64) -> Vec<Evidence>),
+        read!(
+            c,
+            evidence_list(entryId: i64, limit: u32, offset: u64) -> Listing<Evidence>
+        ),
         read!(
             c,
             records_list(query: RecordQuery, limit: u32, offset: u64) -> Listing<CaseRecord>

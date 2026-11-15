@@ -202,7 +202,7 @@ export type CommandArgs = {
   rows_promote: { rows: Array<number> };
   rows_attach: { entryId: number; rows: Array<number> };
   evidence_detach: { entryId: number; rowId: number };
-  evidence_list: { queryId: string; slot: string; entryId: number };
+  evidence_list: { queryId: string; slot: string; entryId: number; limit: number; offset: number };
   records_list: { queryId: string; slot: string; query: RecordQuery; limit: number; offset: number };
   record_get: { queryId: string; slot: string; kind: RecordKind; id: number };
   record_upsert: { spec: RecordSpec };
@@ -287,7 +287,7 @@ export type CommandResult = {
   rows_promote: Array<PromoteOutcome>;
   rows_attach: Array<RowOutcome>;
   evidence_detach: null;
-  evidence_list: Array<Evidence>;
+  evidence_list: Listing<Evidence>;
   records_list: Listing<CaseRecord>;
   record_get: CaseRecord;
   record_upsert: CaseRecord;

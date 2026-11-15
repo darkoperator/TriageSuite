@@ -277,9 +277,9 @@ export const rowsAttach = (entryId: number, rows: number[]) =>
   call<CommandResult["rows_attach"]>("rows_attach", { entryId, rows } satisfies Args<"rows_attach">);
 export const evidenceDetach = (entryId: number, rowId: number) =>
   call<CommandResult["evidence_detach"]>("evidence_detach", { entryId, rowId } satisfies Args<"evidence_detach">);
-/** Every row attached to the entry, each re-checked against the case (`standing`). */
-export const evidenceList = (entryId: number, slot: string, queryId = newQueryId()) =>
-  call<CommandResult["evidence_list"]>("evidence_list", { queryId, slot, entryId } satisfies Args<"evidence_list">);
+/** Up to `limit` of the rows attached to the entry from `offset`, each re-checked against the case (`standing`). */
+export const evidenceList = (entryId: number, limit: number, offset: number, slot: string, queryId = newQueryId()) =>
+  call<CommandResult["evidence_list"]>("evidence_list", { queryId, slot, entryId, limit, offset } satisfies Args<"evidence_list">);
 
 // host, account and IOC records (writes: `case-changed` with `records`, and `entries` when the Timeline shows it)
 /** The live records of `query.kind`, each tagged with its kind; IOCs narrowed by type, tool and text. */

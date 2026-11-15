@@ -276,8 +276,27 @@ fn promote_attach_detach_and_evidence() {
         (v["data"]["count"].as_u64(), &v["truncated"]),
         (Some(1), &json!(true))
     );
+    // The engine pages it: the second page holds the row the first did not.
+    let first = v["data"]["evidence"][0]["row_id"].clone();
+    let v = ok(
+        &p,
+        &[
+            "evidence", "list", "--entry", &id, "--limit", "1", "--offset", "1",
+        ],
+    );
+    assert_eq!(v["data"]["count"], 1);
+    assert_eq!(v["truncated"], false);
+    assert_ne!(v["data"]["evidence"][0]["row_id"], first);
     let (c, _) = run(&p, ANALYST, &["evidence", "list", "--entry", "999"]);
     assert_eq!(c, 3);
+    // entry show pages its evidence the same way.
+    let v = ok(&p, &["entry", "show", &id, "--limit", "1"]);
+    assert_eq!(v["data"]["evidence"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["evidence"][0]["row_id"], first);
+    assert_eq!(v["truncated"], true);
+    let v = ok(&p, &["entry", "show", &id]);
+    assert_eq!(v["data"]["evidence"].as_array().unwrap().len(), 2);
+    assert_eq!(v["truncated"], false);
 
     // The host record the evidence made cannot be unlinked while it holds evidence.
     let hosts = ok(&p, &["host", "list"]);

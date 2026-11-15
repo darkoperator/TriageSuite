@@ -124,7 +124,7 @@ fn m_makes_one_draft_per_row_with_evidence() {
         Some("2026-01-05T02:22:04.551000Z")
     );
 
-    let rows = evidence(&case, failed_entry).unwrap();
+    let rows = evidence(&case, failed_entry, 1000, 0).unwrap().items;
     assert_eq!(rows.len(), 1);
     let ev = &rows[0];
     assert_eq!(ev.row_id, failed);
@@ -411,7 +411,7 @@ fn detaching_the_last_evidence_leaves_the_row_unmarked() {
     detach_row(&mut case, id, failed, &analyst()).unwrap();
     // M removed the Suspicious mark, so nothing is left on the row.
     assert_eq!(state(&case, failed), "");
-    assert!(evidence(&case, id).unwrap().is_empty());
+    assert!(evidence(&case, id, 1000, 0).unwrap().items.is_empty());
     let e = one(&case, id);
     assert_eq!(e.evidence_rows, 0);
     // The host link stays: it was the entry's, not the row's.
@@ -745,6 +745,38 @@ fn every_change_writes_history() {
 }
 
 #[test]
+fn evidence_is_read_a_page_at_a_time() {
+    let (_d, mut case) = loaded();
+    let failed = n(&case, FAILED_LOGON_WS01);
+    let rclone = n(&case, RCLONE_WS01);
+    let share = n(&case, SHARE_SRV01);
+    let id = promote(&mut case, failed, &analyst());
+    // One attach: one attached_at, so the two rows follow by row id.
+    attach_rows(&mut case, id, &[share, rclone], &analyst()).unwrap();
+    let mut later = [rclone, share];
+    later.sort();
+    let rows = |page: &oxl_engine::Listing<oxl_engine::Evidence>| -> Vec<i64> {
+        page.items.iter().map(|e| e.row_id).collect()
+    };
+    let first = evidence(&case, id, 2, 0).unwrap();
+    assert_eq!(rows(&first), [failed, later[0]]);
+    assert!(first.truncated);
+    let last = evidence(&case, id, 2, 2).unwrap();
+    assert_eq!(rows(&last), [later[1]]);
+    assert!(!last.truncated);
+    let exact = evidence(&case, id, 3, 0).unwrap();
+    assert_eq!(exact.items.len(), 3);
+    assert!(!exact.truncated);
+    assert!(evidence(&case, id, 3, 3).unwrap().items.is_empty());
+    assert_eq!(code(evidence(&case, id, 0, 0)).0, "invalid");
+    assert_eq!(
+        code(evidence(&case, id, oxl_engine::MAX_LIMIT + 1, 0)).0,
+        "invalid"
+    );
+    assert_eq!(code(evidence(&case, id, 1, u64::MAX)).0, "invalid");
+}
+
+#[test]
 fn recheck_detects_a_changed_row() {
     let (_d, mut case) = loaded();
     let failed = n(&case, FAILED_LOGON_WS01);
@@ -752,8 +784,9 @@ fn recheck_detects_a_changed_row() {
     let id = promote(&mut case, failed, &analyst());
     attach_rows(&mut case, id, &[rclone], &analyst()).unwrap();
     let standings = |case: &Case| -> Vec<(i64, EvidenceStanding)> {
-        let mut out: Vec<_> = evidence(case, id)
+        let mut out: Vec<_> = evidence(case, id, 1000, 0)
             .unwrap()
+            .items
             .into_iter()
             .map(|e| (e.row_id, e.standing))
             .collect();
@@ -822,7 +855,7 @@ fn a_case_below_format_3_lists_no_entries() {
         .unwrap()
         .items
         .is_empty());
-    assert!(evidence(&case, 1).unwrap().is_empty());
+    assert!(evidence(&case, 1, 1000, 0).unwrap().items.is_empty());
 }
 
 #[test]

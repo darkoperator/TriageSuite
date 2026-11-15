@@ -307,17 +307,40 @@ fn a_promoted_row_is_an_entry_with_its_evidence_and_host() {
     assert_eq!(entry.hosts, ["WS01"]);
     assert_eq!(entry.evidence_rows, 1);
 
-    let evidence = r::evidence_list(&s.state, at("evidence"), id).unwrap();
-    assert_eq!(evidence.len(), 1);
-    assert_eq!(evidence[0].row_id, row);
-    assert_eq!(evidence[0].relation, EVENTS);
-    assert_eq!(evidence[0].standing, EvidenceStanding::Unchanged);
+    let evidence = r::evidence_list(&s.state, at("evidence"), id, 10, 0).unwrap();
+    assert_eq!(evidence.items.len(), 1);
+    assert!(!evidence.truncated);
+    assert_eq!(evidence.items[0].row_id, row);
+    assert_eq!(evidence.items[0].relation, EVENTS);
+    assert_eq!(evidence.items[0].standing, EvidenceStanding::Unchanged);
     assert_eq!(
-        r::evidence_list(&s.state, at("evidence"), 999)
+        r::evidence_list(&s.state, at("evidence"), 999, 10, 0)
             .unwrap_err()
             .code,
         "not_found"
     );
+    // It is paged: a second row makes a page of one truncated, and the next page holds it.
+    let second = row_with(&s, "rclone.exe");
+    r::rows_attach(&s.state, id, &[second]).unwrap();
+    let first = r::evidence_list(&s.state, at("evidence"), id, 1, 0).unwrap();
+    assert_eq!(
+        first.items.iter().map(|e| e.row_id).collect::<Vec<_>>(),
+        [row]
+    );
+    assert!(first.truncated);
+    let next = r::evidence_list(&s.state, at("evidence"), id, 1, 1).unwrap();
+    assert_eq!(
+        next.items.iter().map(|e| e.row_id).collect::<Vec<_>>(),
+        [second]
+    );
+    assert!(!next.truncated);
+    assert_eq!(
+        r::evidence_list(&s.state, at("evidence"), id, 0, 0)
+            .unwrap_err()
+            .code,
+        "invalid"
+    );
+    r::evidence_detach(&s.state, id, second).unwrap();
 
     let listed = r::entries_list(&s.state, at("timeline"), &EntryQuery::default(), 10, 0).unwrap();
     assert_eq!(listed.items.iter().map(|e| e.id).collect::<Vec<_>>(), [id]);
@@ -738,7 +761,7 @@ fn the_record_commands_need_a_case() {
         ),
         (
             "evidence_list",
-            Box::new(|s| ok(r::evidence_list(s, at("ev"), 1))),
+            Box::new(|s| ok(r::evidence_list(s, at("ev"), 1, 10, 0))),
         ),
         (
             "records_list",

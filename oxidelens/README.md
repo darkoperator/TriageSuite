@@ -178,7 +178,7 @@ command and limit and needs no case.
 | `column primary-time <relation> (<column> \| --none)` | Set or clear the time a relation's timeline runs on (analyst only) |
 | `history [--kind K [--id ID]] [--limit N] [--offset N]` | Every change, newest first; `K` is `source`, `relation`, `row_mark`, `row_tag`, `note`, `case`, `saved_view`, `entry`, `evidence`, `host`, `account`, `ioc` or `link`. `--id` (needs `--kind`) is one target: an entry, host, account or IOC by its number or `E-12` form, an evidence link as `<entry>:<row>` |
 | `entry list [--status S]... [--host H] [--tactic T] [--text T] [--limit N] [--offset N]` | The timeline's live entries, by time with the undated last; `S` is `draft`, `unreviewed` or `reviewed` |
-| `entry show <id>` | One entry and its evidence rows, each `unchanged`, `changed`, `superseded` or `source_removed` |
+| `entry show <id> [--limit N] [--offset N]` | One entry and a page of its evidence rows, each `unchanged`, `changed`, `superseded` or `source_removed` |
 | `entry add --title T [--description <text \| @file>] [--time <UTC>] [--tactic T] [--technique T1059,...]` | Write an entry; an agent's is `unreviewed` and `agent_added` |
 | `entry edit <id> [--title T] [--description ..] [--time <UTC> \| ""] [--tactic T \| ""] [--technique a,b \| --clear-techniques]` | Change the fields given; an empty `--time` or `--tactic` clears it |
 | `entry status <id> draft\|unreviewed\|reviewed` | Set the status (analyst only; `reviewed` needs a time) |

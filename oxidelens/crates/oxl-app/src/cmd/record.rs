@@ -305,17 +305,19 @@ pub fn evidence_detach(state: &AppState, entry_id: i64, row_id: i64) -> Result<(
     })
 }
 
-/// Every row attached to live entry `entry_id`, each re-checked against
-/// the case (`evidence`); `not_found` for an entry the case does not have,
-/// as `entry_get` answers.
+/// Up to `limit` of the rows attached to live entry `entry_id`, from
+/// `offset`, each re-checked against the case (`evidence`); `not_found`
+/// for an entry the case does not have, as `entry_get` answers.
 pub fn evidence_list(
     state: &AppState,
     at: At<'_>,
     entry_id: i64,
-) -> Result<Vec<Evidence>, CmdError> {
+    limit: u32,
+    offset: u64,
+) -> Result<Listing<Evidence>, CmdError> {
     at.read(state, |c| {
         oxl_engine::entry(c, entry_id)?;
-        oxl_engine::evidence(c, entry_id)
+        oxl_engine::evidence(c, entry_id, limit, offset)
     })
 }
 
@@ -771,8 +773,10 @@ pub mod commands {
         query_id: String,
         slot: String,
         entry_id: i64,
-    ) -> Result<Vec<Evidence>, CmdError> {
-        super::evidence_list(&app, At::new(&query_id, &slot), entry_id)
+        limit: u32,
+        offset: u64,
+    ) -> Result<Listing<Evidence>, CmdError> {
+        super::evidence_list(&app, At::new(&query_id, &slot), entry_id, limit, offset)
     }
 
     #[tauri::command(async)]

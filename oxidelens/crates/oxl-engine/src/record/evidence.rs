@@ -21,8 +21,9 @@ use crate::case::Case;
 use crate::catalog::appmap::summary_for;
 use crate::catalog::{physical_columns, read_columns, read_relation, ColumnRole, TimeSemantics};
 use crate::error::{EngineError, Result};
+use crate::listing::{check_limit, fetch_limit, Listing};
 use crate::load::stage::source_schema;
-use crate::query::{summary_sql, ISO_FORMAT, ROW_ALIAS};
+use crate::query::{check_offset, summary_sql, ISO_FORMAT, ROW_ALIAS};
 use crate::time::now_iso;
 use duckdb::types::Value as SqlValue;
 use duckdb::{params, params_from_iter, Connection};
@@ -558,14 +559,21 @@ pub fn detach_row(case: &mut Case, entry_id: i64, row_id: i64, actor: &Actor) ->
     Ok(())
 }
 
-/// The rows attached to entry `entry_id` (deleted or not), in the order
-/// they were attached, each re-checked against the case: unchanged or
-/// changed while its row is in the view, from a superseded run when a
-/// newer run had no identical row, or source removed. A case without the
-/// record tables has none. `NotFound` for an unknown entry.
-pub fn evidence(case: &Case, entry_id: i64) -> Result<Vec<Evidence>> {
+/// Up to `limit` of the rows attached to entry `entry_id` (deleted or not),
+/// from `offset`, in the order they were attached (then by row id), each
+/// re-checked against the case: unchanged or changed while its row is in
+/// the view, from a superseded run when a newer run had no identical row,
+/// or source removed. Only the page is read and re-checked. A case without
+/// the record tables has none. `NotFound` for an unknown entry; `Invalid`
+/// for a `limit` of 0 or over `MAX_LIMIT`, or an `offset` past `i64::MAX`.
+pub fn evidence(case: &Case, entry_id: i64, limit: u32, offset: u64) -> Result<Listing<Evidence>> {
+    check_limit(limit)?;
+    check_offset(offset)?;
     if !has_records(case) {
-        return Ok(Vec::new());
+        return Ok(Listing {
+            items: Vec::new(),
+            truncated: false,
+        });
     }
     let conn = case.conn();
     read_stored(conn, entry_id)?;
@@ -573,9 +581,9 @@ pub fn evidence(case: &Case, entry_id: i64) -> Result<Vec<Evidence>> {
     let stored: Vec<Attached> = conn
         .prepare(
             "SELECT row_id, relation, host, row_hash, snapshot_json, attached_by, attached_at \
-             FROM ox.evidence WHERE entry_id = ? ORDER BY attached_at, row_id",
+             FROM ox.evidence WHERE entry_id = ? ORDER BY attached_at, row_id LIMIT ? OFFSET ?",
         )?
-        .query_map(params![entry_id], |r| {
+        .query_map(params![entry_id, fetch_limit(limit), offset], |r| {
             Ok((
                 r.get(0)?,
                 r.get(1)?,
@@ -587,11 +595,13 @@ pub fn evidence(case: &Case, entry_id: i64) -> Result<Vec<Evidence>> {
             ))
         })?
         .collect::<std::result::Result<_, _>>()?;
-    let ids: Vec<i64> = stored.iter().map(|s| s.0).collect();
+    let page = Listing::from_fetched(stored, limit);
+    let ids: Vec<i64> = page.items.iter().map(|s| s.0).collect();
     let located = locate_rows(conn, &ids)?;
     let facts = read_facts(conn, &located.values().collect::<Vec<_>>())?;
 
-    stored
+    let items = page
+        .items
         .into_iter()
         .map(
             |(row_id, relation, host, hash, snapshot, attached_by, attached_at)| {
@@ -627,7 +637,11 @@ pub fn evidence(case: &Case, entry_id: i64) -> Result<Vec<Evidence>> {
                 })
             },
         )
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Listing {
+        items,
+        truncated: page.truncated,
+    })
 }
 
 /// A stored snapshot, parsed. The engine writes every snapshot itself.

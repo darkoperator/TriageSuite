@@ -1837,8 +1837,9 @@ fn evidence_case(d: &Path, case: &mut Case) -> (i64, i64, i64) {
 
 /// The entry's evidence as `(row_id, standing)`, by row id.
 fn standings(case: &Case, entry: i64) -> Vec<(i64, oxl_engine::EvidenceStanding)> {
-    let mut out: Vec<_> = oxl_engine::evidence(case, entry)
+    let mut out: Vec<_> = oxl_engine::evidence(case, entry, 1000, 0)
         .unwrap()
+        .items
         .into_iter()
         .map(|e| (e.row_id, e.standing))
         .collect();
@@ -1964,7 +1965,7 @@ fn removing_a_source_with_evidence_needs_confirmation() {
         [failed, rclone].map(|row| snapshot_of(&case, entry, row)),
         before
     );
-    let listed = oxl_engine::evidence(&case, entry).unwrap();
+    let listed = oxl_engine::evidence(&case, entry, 1000, 0).unwrap().items;
     let summary = &listed.iter().find(|e| e.row_id == failed).unwrap().summary;
     assert!(summary.contains("Failed logon"), "{summary}");
     assert_eq!(

@@ -103,16 +103,6 @@ fn list_reply(name: &str, items: Vec<Parts>, truncated: bool) -> Reply {
     }
 }
 
-/// `items`'s page for `--limit` and `--offset`, for a list the engine
-/// returns whole.
-fn slice<T>(items: Vec<T>, page: &PageArgs) -> (Vec<T>, bool) {
-    let offset = usize::try_from(page.offset).unwrap_or(usize::MAX);
-    let limit = page.limit as usize;
-    let mut rest = items.into_iter().skip(offset);
-    let kept: Vec<T> = rest.by_ref().take(limit).collect();
-    (kept, rest.next().is_some())
-}
-
 fn text_opt(value: Option<&String>) -> Result<Option<String>> {
     value.map(|t| text_arg(t)).transpose()
 }
@@ -163,7 +153,7 @@ pub fn entry(ctx: &Ctx, cmd: &EntryCmd) -> Result<Reply> {
             let items = list.items.iter().map(entry_parts).collect();
             Ok(list_reply("entries", items, list.truncated))
         }
-        EntryCmd::Show { id } => entry_show(ctx, *id),
+        EntryCmd::Show { id, page } => entry_show(ctx, *id, page),
         EntryCmd::Add {
             title,
             description,
@@ -244,19 +234,22 @@ pub fn entry(ctx: &Ctx, cmd: &EntryCmd) -> Result<Reply> {
     }
 }
 
-/// An entry and every row attached to it, one read.
-fn entry_show(ctx: &Ctx, id: i64) -> Result<Reply> {
+/// An entry and a page of the rows attached to it, one read.
+fn entry_show(ctx: &Ctx, id: i64, page: &PageArgs) -> Result<Reply> {
     let case = ctx.read_case()?;
     let entry = oxl_engine::entry(&case, id)?;
-    let evidence = oxl_engine::evidence(&case, id)?;
+    let evidence = oxl_engine::evidence(&case, id, page.limit, page.offset)?;
     let mut p = entry_parts(&entry);
     let rows: Vec<Parts> = evidence
+        .items
         .iter()
         .map(|e| parts(e, "row_id", EVIDENCE_TEXT))
         .collect();
     p.safe.insert("evidence".to_string(), safe_array(&rows));
     p.text.insert("evidence".to_string(), text_array(&rows));
-    Ok(one_reply(p))
+    let mut reply = one_reply(p);
+    reply.truncated = evidence.truncated;
+    Ok(reply)
 }
 
 fn safe_array(items: &[Parts]) -> Value {
@@ -282,13 +275,13 @@ pub fn evidence(ctx: &Ctx, cmd: &EvidenceCmd) -> Result<Reply> {
     let case = ctx.read_case()?;
     // The entry must exist, as `entry show` has it.
     oxl_engine::entry(&case, *entry)?;
-    let all = oxl_engine::evidence(&case, *entry)?;
-    let (kept, truncated) = slice(all, page);
-    let items = kept
+    let listed = oxl_engine::evidence(&case, *entry, page.limit, page.offset)?;
+    let items = listed
+        .items
         .iter()
         .map(|e| parts(e, "row_id", EVIDENCE_TEXT))
         .collect();
-    Ok(list_reply("evidence", items, truncated))
+    Ok(list_reply("evidence", items, listed.truncated))
 }
 
 // ---- records ----

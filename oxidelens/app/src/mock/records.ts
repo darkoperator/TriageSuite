@@ -321,9 +321,9 @@ export function entryGet(r: MockRecords, id: number): Entry {
   return shownEntry(r, e);
 }
 
-export function evidenceList(r: MockRecords, entry: number): Evidence[] {
+export function evidenceList(r: MockRecords, entry: number, limit: number, offset: number): Listing<Evidence> {
   entryGet(r, entry);
-  return r.evidence.get(entry) ?? [];
+  return page(r.evidence.get(entry) ?? [], limit, offset);
 }
 
 export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offset: number): Listing<CaseRecord> {

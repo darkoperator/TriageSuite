@@ -285,6 +285,31 @@ describe("the entry editor", () => {
     expect(asked.state.relation).toBe("mock_events");
   });
 
+  it("evidence_is_read_a_page_at_a_time", async () => {
+    // 150 evidence rows: the editor reads 100, says more follow, and Show more reads the next page from the engine.
+    const rows: Evidence[] = Array.from({ length: 150 }, (_, i) => ({
+      row_id: 1000 + i, relation: "mock_events", host: "WS01", standing: "unchanged", summary: `evidence row ${1000 + i}`,
+      attached_by: "analyst:analyst01", attached_at: "2026-01-10T12:00:00.000000Z",
+    }));
+    overrideCommand("evidence_list", async (a) => {
+      const { limit, offset } = a as { limit: number; offset: number };
+      return { items: rows.slice(offset, offset + limit), truncated: offset + limit < rows.length };
+    });
+    const user = await openTimeline();
+    const editor = await select(user, 1);
+    const evidence = await within(editor).findByRole("region", { name: "Evidence" });
+    await waitFor(() => expect(within(evidence).getAllByRole("listitem")).toHaveLength(100));
+    const paged = () => callsOf("evidence_list").map((c) => c.args as { limit: number; offset: number });
+    expect(paged().every((p) => p.limit === 100)).toBe(true);
+    expect(paged().map((p) => p.offset)).not.toContain(100);
+    expect(evidence.textContent).not.toContain("evidence row 1100");
+    await user.click(within(evidence).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(evidence).getAllByRole("listitem")).toHaveLength(150));
+    expect(paged().at(-1)).toMatchObject({ limit: 100, offset: 100 });
+    expect(evidence.textContent).toContain("evidence row 1149");
+    expect(within(evidence).queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
   it("history_is_read_when_opened", async () => {
     const user = await openTimeline();
     const editor = await select(user, 1);
@@ -708,7 +733,7 @@ describe("the candidates after M", () => {
       row_id: 100 + i, relation: "mock_events", host: "WS01", standing: "unchanged", summary: `row ${100 + i}`,
       attached_by: "analyst:analyst01", attached_at: "2026-01-10T12:00:00.000000Z",
     }));
-    overrideCommand("evidence_list", async () => rows);
+    overrideCommand("evidence_list", async () => ({ items: rows, truncated: false }));
     overrideCommand("candidates", async (a) =>
       (a as { rowId: number }).rowId === 124
         ? [{ kind: "account", ioc_type: null, value: "late_user", domain: null, sid: null, column: "UserName", existing_id: null }]

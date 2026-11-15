@@ -3,8 +3,9 @@
 // there; more are linked from a picker), its evidence rows (each re-checked by the engine, each opening its dataset
 // scrolled to the row), its history (read when opened), and after M the candidates found in its evidence.
 //
-// Reads are by the late-answer rules (`useCaseRead`): the entry, its evidence and its history each for one key (entry,
-// case generation), on slots under `slot`. Every refusal the engine gives is shown in place, never in a dialog; a review
+// Reads are by the late-answer rules (`useCaseRead`, `usePagedRead`): the entry, its evidence and its history each for
+// one key (entry, case generation), on slots under `slot`. The evidence is read 100 rows at a time (*Show more*): an
+// entry can hold many attachments, and the engine re-checks only the page it reads. Every refusal the engine gives is shown in place, never in a dialog; a review
 // refusal (an undated entry, an agent) is shown under the status with the engine's own words.
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
@@ -24,6 +25,7 @@ import Candidates from "./Candidates";
 import { isStale, messageOf, reportFailure } from "./outcomes";
 import RecordDialog from "./RecordDialog";
 import { useCaseRead } from "./useCaseRead";
+import { usePagedRead } from "./usePagedRead";
 import "./records.css";
 
 const AGENT = "agent:";
@@ -45,6 +47,8 @@ const STANDING: Record<EvidenceStanding, string> = {
 const SOURCE: Record<string, string> = { row: "taken from the row", typed: "typed by hand" };
 /** How many history rows are read at once. */
 const HISTORY = 50;
+/** Evidence rows a page (*Show more* reads the next). */
+const EVIDENCE_PAGE = 100;
 
 // ---- review ------------------------------------------------------------------------------------------------------------
 /** The last *Mark reviewed* refusal, for the entry it was for. */
@@ -122,7 +126,13 @@ export default function EntryEditor({
   const reviewing = review ?? own;
 
   const read = useCaseRead<Entry>(`entry:${entryId}`, gen, (next) => entryGet(entryId, slot, next()), reportError);
-  const evidence = useCaseRead(`evidence:${entryId}`, gen, (next) => evidenceList(entryId, `${slot}:evidence`, next()), reportError);
+  const { read: evidence, showMore: moreEvidence } = usePagedRead(
+    `evidence:${entryId}`,
+    gen,
+    EVIDENCE_PAGE,
+    (limit, offset, q) => evidenceList(entryId, limit, offset, `${slot}:evidence`, q),
+    reportError,
+  );
   const [historyOpen, setHistoryOpen] = useState(false);
   const history = useCaseRead(
     historyOpen ? `history:${entryId}` : null,
@@ -198,7 +208,7 @@ export default function EntryEditor({
   const [picking, setPicking] = useState(false);
 
   const label = `Entry E-${entryId}`;
-  const rows = evidence?.value ?? [];
+  const rows = evidence?.value?.items ?? [];
   return (
     <section className="entry-card entry-editor" aria-label={label}>
       <header className="detail-head">
@@ -313,6 +323,16 @@ export default function EntryEditor({
                 </li>
               ))}
             </ul>
+            {evidence?.value?.truncated && (
+              <button type="button" className="link-button" onClick={moreEvidence}>
+                Show more
+              </button>
+            )}
+            {evidence?.error !== undefined && (
+              <p role="alert" className="form-error">
+                {displaySafe(messageOf(evidence.error))}
+              </p>
+            )}
           </section>
 
           {candidates && <Candidates entryId={entryId} rows={rows.map((r) => r.row_id)} links={entry.links} slot={`${slot}:candidates`} />}

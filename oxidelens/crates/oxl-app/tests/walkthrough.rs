@@ -698,8 +698,9 @@ type Logon = (String, u32, Option<String>, u64);
 
 /// Each entry's evidence as `(row id, standing)`, by row id.
 fn standings(state: &AppState, entry_id: i64) -> Vec<(i64, EvidenceStanding)> {
-    let mut rows: Vec<_> = r::evidence_list(state, at("timeline:evidence"), entry_id)
+    let mut rows: Vec<_> = r::evidence_list(state, at("timeline:evidence"), entry_id, 1000, 0)
         .unwrap()
+        .items
         .into_iter()
         .map(|e| (e.row_id, e.standing))
         .collect();
@@ -796,7 +797,9 @@ fn record_walk(
     }
     let entry = r::entry_get(state, at("timeline:entry"), entry_id).unwrap();
     assert_eq!((entry.status, entry.evidence_rows), (EntryStatus::Draft, 1));
-    let evidence = r::evidence_list(state, at("timeline:evidence"), entry_id).unwrap();
+    let evidence = r::evidence_list(state, at("timeline:evidence"), entry_id, 1000, 0)
+        .unwrap()
+        .items;
     assert_eq!(evidence.len(), 1);
     assert_eq!(
         (evidence[0].row_id, evidence[0].standing),
@@ -1562,8 +1565,11 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
         "",
         &format!("{done} attached"),
     );
-    let (evidence, t) =
-        timed(|| r::evidence_list(state, at("timeline:evidence"), entry.id).unwrap());
+    let (evidence, t) = timed(|| {
+        r::evidence_list(state, at("timeline:evidence"), entry.id, 1000, 0)
+            .unwrap()
+            .items
+    });
     let unchanged = evidence
         .iter()
         .filter(|e| e.standing == EvidenceStanding::Unchanged)

@@ -962,7 +962,7 @@ const handlers: Handlers = {
       syncMarks([a.rowId]);
       return null;
     }),
-  evidence_list: (a) => read(a.slot, a.queryId, () => rec.evidenceList(theCase().records, a.entryId)),
+  evidence_list: (a) => read(a.slot, a.queryId, () => rec.evidenceList(theCase().records, a.entryId, a.limit, a.offset)),
 
   // host, account and IOC records
   records_list: (a) => read(a.slot, a.queryId, () => rec.recordsList(theCase().records, a.query, a.limit, a.offset)),
