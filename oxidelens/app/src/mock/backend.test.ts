@@ -403,3 +403,32 @@ describe("the case record", () => {
     expect(await sweep).toMatchObject({ code: "interrupted" });
   });
 });
+
+describe("the record order", () => {
+  it("orders hosts seen by the count, then the names as the sheet shows them, as the engine does", async () => {
+    resetMock();
+    await mockCall("case_open", { path: "/cases/acme.case.duckdb" });
+    const host = async (name: string) =>
+      (await mockCall<CaseRecord>("record_upsert", { spec: { kind: "host", id: null, name, role: "", note: "" } })).id;
+    const ioc = async (value: string) =>
+      (await mockCall<CaseRecord>("record_upsert", { spec: { kind: "ioc", id: null, ioc_type: "file_name", value, tool: null, attack_ids: [], note: "" } })).id;
+    const quote = await host('A"');
+    const hash = await host("A#");
+    const b = await host("B");
+    const two = await ioc("seen-1.exe");
+    const oneHash = await ioc("seen-2.exe");
+    const none = await ioc("seen-3.exe");
+    const oneQuote = await ioc("seen-4.exe");
+    for (const [id, hosts] of [[two, [b, quote]], [oneHash, [hash]], [oneQuote, [quote]]] as const) {
+      const e = await mockCall<Entry>("entry_new", { edit: { title: "seen", description: null, time: null, tactic: null, technique_ids: null } });
+      await mockCall("record_link", { entryId: e.id, kind: "ioc", recordId: id });
+      for (const h of hosts) await mockCall("record_link", { entryId: e.id, kind: "host", recordId: h });
+    }
+    const ids = async (descending: boolean) =>
+      (await mockCall<Listing<CaseRecord>>("records_list", {
+        ...q("r"), query: { kind: "ioc", ioc_type: null, tool: null, text: "seen-", order: { by: "hosts_seen", descending } }, limit: 10, offset: 0,
+      })).items.map((r) => r.id);
+    expect(await ids(false)).toEqual([none, oneQuote, oneHash, two]);
+    expect(await ids(true)).toEqual([two, oneHash, oneQuote, none]);
+  });
+});

@@ -1771,16 +1771,17 @@ fn every_shown_column_orders_across_pages() {
         role: role.to_string(),
         ..host_spec(name)
     };
+    // Every column's values sort apart from the id order, so an order by id fails each assertion.
     let hb = upsert_host(&mut case, &spec("col-1", "server"), &analyst())
         .unwrap()
         .id;
-    let hn = upsert_host(&mut case, &spec("col-2", ""), &analyst())
+    let hg = upsert_host(&mut case, &host_spec("col-2"), &agent())
         .unwrap()
         .id;
-    let ha = upsert_host(&mut case, &spec("col-3", "admin"), &analyst())
+    let hn = upsert_host(&mut case, &spec("col-3", ""), &analyst())
         .unwrap()
         .id;
-    let hg = upsert_host(&mut case, &host_spec("col-4"), &agent())
+    let ha = upsert_host(&mut case, &spec("col-4", "admin"), &analyst())
         .unwrap()
         .id;
     let hosts_in = |o| -> Vec<i64> {
@@ -1798,10 +1799,10 @@ fn every_shown_column_orders_across_pages() {
     };
     assert_eq!(
         hosts_in(order(By::Role, false)),
-        [hn, hg, ha, hb],
+        [hg, hn, ha, hb],
         "an empty role is text, before any other"
     );
-    assert_eq!(hosts_in(order(By::Role, true)), [hb, ha, hn, hg]);
+    assert_eq!(hosts_in(order(By::Role, true)), [hb, ha, hg, hn]);
     // `reviewed` before `unreviewed`; equal statuses by id.
     assert_eq!(hosts_in(order(By::Status, false)), [hb, hn, ha, hg]);
     assert_eq!(hosts_in(order(By::Status, true)), [hg, hb, hn, ha]);
@@ -1856,7 +1857,8 @@ fn every_shown_column_orders_across_pages() {
     );
     assert_eq!(
         accounts_in(&case, order(By::HostsSeen, false)),
-        [a3, a1, a2]
+        [a2, a3, a1],
+        "no host first, then one host by name"
     );
     assert_eq!(accounts_in(&case, order(By::HostsSeen, true)), [a1, a3, a2]);
 
@@ -1865,7 +1867,7 @@ fn every_shown_column_orders_across_pages() {
         tool: tool.map(str::to_string),
         ..ioc_spec(IocType::FileName, value)
     };
-    let i1 = upsert_ioc(&mut case, &ioc("col-1.exe", Some("rclone")), &analyst())
+    let i1 = upsert_ioc(&mut case, &ioc("col-1.exe", Some("rclone")), &agent())
         .unwrap()
         .id;
     let i2 = upsert_ioc(&mut case, &ioc("col-2.exe", None), &analyst())
@@ -1899,8 +1901,10 @@ fn every_shown_column_orders_across_pages() {
         "case ignored, none last"
     );
     assert_eq!(iocs_in(&case, order(By::Tool, true)), [i1, i3, i2]);
-    assert_eq!(iocs_in(&case, order(By::HostsSeen, false)), [i1, i2, i3]);
-    assert_eq!(iocs_in(&case, order(By::Status, false)), [i1, i2, i3]);
+    assert_eq!(iocs_in(&case, order(By::HostsSeen, false)), [i2, i3, i1]);
+    assert_eq!(iocs_in(&case, order(By::HostsSeen, true)), [i1, i2, i3]);
+    assert_eq!(iocs_in(&case, order(By::Status, false)), [i2, i3, i1]);
+    assert_eq!(iocs_in(&case, order(By::Status, true)), [i1, i2, i3]);
 
     // Each kind refuses the columns it does not have.
     for by in [By::Sid, By::Privilege, By::HostsSeen, By::Tool] {
@@ -1924,6 +1928,63 @@ fn every_shown_column_orders_across_pages() {
         };
         assert_eq!(code(iocs(&case, &q, 10, 0)).0, "invalid", "{by:?}");
     }
+    drop(case);
+    drop(d);
+}
+
+#[test]
+fn hosts_seen_orders_by_count_then_the_names_as_shown() {
+    use oxl_engine::{RecordOrder, RecordOrderBy};
+    let (d, mut case) = loaded();
+    let host =
+        |case: &mut Case, name: &str| upsert_host(case, &host_spec(name), &analyst()).unwrap().id;
+    let quote = host(&mut case, "A\"");
+    let hash = host(&mut case, "A#");
+    let b = host(&mut case, "B");
+    let ioc = |case: &mut Case, value: &str| {
+        upsert_ioc(case, &ioc_spec(IocType::FileName, value), &analyst())
+            .unwrap()
+            .id
+    };
+    // Ids in an order no rule here gives: two hosts, one (`A#`), none, one (`A"`).
+    let two = ioc(&mut case, "seen-1.exe");
+    let one_hash = ioc(&mut case, "seen-2.exe");
+    let none = ioc(&mut case, "seen-3.exe");
+    let one_quote = ioc(&mut case, "seen-4.exe");
+    for (id, hosts) in [
+        (two, vec![b, quote]),
+        (one_hash, vec![hash]),
+        (one_quote, vec![quote]),
+    ] {
+        let e = entry(&mut case, "seen", Some("2026-01-01T00:00:00Z"), &analyst());
+        link(&mut case, e, RecordKind::Ioc, id, &analyst()).unwrap();
+        for h in hosts {
+            link(&mut case, e, RecordKind::Host, h, &analyst()).unwrap();
+        }
+    }
+    // As the sheet shows them: the names sorted, joined with ", ".
+    let shown = |id: i64| ioc_record(&case, id).unwrap().hosts_seen.join(", ");
+    assert_eq!(shown(two), "A\", B");
+    let ids = |descending| -> Vec<i64> {
+        let q = IocQuery {
+            text: Some("seen-".into()),
+            order: Some(RecordOrder {
+                by: RecordOrderBy::HostsSeen,
+                descending,
+            }),
+            ..Default::default()
+        };
+        iocs(&case, &q, 10, 0)
+            .unwrap()
+            .items
+            .iter()
+            .map(|i| i.id)
+            .collect()
+    };
+    // By the count, then `A"` before `A#` as the names read (their JSON text, `"A\""` and `"A#"`, sorts the other
+    // way round), then the id.
+    assert_eq!(ids(false), [none, one_quote, one_hash, two]);
+    assert_eq!(ids(true), [two, one_hash, one_quote, none]);
     drop(case);
     drop(d);
 }

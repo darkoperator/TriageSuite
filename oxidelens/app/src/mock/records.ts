@@ -349,7 +349,9 @@ export function recordsList(r: MockRecords, q: RecordQuery, limit: number, offse
         case "role": return x.kind === "host" ? x.role.toLowerCase() : fail("invalid", `${x.kind} records do not order by role`);
         case "sid": return x.kind === "account" ? x.sid : fail("invalid", `${x.kind} records do not order by sid`);
         case "privilege": return x.kind === "account" ? x.privilege : fail("invalid", `${x.kind} records do not order by privilege`);
-        case "hosts_seen": return x.kind === "host" ? fail("invalid", "host records do not order by hosts_seen") : x.hosts_seen.length === 0 ? null : JSON.stringify(x.hosts_seen);
+        // The count, then the names as the sheet shows them (sorted, joined with ", "): one key whose fixed-width count
+        // sorts first.
+        case "hosts_seen": return x.kind === "host" ? fail("invalid", "host records do not order by hosts_seen") : `${String(x.hosts_seen.length).padStart(6, "0")}${x.hosts_seen.join(", ")}`;
         case "tool": return x.kind === "ioc" ? (x.tool?.toLowerCase() ?? null) : fail("invalid", `${x.kind} records do not order by tool`);
         case "status": return x.status;
         case "entries": return x.entries;

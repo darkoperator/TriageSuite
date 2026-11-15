@@ -36,8 +36,8 @@ pub enum RecordOrderBy {
     /// An account's privilege, as stored (`domain_admin`, `local_admin`,
     /// ...); only an account's.
     Privilege,
-    /// The host names its entries link, as listed (`hosts_seen`); an
-    /// account's or an IOC's. None sorts last.
+    /// How many hosts its entries link, then their names as the sheet shows
+    /// them (sorted, joined with `", "`); an account's or an IOC's.
     HostsSeen,
     /// An IOC's tool (case ignored); only an IOC's. None sorts last.
     Tool,
@@ -69,14 +69,14 @@ pub struct RecordOrder {
 /// `seen_columns` selects (`name` is the kind's name expression). `Invalid`
 /// for a column the kind does not have.
 pub(super) fn order_by(kind: RecordKind, order: RecordOrder, name: &str) -> Result<String> {
+    if let Some(by_hosts) = hosts_seen_order(kind, order) {
+        return Ok(by_hosts);
+    }
     let column = match (order.by, kind) {
         (RecordOrderBy::Name, RecordKind::Host | RecordKind::Account) => format!("lower({name})"),
         (RecordOrderBy::Role, RecordKind::Host) => "lower(r.role)".to_string(),
         (RecordOrderBy::Sid, RecordKind::Account) => "r.sid".to_string(),
         (RecordOrderBy::Privilege, RecordKind::Account) => "r.privilege".to_string(),
-        (RecordOrderBy::HostsSeen, RecordKind::Account | RecordKind::Ioc) => {
-            "seen_hosts".to_string()
-        }
         (RecordOrderBy::Tool, RecordKind::Ioc) => "lower(r.tool)".to_string(),
         (RecordOrderBy::Status, _) => "r.status".to_string(),
         (RecordOrderBy::Entries, _) => "seen_entries".to_string(),
@@ -93,6 +93,19 @@ pub(super) fn order_by(kind: RecordKind, order: RecordOrder, name: &str) -> Resu
     };
     let dir = if order.descending { "DESC" } else { "ASC" };
     Ok(format!("{column} {dir} NULLS LAST, r.id"))
+}
+
+/// The `ORDER BY` for `hosts_seen`: the number of hosts, then the names as
+/// the sheet shows them, then the id. `None` for an order by anything else,
+/// or for a host (which has no hosts seen).
+fn hosts_seen_order(kind: RecordKind, order: RecordOrder) -> Option<String> {
+    if order.by != RecordOrderBy::HostsSeen || kind == RecordKind::Host {
+        return None;
+    }
+    let dir = if order.descending { "DESC" } else { "ASC" };
+    Some(format!(
+        "seen_host_count {dir}, seen_hosts_shown {dir} NULLS LAST, r.id"
+    ))
 }
 
 /// Which kind of record: the three sheets beside the Timeline.
@@ -737,21 +750,30 @@ pub fn record_entries(
 /// What every record's computed columns are: its live linked entries, the
 /// earliest and latest of their times (undated entries left out), and the
 /// names of the live host records those entries link, as a JSON list.
-/// Four select expressions over a record aliased `r`, read by `Seen::read`.
+/// Four select expressions over a record aliased `r`, read by `Seen::read`;
+/// then two that only an order by hosts seen reads (`hosts_seen_order`): how
+/// many hosts, and their names as the sheet shows them (sorted, joined with
+/// `", "`).
 pub(super) fn seen_columns(kind: RecordKind) -> String {
     let linked = format!(
         "FROM {} l JOIN ox.entry e ON e.id = l.entry_id WHERE l.record_id = r.id AND NOT e.deleted",
+        kind.link_table()
+    );
+    let hosts = format!(
+        "FROM {} l JOIN ox.entry e ON e.id = l.entry_id \
+         JOIN ox.entry_host eh ON eh.entry_id = e.id JOIN ox.host h ON h.id = eh.record_id \
+         WHERE l.record_id = r.id AND NOT e.deleted AND NOT h.deleted",
         kind.link_table()
     );
     format!(
         "(SELECT count(*) {linked}) AS seen_entries, \
          (SELECT min(e.\"time\") {linked}) AS seen_first, \
          (SELECT max(e.\"time\") {linked}) AS seen_last, \
-         (SELECT CAST(to_json(list(DISTINCT h.name ORDER BY h.name)) AS VARCHAR) \
-          FROM {} l JOIN ox.entry e ON e.id = l.entry_id \
-          JOIN ox.entry_host eh ON eh.entry_id = e.id JOIN ox.host h ON h.id = eh.record_id \
-          WHERE l.record_id = r.id AND NOT e.deleted AND NOT h.deleted) AS seen_hosts",
-        kind.link_table()
+         (SELECT CAST(to_json(list(DISTINCT h.name ORDER BY h.name)) AS VARCHAR) {hosts}) \
+          AS seen_hosts, \
+         (SELECT count(DISTINCT h.name) {hosts}) AS seen_host_count, \
+         (SELECT array_to_string(list(DISTINCT h.name ORDER BY h.name), ', ') {hosts}) \
+          AS seen_hosts_shown"
     )
 }
 
