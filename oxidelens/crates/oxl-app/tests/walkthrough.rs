@@ -517,8 +517,8 @@ fn walk(state: &Arc<AppState>, case_path: &Path, export: &Path, plan: &Plan<'_>)
         applied.group_by.join(" > ")
     ));
 
-    // Export what the grid shows, as a job.
-    let _ = std::fs::remove_file(export);
+    // Export what the grid shows, as a job, to a file that is not there yet.
+    assert!(!export.exists(), "{} is already there", export.display());
     let report = seen.step("export CSV", || {
         g::grid_export(state, at("tab:walk:export"), &applied.state, export, None).unwrap()
     });
@@ -758,13 +758,14 @@ fn record_walk(
     // dialog, every row taken.
     let st = text_grid(plan.relation, plan.rows_text, &[]);
     let marked = seen.step("S on rows", || {
-        let n = counts(state, &st).min(SUSPICIOUS);
+        let held = counts(state, &st);
         assert!(
-            n > 0,
-            "no row of {} holds {:?}",
+            held >= SUSPICIOUS,
+            "the walk needs {SUSPICIOUS} rows of {} holding {:?}; the case has {held}",
             plan.relation,
             plan.rows_text
         );
+        let n = SUSPICIOUS;
         let ids = first_ids(state, &st, n);
         let outcomes = r::mark_set(state, &ids).unwrap();
         assert!(outcomes.iter().all(|o| o.done), "{outcomes:?}");
@@ -823,7 +824,9 @@ fn record_walk(
         .iter()
         .find(|c| c.kind == RecordKind::Account && c.domain.is_some())
         .or_else(|| found.iter().find(|c| c.kind == RecordKind::Account));
-    if let Some(c) = account {
+    {
+        let c =
+            account.unwrap_or_else(|| panic!("the M row offers no account candidate: {found:?}"));
         let id = take_candidate(state, entry_id, c);
         let logons = seen.step("account logons", || {
             r::logon_summary(state, at("sheet:accounts:logons"), id).unwrap()
@@ -868,7 +871,8 @@ fn record_walk(
         .iter()
         .find(|c| c.ioc_type == Some(IocType::Ip))
         .or_else(|| found.iter().find(|c| c.kind == RecordKind::Ioc));
-    if let Some(c) = address {
+    {
+        let c = address.unwrap_or_else(|| panic!("the M row offers no IOC candidate: {found:?}"));
         let id = take_candidate(state, entry_id, c);
         let sightings = seen.step("IOC sightings", || {
             r::ioc_sightings(state, at("sightings"), id).unwrap()
@@ -980,7 +984,7 @@ fn record_walk(
     ];
     for (step, name, export) in exports {
         let path = out.join(name);
-        let _ = std::fs::remove_file(&path);
+        assert!(!path.exists(), "{} is already there", path.display());
         let report = seen.step(step, || export(state, at("case:export"), &path).unwrap());
         assert_eq!(report.path, path);
         let bytes = std::fs::metadata(&path).unwrap().len();
@@ -1410,7 +1414,8 @@ fn case_from_env(var: &str) -> std::path::PathBuf {
 }
 
 /// The walkthrough on a copy of a real case, opened through the app (which
-/// upgrades a format-1 case in place). It exports next to the case.
+/// upgrades a format 1 or 2 case in place). It exports into a temporary
+/// folder of its own.
 #[test]
 #[ignore = "needs a copy of a real case in OXL_WALKTHROUGH_CASE"]
 fn real_case_walkthrough() {
@@ -1425,10 +1430,18 @@ fn real_case_walkthrough() {
         summary.relations.len(),
         summary.sources.len()
     );
-    let export = case_path.with_file_name("walkthrough-export.csv");
-    let seen = walk(&state, &case_path, &export, &PLAN);
+    // Every export goes into a folder of this run's own, removed with
+    // everything in it when the test ends: nothing beside the case is
+    // touched.
+    let scratch = tempfile::tempdir().unwrap();
+    let out = scratch.path();
+    let seen = walk(
+        &state,
+        &case_path,
+        &out.join("walkthrough-export.csv"),
+        &PLAN,
+    );
     seen.print("real case");
-    let _ = std::fs::remove_file(&export);
 
     // Every session the case offers, with the rows each of its tabs shows.
     println!("\n| source | session | tab: relation [hosts] rows | unmatched |");
@@ -1459,8 +1472,7 @@ fn real_case_walkthrough() {
         );
     }
 
-    // The case record, walked as on the fixture, exporting next to the case.
-    let out = case_path.parent().expect("the case is in a folder");
+    // The case record, walked as on the fixture.
     let rs = record_walk(&state, &events, out, &RECORD_PLAN);
     rs.seen.print("real case: the case record");
     let entry = rs.entry.as_ref().unwrap();
@@ -1485,9 +1497,6 @@ fn real_case_walkthrough() {
     println!("ioc: {:?}", rs.ioc);
     println!("reviewed: {:?}; sheets {:?}", rs.reviewed, rs.sheets);
     println!("exports: {:?}", rs.exports);
-    for (name, _, _) in &rs.exports {
-        let _ = std::fs::remove_file(out.join(name));
-    }
     record_costs(&state, out);
 }
 
@@ -1528,6 +1537,10 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
     let rows = ids_at(state, &all, 1_000, 1_000);
     let (promoted, t) = once(|| r::rows_promote(state, &rows).unwrap());
     let created = promoted.iter().filter(|p| p.created).count();
+    assert_eq!(
+        created, 1_000,
+        "M made an entry for every row: {promoted:?}"
+    );
     row("M on 1,000 rows", t, "", &format!("{created} entries made"));
 
     // A re-check of 100 evidence rows: an entry holding 100, listed.
@@ -1542,6 +1555,7 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
     let hundred = ids_at(state, &all, 2_100, 100);
     let (attached, t) = once(|| r::rows_attach(state, entry.id, &hundred).unwrap());
     let done = attached.iter().filter(|a| a.done).count();
+    assert_eq!(done, 100, "every row attached: {attached:?}");
     row(
         "A of 100 rows to one entry",
         t,
@@ -1554,6 +1568,7 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
         .iter()
         .filter(|e| e.standing == EvidenceStanding::Unchanged)
         .count();
+    assert_eq!((evidence.len(), unchanged), (100, 100));
     row(
         "re-check of 100 evidence rows (evidence_list)",
         t,
@@ -1567,7 +1582,12 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
     for &row_id in rows.iter().take(200) {
         for c in r::candidates(state, at("candidates"), row_id).unwrap() {
             let value = (c.ioc_type.unwrap_or(IocType::Other), c.value.clone());
-            if c.kind == RecordKind::Ioc && c.existing_id.is_none() && !values.contains(&value) {
+            // Sightings search a value of at most Find's 1,000 characters.
+            if c.kind == RecordKind::Ioc
+                && c.existing_id.is_none()
+                && c.value.chars().count() <= 1_000
+                && !values.contains(&value)
+            {
                 values.push(value);
             }
         }
@@ -1580,12 +1600,16 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
     for n in 0..(20 - from_rows) {
         values.push((IocType::Ip, format!("203.0.113.{}", 100 + n)));
     }
-    let mut iocs = Vec::new();
-    for (ioc_type, value) in &values {
-        if let Ok(record) = r::record_upsert(state, &ioc(*ioc_type, value)) {
-            iocs.push(record_id(&record));
-        }
-    }
+    let iocs: Vec<i64> = values
+        .iter()
+        .map(
+            |(ioc_type, value)| match r::record_upsert(state, &ioc(*ioc_type, value)) {
+                Ok(record) => record_id(&record),
+                Err(e) => panic!("IOC {ioc_type:?} {value:?} not created: {e:?}"),
+            },
+        )
+        .collect();
+    assert_eq!(iocs.len(), 20);
 
     // The four sheet lists, as their tabs read them.
     let (timeline, t) = timed(|| {
@@ -1628,22 +1652,22 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
     // Sweep all: each IOC's sightings in turn on the one slot.
     let start = Instant::now();
     let mut each = Vec::new();
-    let (mut hits, mut refused) = (0, 0);
+    let mut hits = 0;
     for id in &iocs {
         let one = Instant::now();
-        match r::ioc_sightings(state, at("sightings"), *id) {
-            Ok(s) => hits += s.hits,
-            Err(_) => refused += 1,
-        }
+        hits += r::ioc_sightings(state, at("sightings"), *id)
+            .unwrap_or_else(|e| panic!("I-{id}'s sightings: {e:?}"))
+            .hits;
         each.push(one.elapsed());
     }
+    assert_eq!(each.len(), 20, "every IOC was searched");
     let total = start.elapsed();
     each.sort();
     row(
         &format!("Sweep all over {} IOCs (total)", iocs.len()),
         [total; 3],
         "",
-        &format!("{from_rows} values from rows; {hits} hits; {refused} refused"),
+        &format!("{from_rows} values from rows; {hits} hits"),
     );
     if !each.is_empty() {
         row(
@@ -1667,11 +1691,10 @@ fn record_costs(state: &Arc<AppState>, out: &Path) {
     ];
     for (what, name, export) in exports {
         let path = out.join(name);
-        let _ = std::fs::remove_file(&path);
+        assert!(!path.exists(), "{} is already there", path.display());
         let (report, t) = once(|| export(state, at("case:export"), &path).unwrap());
         let bytes = std::fs::metadata(&path).unwrap().len();
         row(what, t, "", &format!("{} rows, {bytes} bytes", report.rows));
-        let _ = std::fs::remove_file(&path);
     }
 }
 
